@@ -18,6 +18,7 @@
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_request_args.h"
 #include "base/trace_event/process_memory_dump.h"
+#include "net/mock/mock_url_service.h"
 #include "net/base/http_user_agent_settings.h"
 #include "net/cookies/cookie_store.h"
 #include "net/dns/host_resolver.h"
@@ -53,6 +54,7 @@ URLRequestContext::URLRequestContext()
       reporting_service_(nullptr),
       network_error_logging_service_(nullptr),
 #endif  // BUILDFLAG(ENABLE_REPORTING)
+      mock_url_service_(nullptr),
       url_requests_(std::make_unique<std::set<const URLRequest*>>()),
       enable_brotli_(false),
       check_cleartext_permitted_(false),
@@ -105,12 +107,20 @@ std::unique_ptr<URLRequest> URLRequestContext::CreateRequest(
     RequestPriority priority,
     URLRequest::Delegate* delegate,
     NetworkTrafficAnnotationTag traffic_annotation) const {
+  GURL fixed_url = url;
+  if (mock_url_service_) {
+      fixed_url = mock_url_service_->GetMock(url);
+  }
   return base::WrapUnique(
-      new URLRequest(url, priority, delegate, this, traffic_annotation));
+      new URLRequest(fixed_url, priority, delegate, this, traffic_annotation));
 }
 
 void URLRequestContext::set_cookie_store(CookieStore* cookie_store) {
   cookie_store_ = cookie_store;
+}
+
+void URLRequestContext::set_mock_url_service(MockURLService* mock_url_service) {
+  mock_url_service_ = mock_url_service;
 }
 
 void URLRequestContext::AssertNoURLRequests() const {

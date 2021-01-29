@@ -771,6 +771,8 @@ component("net") {
       "log/net_log_util.h",
       "log/trace_net_log_observer.cc",
       "log/trace_net_log_observer.h",
+      "mock/mock_url_service.cc",
+      "mock/mock_url_service.h",
       "nqe/cached_network_quality.cc",
       "nqe/cached_network_quality.h",
       "nqe/connectivity_monitor.cc",

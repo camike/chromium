@@ -37,6 +37,7 @@
 #include "net/http/transport_security_persister.h"
 #include "net/http/transport_security_state.h"
 #include "net/log/net_log.h"
+#include "net/mock/mock_url_service.h"
 #include "net/net_buildflags.h"
 #include "net/nqe/network_quality_estimator.h"
 #include "net/proxy_resolution/configured_proxy_resolution_service.h"
@@ -295,6 +296,11 @@ void URLRequestContextBuilder::SetCookieStore(
     std::unique_ptr<CookieStore> cookie_store) {
   cookie_store_set_by_client_ = true;
   cookie_store_ = std::move(cookie_store);
+}
+
+void URLRequestContextBuilder::SetMockURLService(
+    std::unique_ptr<MockURLService> mock_url_service) {
+  mock_url_service_ = std::move(mock_url_service);
 }
 
 void URLRequestContextBuilder::SetProtocolHandler(
@@ -626,6 +632,7 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
 #endif  // !BUILDFLAG(DISABLE_FTP_SUPPORT)
 
   storage->set_job_factory(std::move(job_factory));
+  storage->set_mock_url_service(std::move(mock_url_service_));
 
   return std::move(context);
 }

@@ -63,6 +63,7 @@
 #include "net/http/http_request_headers.h"
 #include "net/http/http_server_properties.h"
 #include "net/http/http_transaction_factory.h"
+#include "net/mock/mock_url_service.h"
 #include "net/proxy_resolution/configured_proxy_resolution_service.h"
 #include "net/proxy_resolution/proxy_config.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
@@ -1977,6 +1978,9 @@ URLRequestContextOwner NetworkContext::MakeURLRequestContext(
     builder.SetMojoProxyResolverFactory(
         std::move(params_->proxy_resolver_factory));
   }
+
+  std::unique_ptr<net::MockURLService> mock_url_service(new net::MockURLService());
+  builder.SetMockURLService(std::move(mock_url_service));
 
 #if defined(OS_CHROMEOS)
   if (params_->dhcp_wpad_url_client) {

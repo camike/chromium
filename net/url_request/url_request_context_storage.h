@@ -36,6 +36,7 @@ class TransportSecurityState;
 class URLRequestContext;
 class URLRequestJobFactory;
 class URLRequestThrottlerManager;
+class MockURLService;
 
 #if BUILDFLAG(ENABLE_REPORTING)
 class NetworkErrorLoggingService;
@@ -101,6 +102,7 @@ class NET_EXPORT URLRequestContextStorage {
       std::unique_ptr<NetworkErrorLoggingService>
           network_error_logging_service);
 #endif  // BUILDFLAG(ENABLE_REPORTING)
+  void set_mock_url_service(std::unique_ptr<MockURLService> mock_url_service);
 
   // Everything else can be access through the URLRequestContext, but this
   // cannot.  Having an accessor for it makes usage a little cleaner.
@@ -148,6 +150,7 @@ class NET_EXPORT URLRequestContextStorage {
   std::unique_ptr<ReportingService> reporting_service_;
   std::unique_ptr<NetworkErrorLoggingService> network_error_logging_service_;
 #endif  // BUILDFLAG(ENABLE_REPORTING)
+  std::unique_ptr<MockURLService> mock_url_service_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestContextStorage);
 };

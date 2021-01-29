@@ -19,6 +19,7 @@
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_server_properties.h"
 #include "net/http/http_transaction_factory.h"
+#include "net/mock/mock_url_service.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
 #include "net/quic/quic_context.h"
 #include "net/url_request/url_request_context.h"
@@ -96,6 +97,12 @@ void URLRequestContextStorage::set_cookie_store(
     std::unique_ptr<CookieStore> cookie_store) {
   context_->set_cookie_store(cookie_store.get());
   cookie_store_ = std::move(cookie_store);
+}
+
+void URLRequestContextStorage::set_mock_url_service(
+    std::unique_ptr<MockURLService> mock_url_service) {
+  context_->set_mock_url_service(mock_url_service.get());
+  mock_url_service_ = std::move(mock_url_service);
 }
 
 void URLRequestContextStorage::set_transport_security_state(

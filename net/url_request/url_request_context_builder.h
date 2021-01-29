@@ -59,6 +59,7 @@ class HttpTransactionFactory;
 class HttpUserAgentSettings;
 class HttpServerProperties;
 class HostResolverManager;
+class MockURLService;
 class NetworkQualityEstimator;
 class ProxyConfigService;
 class URLRequestContext;
@@ -312,6 +313,8 @@ class NET_EXPORT URLRequestContextBuilder {
   void SetCreateHttpTransactionFactoryCallback(
       CreateHttpTransactionFactoryCallback
           create_http_network_transaction_factory);
+  
+  void SetMockURLService(std::unique_ptr<MockURLService> mock_url_service);
 
   // Creates a mostly self-contained URLRequestContext. May only be called once
   // per URLRequestContextBuilder. After this is called, the Builder can be
@@ -380,6 +383,7 @@ class NET_EXPORT URLRequestContextBuilder {
   std::unique_ptr<HttpServerProperties> http_server_properties_;
   std::map<std::string, std::unique_ptr<URLRequestJobFactory::ProtocolHandler>>
       protocol_handlers_;
+  std::unique_ptr<MockURLService> mock_url_service_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestContextBuilder);
 };

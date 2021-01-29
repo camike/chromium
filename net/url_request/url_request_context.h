@@ -42,6 +42,7 @@ class HostResolver;
 class HttpAuthHandlerFactory;
 class HttpTransactionFactory;
 class HttpUserAgentSettings;
+class MockURLService;
 class NetLog;
 class NetworkDelegate;
 class NetworkQualityEstimator;
@@ -187,6 +188,9 @@ class NET_EXPORT URLRequestContext
   // cookies are not stored).
   CookieStore* cookie_store() const { return cookie_store_; }
   void set_cookie_store(CookieStore* cookie_store);
+
+  void set_mock_url_service(MockURLService* mock_url_service);
+  MockURLService* mock_url_service() const { return mock_url_service_; }
 
   TransportSecurityState* transport_security_state() const {
     return transport_security_state_;
@@ -352,6 +356,7 @@ class NET_EXPORT URLRequestContext
 #if !BUILDFLAG(DISABLE_FTP_SUPPORT)
   FtpAuthCache* ftp_auth_cache_;
 #endif  // !BUILDFLAG(DISABLE_FTP_SUPPORT)
+  MockURLService* mock_url_service_;
 
   std::unique_ptr<std::set<const URLRequest*>> url_requests_;
 
