@@ -5,6 +5,7 @@
 #include "chrome/browser/sync/test/integration/printers_helper.h"
 
 #include <algorithm>
+#include <ostream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -105,7 +106,7 @@ bool EditPrinterDescription(chromeos::SyncedPrintersManager* manager,
 chromeos::Printer CreateTestPrinter(int index) {
   chromeos::Printer printer(PrinterId(index));
   printer.set_description("Description");
-  printer.set_uri(base::StringPrintf("ipp://192.168.1.%d", index));
+  printer.SetUri(base::StringPrintf("ipp://192.168.1.%d", index));
 
   return printer;
 }
@@ -153,12 +154,14 @@ int GetPrinterCount(int index) {
   return GetPrinterStore(index)->GetSavedPrinters().size();
 }
 
-bool AllProfilesContainSamePrinters() {
+bool AllProfilesContainSamePrinters(std::ostream* os) {
   auto reference_printers = GetPrinterStore(0)->GetSavedPrinters();
   for (int i = 1; i < test()->num_clients(); ++i) {
     auto printers = GetPrinterStore(i)->GetSavedPrinters();
     if (!ListsContainTheSamePrinters(reference_printers, printers)) {
-      VLOG(1) << "Printers in client [" << i << "] don't match client 0";
+      if (os) {
+        *os << "Printers in client [" << i << "] don't match client 0";
+      }
       return false;
     }
   }
@@ -173,9 +176,8 @@ bool ProfileContainsSamePrintersAsVerifier(int index) {
 }
 
 PrintersMatchChecker::PrintersMatchChecker()
-    : AwaitMatchStatusChangeChecker(
-          base::Bind(&printers_helper::AllProfilesContainSamePrinters),
-          "All printers match") {}
+    : AwaitMatchStatusChangeChecker(base::BindRepeating(
+          &printers_helper::AllProfilesContainSamePrinters)) {}
 
 PrintersMatchChecker::~PrintersMatchChecker() {}
 

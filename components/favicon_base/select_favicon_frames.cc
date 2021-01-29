@@ -43,7 +43,7 @@ SkBitmap SampleNearestNeighbor(const SkBitmap& contents, int desired_size) {
     bitmap.eraseARGB(0, 0, 0, 0);
 
   {
-    SkCanvas canvas(bitmap);
+    SkCanvas canvas(bitmap, SkSurfaceProps{});
     canvas.drawBitmapRect(contents, SkRect::MakeIWH(desired_size, desired_size),
                           nullptr);
   }
@@ -240,7 +240,7 @@ gfx::ImageSkia CreateFaviconImageSkia(
 
   if (desired_size_in_dip == 0) {
     size_t index = results[0].index;
-    return gfx::ImageSkia(gfx::ImageSkiaRep(bitmaps[index], 1.0f));
+    return gfx::ImageSkia::CreateFromBitmap(bitmaps[index], 1.0f);
   }
 
   auto image_source = std::make_unique<FaviconImageSource>();

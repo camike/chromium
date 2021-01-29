@@ -10,7 +10,6 @@
 
 namespace blink {
 
-class LayoutSVGResourceContainer;
 class QualifiedName;
 class SVGFilterPrimitiveStandardAttributes;
 
@@ -26,15 +25,20 @@ class CORE_EXPORT SVGResourceClient : public GarbageCollectedMixin {
     kLayoutInvalidation = 1 << 0,
     kBoundariesInvalidation = 1 << 1,
     kPaintInvalidation = 1 << 2,
+    kPaintPropertiesInvalidation = 1 << 3,
+    kClipCacheInvalidation = 1 << 4,
+    kFilterCacheInvalidation = 1 << 5,
+    kInvalidateAll = kLayoutInvalidation | kBoundariesInvalidation |
+                     kPaintInvalidation | kPaintPropertiesInvalidation |
+                     kClipCacheInvalidation | kFilterCacheInvalidation,
   };
   virtual void ResourceContentChanged(InvalidationModeMask) = 0;
   virtual void ResourceElementChanged() = 0;
-  virtual void ResourceDestroyed(LayoutSVGResourceContainer*) {}
 
   virtual void FilterPrimitiveChanged(
       SVGFilterPrimitiveStandardAttributes& primitive,
       const QualifiedName& attribute) {
-    ResourceContentChanged(kPaintInvalidation);
+    ResourceContentChanged(kPaintInvalidation | kFilterCacheInvalidation);
   }
 
  protected:

@@ -11,6 +11,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/policy/profile_policy_connector_builder.h"
@@ -42,7 +43,7 @@
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/mojom/network_service_test.mojom.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chromeos/constants/chromeos_switches.h"
 #endif
 
@@ -134,8 +135,10 @@ class QuicAllowedPolicyTestBase : public QuicTestBase {
   void SetUpInProcessBrowserTestFixture() override {
     QuicTestBase::SetUpInProcessBrowserTestFixture();
     base::CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnableQuic);
-    EXPECT_CALL(provider_, IsInitializationComplete(testing::_))
-        .WillRepeatedly(testing::Return(true));
+    ON_CALL(provider_, IsInitializationComplete(testing::_))
+        .WillByDefault(testing::Return(true));
+    ON_CALL(provider_, IsFirstPolicyLoadComplete(testing::_))
+        .WillByDefault(testing::Return(true));
 
     BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
     PolicyMap values;
@@ -172,8 +175,7 @@ class QuicAllowedPolicyIsFalse: public QuicAllowedPolicyTestBase {
  protected:
   void GetQuicAllowedPolicy(PolicyMap* values) override {
     values->Set(key::kQuicAllowed, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_MACHINE,
-                POLICY_SOURCE_CLOUD, std::make_unique<base::Value>(false),
-                nullptr);
+                POLICY_SOURCE_CLOUD, base::Value(false), nullptr);
   }
 
  private:
@@ -236,8 +238,7 @@ class QuicAllowedPolicyIsTrue: public QuicAllowedPolicyTestBase {
  protected:
   void GetQuicAllowedPolicy(PolicyMap* values) override {
     values->Set(key::kQuicAllowed, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_MACHINE,
-                POLICY_SOURCE_CLOUD, std::make_unique<base::Value>(true),
-                nullptr);
+                POLICY_SOURCE_CLOUD, base::Value(true), nullptr);
   }
 
  private:
@@ -250,7 +251,7 @@ class QuicAllowedPolicyIsTrue: public QuicAllowedPolicyTestBase {
 // some particular order.
 
 // TODO(crbug.com/938139): Flaky on ChromeOS with Network Service
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #define MAYBE_QuicAllowedForSystem DISABLED_QuicAllowedForSystem
 #else
 #define MAYBE_QuicAllowedForSystem QuicAllowedForSystem
@@ -324,7 +325,7 @@ class QuicAllowedPolicyDynamicTest : public QuicTestBase {
 
  protected:
   void SetUpCommandLine(base::CommandLine* command_line) override {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     command_line->AppendSwitch(
         chromeos::switches::kIgnoreUserProfileMappingForTests);
 #endif
@@ -336,8 +337,10 @@ class QuicAllowedPolicyDynamicTest : public QuicTestBase {
   void SetUpInProcessBrowserTestFixture() override {
     QuicTestBase::SetUpInProcessBrowserTestFixture();
     // Set the overriden policy provider for the first Profile (profile_1_).
-    EXPECT_CALL(policy_for_profile_1_, IsInitializationComplete(testing::_))
-        .WillRepeatedly(testing::Return(true));
+    ON_CALL(policy_for_profile_1_, IsInitializationComplete(testing::_))
+        .WillByDefault(testing::Return(true));
+    ON_CALL(policy_for_profile_1_, IsFirstPolicyLoadComplete(testing::_))
+        .WillByDefault(testing::Return(true));
     policy::PushProfilePolicyConnectorProviderForTesting(
         &policy_for_profile_1_);
   }
@@ -353,8 +356,10 @@ class QuicAllowedPolicyDynamicTest : public QuicTestBase {
     EXPECT_FALSE(profile_2_);
 
     // Prepare policy provider for second profile.
-    EXPECT_CALL(policy_for_profile_2_, IsInitializationComplete(testing::_))
-        .WillRepeatedly(testing::Return(true));
+    ON_CALL(policy_for_profile_2_, IsInitializationComplete(testing::_))
+        .WillByDefault(testing::Return(true));
+    ON_CALL(policy_for_profile_2_, IsFirstPolicyLoadComplete(testing::_))
+        .WillByDefault(testing::Return(true));
     policy::PushProfilePolicyConnectorProviderForTesting(
         &policy_for_profile_2_);
 
@@ -366,7 +371,8 @@ class QuicAllowedPolicyDynamicTest : public QuicTestBase {
     base::RunLoop run_loop;
     profile_manager->CreateProfileAsync(
         path_profile,
-        base::Bind(&OnProfileInitialized, &profile_2_, run_loop.QuitClosure()),
+        base::BindRepeating(&OnProfileInitialized, &profile_2_,
+                            run_loop.QuitClosure()),
         base::string16(), std::string());
 
     // Run the message loop to allow profile creation to take place; the loop is
@@ -385,8 +391,7 @@ class QuicAllowedPolicyDynamicTest : public QuicTestBase {
                             bool value) {
     PolicyMap policy_map;
     policy_map.Set(key::kQuicAllowed, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-                   POLICY_SOURCE_CLOUD, std::make_unique<base::Value>(value),
-                   nullptr);
+                   POLICY_SOURCE_CLOUD, base::Value(value), nullptr);
     provider->UpdateChromePolicy(policy_map);
     base::RunLoop().RunUntilIdle();
 

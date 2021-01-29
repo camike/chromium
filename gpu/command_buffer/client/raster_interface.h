@@ -13,6 +13,7 @@
 #include "gpu/command_buffer/client/interface_base.h"
 #include "gpu/command_buffer/common/sync_token.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
+#include "third_party/skia/include/core/SkYUVAInfo.h"
 
 namespace cc {
 class DisplayItemList;
@@ -64,12 +65,12 @@ class RasterInterface : public InterfaceBase {
                            const SkImageInfo& src_info,
                            const void* src_pixels) = 0;
 
-  virtual void ConvertYUVMailboxesToRGB(
+  virtual void ConvertYUVAMailboxesToRGB(
       const gpu::Mailbox& dest_mailbox,
       SkYUVColorSpace planes_yuv_color_space,
-      const gpu::Mailbox& y_plane_mailbox,
-      const gpu::Mailbox& u_plane_mailbox,
-      const gpu::Mailbox& v_plane_mailbox) = 0;
+      SkYUVAInfo::PlaneConfig plane_config,
+      SkYUVAInfo::Subsampling subsampling,
+      const gpu::Mailbox yuva_plane_mailboxes[]) = 0;
 
   // OOP-Raster
   virtual void BeginRasterCHROMIUM(GLuint sk_color,
@@ -139,6 +140,15 @@ class RasterInterface : public InterfaceBase {
       const gfx::Point& paste_location,
       base::OnceCallback<void()> release_mailbox,
       base::OnceCallback<void(bool)> readback_done) = 0;
+
+  // Synchronously does a readback of SkImage pixels from |source_mailbox| into
+  // caller-owned memory |dst_pixels|.
+  virtual void ReadbackImagePixels(const gpu::Mailbox& source_mailbox,
+                                   const SkImageInfo& dst_info,
+                                   GLuint dst_row_bytes,
+                                   int src_x,
+                                   int src_y,
+                                   void* dst_pixels) = 0;
 
   // Raster via GrContext.
   virtual GLuint CreateAndConsumeForGpuRaster(const gpu::Mailbox& mailbox) = 0;

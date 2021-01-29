@@ -32,7 +32,8 @@ class TestPersonalDataManager : public PersonalDataManager {
   // or to make things easier in general to toggle.
   void OnSyncServiceInitialized(syncer::SyncService* sync_service) override;
   AutofillSyncSigninState GetSyncSigninState() const override;
-  void RecordUseOf(const AutofillDataModel& data_model) override;
+  void RecordUseOf(absl::variant<const AutofillProfile*, const CreditCard*>
+                       profile_or_credit_card) override;
   std::string SaveImportedProfile(
       const AutofillProfile& imported_profile) override;
   std::string SaveImportedCreditCard(
@@ -75,6 +76,9 @@ class TestPersonalDataManager : public PersonalDataManager {
   // Clears |server_credit_card_cloud_token_data_|.
   void ClearCloudTokenData();
 
+  // Clears |autofill_offer_data_|.
+  void ClearCreditCardOfferData();
+
   // Gets a profile based on the provided |guid|.
   AutofillProfile* GetProfileWithGUID(const char* guid);
 
@@ -87,6 +91,9 @@ class TestPersonalDataManager : public PersonalDataManager {
 
   // Adds a cloud token data to |server_credit_card_cloud_token_data_|.
   void AddCloudTokenData(const CreditCardCloudTokenData& cloud_token_data);
+
+  // Adds offer data to |autofill_offer_data_|.
+  void AddCreditCardOfferData(const AutofillOfferData& offer_data);
 
   // Sets a local/server card's nickname based on the provided |guid|.
   void SetNicknameForCardWithGUID(const char* guid,
@@ -139,6 +146,11 @@ class TestPersonalDataManager : public PersonalDataManager {
   void SetAccountInfoForPayments(const CoreAccountInfo& account_info) {
     account_info_ = account_info;
   }
+
+  // Calls
+  // AlternativeStateNameMapUpdater::PopulateAlternativeStateNameMapForTesting,
+  // used for testing purposes.
+  void PopulateAlternativeStateNameMap(base::OnceClosure callback);
 
  private:
   std::string timezone_country_code_;

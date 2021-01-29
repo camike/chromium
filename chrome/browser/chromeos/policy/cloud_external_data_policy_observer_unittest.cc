@@ -150,7 +150,7 @@ class CloudExternalDataPolicyObserverTest
       device_local_account_policy_provider_;
 
   MockCloudExternalDataManager external_data_manager_;
-  MockConfigurationPolicyProvider user_policy_provider_;
+  testing::NiceMock<MockConfigurationPolicyProvider> user_policy_provider_;
 
   std::unique_ptr<TestingProfile> profile_;
 
@@ -195,8 +195,10 @@ void CloudExternalDataPolicyObserverTest::SetUp() {
           base::ThreadTaskRunnerHandle::Get(),
           base::ThreadTaskRunnerHandle::Get(), shared_url_loader_factory_));
 
-  EXPECT_CALL(user_policy_provider_, IsInitializationComplete(_))
-      .WillRepeatedly(Return(true));
+  ON_CALL(user_policy_provider_, IsInitializationComplete(_))
+      .WillByDefault(Return(true));
+  ON_CALL(user_policy_provider_, IsFirstPolicyLoadComplete(_))
+      .WillByDefault(Return(true));
   user_policy_provider_.Init();
 
   ConstructAvatarPolicy("avatar1.jpg",
@@ -359,8 +361,7 @@ void CloudExternalDataPolicyObserverTest::SetRegularUserAvatarPolicy(
   PolicyMap policy_map;
   if (!value.empty()) {
     policy_map.Set(key::kUserAvatarImage, POLICY_LEVEL_MANDATORY,
-                   POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                   std::make_unique<base::Value>(value),
+                   POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, base::Value(value),
                    external_data_manager_.CreateExternalDataFetcher(
                        key::kUserAvatarImage));
   }

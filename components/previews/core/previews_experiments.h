@@ -21,31 +21,33 @@ enum class PreviewsType {
   // Used to indicate that there is no preview type.
   NONE = 0,
 
-  // The user is shown an offline page as a preview.
-  OFFLINE = 1,
+  // The user is shown an offline page as a preview. Deprecated, and should not
+  // be used.
+  // DEPRECATED_OFFLINE = 1,
 
   // Replace images with placeholders. Deprecated, and should not be used.
-  DEPRECATED_LOFI = 2,
+  // DEPRECATED_LOFI = 2,
 
-  // The user is shown a server lite page.
-  LITE_PAGE = 3,
+  // The user is shown a server lite page. Deprecated, and should not
+  // be used.
+  // DEPRECATED_LITE_PAGE = 3,
 
   // AMP version of the page is shown as a preview. Deprecated, and should not
   // be used.
-  DEPRECATED_AMP_REDIRECTION = 4,
+  // DEPRECATED_AMP_REDIRECTION = 4,
 
   // Preview that disables JavaScript for the navigation.
-  NOSCRIPT = 5,
+  // NOSCRIPT = 5,
 
   // Special value that indicates that no specific type is identified. This
   // might be used for checks or logging that applies to any type.
   UNSPECIFIED = 6,
 
   // Request that resource loading hints be used during pageload.
-  RESOURCE_LOADING_HINTS = 7,
+  // RESOURCE_LOADING_HINTS = 7,
 
   // Allows the browser to redirect navigations to a Lite Page server.
-  DEPRECATED_LITE_PAGE_REDIRECT = 8,
+  // DEPRECATED_LITE_PAGE_REDIRECT = 8,
 
   // Preview that defers script execution until after parsing completes.
   DEFER_ALL_SCRIPT = 9,
@@ -76,37 +78,33 @@ std::string GetStringNameForType(PreviewsType type);
 
 namespace params {
 
-// The maximum number of recent previews navigations the black list looks at to
-// determine if a host is blacklisted.
-size_t MaxStoredHistoryLengthForPerHostBlackList();
+// The maximum number of recent previews navigations the block list looks at to
+// determine if a host is blocklisted.
+size_t MaxStoredHistoryLengthForPerHostBlockList();
 
-// The maximum number of recent previews navigations the black list looks at to
+// The maximum number of recent previews navigations the block list looks at to
 // determine if all previews navigations are disallowed.
-size_t MaxStoredHistoryLengthForHostIndifferentBlackList();
+size_t MaxStoredHistoryLengthForHostIndifferentBlockList();
 
-// The maximum number of hosts allowed in the in memory black list.
-size_t MaxInMemoryHostsInBlackList();
+// The maximum number of hosts allowed in the in memory block list.
+size_t MaxInMemoryHostsInBlockList();
 
 // The number of recent navigations that were opted out of for a given host that
-// would trigger that host to be blacklisted.
-int PerHostBlackListOptOutThreshold();
+// would trigger that host to be blocklisted.
+int PerHostBlockListOptOutThreshold();
 
 // The number of recent navigations that were opted out of that would trigger
 // all previews navigations to be disallowed.
-int HostIndifferentBlackListOptOutThreshold();
+int HostIndifferentBlockListOptOutThreshold();
 
-// The amount of time a host remains blacklisted due to opt outs.
-base::TimeDelta PerHostBlackListDuration();
+// The amount of time a host remains blocklisted due to opt outs.
+base::TimeDelta PerHostBlockListDuration();
 
 // The amount of time all previews navigations are disallowed due to opt outs.
-base::TimeDelta HostIndifferentBlackListPerHostDuration();
+base::TimeDelta HostIndifferentBlockListPerHostDuration();
 
 // The amount of time after any opt out that no previews should be shown.
 base::TimeDelta SingleOptOutDuration();
-
-// The amount of time that an offline page is considered fresh enough to be
-// shown as a preview.
-base::TimeDelta OfflinePreviewFreshnessDuration();
 
 // The default EffectiveConnectionType threshold where preview |type| will be
 // triggered.
@@ -123,33 +121,10 @@ net::EffectiveConnectionType GetSessionMaxECTThreshold();
 bool ArePreviewsAllowed();
 
 // Whether the preview type is enabled.
-bool IsOfflinePreviewsEnabled();
-bool IsNoScriptPreviewsEnabled();
-bool IsResourceLoadingHintsEnabled();
 bool IsDeferAllScriptPreviewsEnabled();
 
-// The blacklist version for each preview type.
-int OfflinePreviewsVersion();
-int NoScriptPreviewsVersion();
-int ResourceLoadingHintsVersion();
+// The blocklist version for each preview type.
 int DeferAllScriptPreviewsVersion();
-
-// For estimating NoScript data savings, this is the percentage factor to
-// multiple by the network bytes for inflating the original_bytes count.
-int NoScriptPreviewsInflationPercent();
-
-// For estimating NoScript data savings, this is the number of bytes to
-// for inflating the original_bytes count.
-int NoScriptPreviewsInflationBytes();
-
-// For estimating ResourceLoadingHints data savings, this is the percentage
-// factor to multiple by the network bytes for inflating the original_bytes
-// count.
-int ResourceLoadingHintsPreviewsInflationPercent();
-
-// For estimating ResourceLoadingHints data savings, this is the number of
-// bytes to for inflating the original_bytes count.
-int ResourceLoadingHintsPreviewsInflationBytes();
 
 // Forces the coin flip holdback, if enabled, to always come up "holdback".
 bool ShouldOverrideNavigationCoinFlipToHoldback();

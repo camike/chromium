@@ -4,6 +4,8 @@
 
 #include "chrome/updater/constants.h"
 
+#include "chrome/updater/updater_branding.h"
+
 namespace updater {
 
 // App ids.
@@ -16,28 +18,28 @@ const char kServerSwitch[] = "server";
 const char kComServiceSwitch[] = "com-service";
 const char kCrashMeSwitch[] = "crash-me";
 const char kCrashHandlerSwitch[] = "crash-handler";
+const char kUpdateSwitch[] = "update";
 const char kInstallSwitch[] = "install";
 const char kUninstallSwitch[] = "uninstall";
-const char kUpdateAppsSwitch[] = "ua";
 const char kSystemSwitch[] = "system";
 const char kTestSwitch[] = "test";
 const char kInitDoneNotifierSwitch[] = "init-done-notifier";
 const char kNoRateLimitSwitch[] = "no-rate-limit";
 const char kEnableLoggingSwitch[] = "enable-logging";
 const char kLoggingModuleSwitch[] = "vmodule";
-const char kSingleProcessSwitch[] = "single-process";
-const char kAppIdSwitch[] = "appid";
+const char kAppIdSwitch[] = "app-id";
+const char kAppVersionSwitch[] = "app-version";
+const char kWakeSwitch[] = "wake";
+const char kTagSwitch[] = "tag";
+
+const char kServerServiceSwitch[] = "service";
+
+const char kServerUpdateServiceInternalSwitchValue[] = "update-internal";
+const char kServerUpdateServiceSwitchValue[] = "update";
 
 #if defined(OS_WIN)
 const char kInstallFromOutDir[] = "install-from-out-dir";
 #endif  // OS_WIN
-
-// URLs.
-const char kUpdaterJSONDefaultUrl[] =
-    "https://update.googleapis.com/service/update2/json";
-const char kCrashUploadURL[] = "https://clients2.google.com/cr/report";
-const char kCrashStagingUploadURL[] =
-    "https://clients2.google.com/cr/staging_report";
 
 // Path names.
 const char kAppsDir[] = "apps";
@@ -46,6 +48,10 @@ const char kUninstallScript[] = "uninstall.cmd";
 // Developer override key names.
 const char kDevOverrideKeyUrl[] = "url";
 const char kDevOverrideKeyUseCUP[] = "use_cup";
+const char kDevOverrideKeyInitialDelay[] = "initial_delay";
+
+// Developer override file name, relative to app data directory.
+const char kDevOverrideFileName[] = "overrides.json";
 
 // Policy Management constants.
 const char kProxyModeDirect[] = "direct";
@@ -56,5 +62,10 @@ const char kProxyModeSystem[] = "system";
 
 // Specifies that urls that can be cached by proxies are preferred.
 const char kDownloadPreferenceCacheable[] = "cacheable";
+
+#if defined(OS_MAC)
+// The user defaults suite name.
+const char kUserDefaultsSuiteName[] = MAC_BUNDLE_IDENTIFIER_STRING ".defaults";
+#endif  // defined(OS_MAC)
 
 }  // namespace updater

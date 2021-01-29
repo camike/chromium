@@ -411,6 +411,32 @@ base::string16 ExtensionInstallPrompt::Prompt::GetRetainedDeviceMessageString(
   return retained_device_messages_[index];
 }
 
+void ExtensionInstallPrompt::Prompt::AddObserver(Observer* observer) {
+  observers_.AddObserver(observer);
+}
+
+void ExtensionInstallPrompt::Prompt::RemoveObserver(Observer* observer) {
+  observers_.RemoveObserver(observer);
+}
+
+void ExtensionInstallPrompt::Prompt::OnDialogOpened() {
+  for (Observer& observer : observers_) {
+    observer.OnDialogOpened();
+  }
+}
+
+void ExtensionInstallPrompt::Prompt::OnDialogAccepted() {
+  for (Observer& observer : observers_) {
+    observer.OnDialogAccepted();
+  }
+}
+
+void ExtensionInstallPrompt::Prompt::OnDialogCanceled() {
+  for (Observer& observer : observers_) {
+    observer.OnDialogCanceled();
+  }
+}
+
 bool ExtensionInstallPrompt::Prompt::ShouldDisplayRevokeButton() const {
   return !retained_files_.empty() || !retained_device_messages_.empty();
 }
@@ -486,26 +512,26 @@ ExtensionInstallPrompt::~ExtensionInstallPrompt() {
 }
 
 void ExtensionInstallPrompt::ShowDialog(
-    const DoneCallback& done_callback,
+    DoneCallback done_callback,
     const Extension* extension,
     const SkBitmap* icon,
     const ShowDialogCallback& show_dialog_callback) {
-  ShowDialog(done_callback, extension, icon,
+  ShowDialog(std::move(done_callback), extension, icon,
              std::make_unique<Prompt>(INSTALL_PROMPT), show_dialog_callback);
 }
 
 void ExtensionInstallPrompt::ShowDialog(
-    const DoneCallback& done_callback,
+    DoneCallback done_callback,
     const Extension* extension,
     const SkBitmap* icon,
     std::unique_ptr<Prompt> prompt,
     const ShowDialogCallback& show_dialog_callback) {
-  ShowDialog(done_callback, extension, icon, std::move(prompt), nullptr,
-             show_dialog_callback);
+  ShowDialog(std::move(done_callback), extension, icon, std::move(prompt),
+             nullptr, show_dialog_callback);
 }
 
 void ExtensionInstallPrompt::ShowDialog(
-    const DoneCallback& done_callback,
+    DoneCallback done_callback,
     const Extension* extension,
     const SkBitmap* icon,
     std::unique_ptr<Prompt> prompt,
@@ -514,7 +540,7 @@ void ExtensionInstallPrompt::ShowDialog(
   DCHECK(ui_thread_checker_.CalledOnValidThread());
   DCHECK(prompt);
   extension_ = extension;
-  done_callback_ = done_callback;
+  done_callback_ = std::move(done_callback);
   if (icon && !icon->empty())
     SetIcon(icon);
   prompt_ = std::move(prompt);
@@ -524,7 +550,9 @@ void ExtensionInstallPrompt::ShowDialog(
   // We special-case themes to not show any confirm UI. Instead they are
   // immediately installed, and then we show an infobar (see OnInstallSuccess)
   // to allow the user to revert if they don't like it.
-  if (extension->is_theme() && extension->from_webstore()) {
+  if (extension->is_theme() && extension->from_webstore() &&
+      prompt_->type() != EXTENSION_REQUEST_PROMPT &&
+      prompt_->type() != EXTENSION_PENDING_REQUEST_PROMPT) {
     std::move(done_callback_).Run(Result::ACCEPTED);
     return;
   }
@@ -544,6 +572,11 @@ void ExtensionInstallPrompt::OnInstallSuccess(
 void ExtensionInstallPrompt::OnInstallFailure(
     const extensions::CrxInstallError& error) {
   install_ui_->OnInstallFailure(error);
+}
+
+std::unique_ptr<ExtensionInstallPrompt::Prompt>
+ExtensionInstallPrompt::GetPromptForTesting() {
+  return std::move(prompt_);
 }
 
 void ExtensionInstallPrompt::SetIcon(const SkBitmap* image) {
@@ -621,6 +654,9 @@ void ExtensionInstallPrompt::ShowConfirmation() {
   g_last_prompt_type_for_tests = prompt_->type();
   did_call_show_dialog_ = true;
 
+  // Notify observers.
+  prompt_->OnDialogOpened();
+
   // If true, auto confirm is enabled and already handled the result.
   if (AutoConfirmPromptIfEnabled())
     return;
@@ -631,7 +667,7 @@ void ExtensionInstallPrompt::ShowConfirmation() {
   // a callback on the stack.
   auto cb = std::move(done_callback_);
   std::move(show_dialog_callback_)
-      .Run(show_params_.get(), cb, std::move(prompt_));
+      .Run(show_params_.get(), std::move(cb), std::move(prompt_));
 }
 
 bool ExtensionInstallPrompt::AutoConfirmPromptIfEnabled() {

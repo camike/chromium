@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 
 #include "testing/libfuzzer/libfuzzer_exports.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
@@ -25,12 +26,7 @@ int LLVMFuzzerInitialize(int* argc, char*** argv) {
   LEAK_SANITIZER_DISABLED_SCOPE;
   g_page_holder = std::make_unique<DummyPageHolder>().release();
 
-  // Set loader sandbox flags and install a new document so the document
-  // has all possible sandbox flags set on the document already when the
-  // CSP is bound.
   scoped_refptr<SharedBuffer> empty_document_data = SharedBuffer::Create();
-  g_page_holder->GetFrame().Loader().ForceSandboxFlags(
-      network::mojom::blink::WebSandboxFlags::kAll);
   g_page_holder->GetFrame().ForceSynchronousDocumentInstall(
       "text/html", empty_document_data);
   return 0;
@@ -59,7 +55,8 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // Construct and initialize a policy from the string.
   auto* csp = MakeGarbageCollected<ContentSecurityPolicy>();
   csp->DidReceiveHeader(header, header_type, header_source);
-  g_page_holder->GetDocument().InitContentSecurityPolicy(csp);
+  auto& context = g_page_holder->GetFrame().DomWindow()->GetSecurityContext();
+  context.SetContentSecurityPolicy(csp);
 
   // Force a garbage collection.
   // Specify namespace explicitly. Otherwise it conflicts on Mac OS X with:

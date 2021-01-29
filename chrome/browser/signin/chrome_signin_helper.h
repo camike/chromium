@@ -10,10 +10,11 @@
 
 #include "base/macros.h"
 #include "base/supports_user_data.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "content/public/browser/web_contents.h"
-#include "third_party/blink/public/mojom/loader/resource_load_info.mojom-shared.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
 
 namespace content_settings {
 class CookieSettings;
@@ -35,14 +36,22 @@ namespace signin {
 // Key for ManageAccountsHeaderReceivedUserData. Exposed for testing.
 extern const void* const kManageAccountsHeaderReceivedUserDataKey;
 
+// The source to use when constructing the Mirror header.
+extern const char kChromeMirrorHeaderSource[];
+
 class ChromeRequestAdapter : public RequestAdapter {
  public:
-  ChromeRequestAdapter();
+  ChromeRequestAdapter(const GURL& url,
+                       const net::HttpRequestHeaders& original_headers,
+                       net::HttpRequestHeaders* modified_headers,
+                       std::vector<std::string>* headers_to_remove);
   ~ChromeRequestAdapter() override;
 
   virtual content::WebContents::Getter GetWebContentsGetter() const = 0;
 
-  virtual blink::mojom::ResourceType GetResourceType() const = 0;
+  virtual network::mojom::RequestDestination GetRequestDestination() const = 0;
+
+  virtual bool IsFetchLikeAPI() const = 0;
 
   virtual GURL GetReferrerOrigin() const = 0;
 
@@ -81,7 +90,6 @@ void SetDiceAccountReconcilorBlockDelayForTesting(int delay_ms);
 
 // Adds an account consistency header to Gaia requests from a connected profile,
 // with the exception of requests from gaia webview.
-// Returns true if the account consistency header was added to the request.
 // Removes the header if it is already in the headers but should not be there.
 void FixAccountConsistencyRequestHeader(
     ChromeRequestAdapter* request,
@@ -90,8 +98,9 @@ void FixAccountConsistencyRequestHeader(
     int incognito_availibility,
     AccountConsistencyMethod account_consistency,
     std::string gaia_id,
-#if defined(OS_CHROMEOS)
-    bool account_consistency_mirror_required,
+    const base::Optional<bool>& is_child_account,
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    bool is_secondary_account_addition_allowed,
 #endif
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
     bool is_sync_enabled,

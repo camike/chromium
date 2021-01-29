@@ -9,11 +9,12 @@
 #include "base/bind.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/test/task_environment.h"
+#include "build/chromeos_buildflags.h"
 #include "components/feed/core/common/pref_names.h"
 #include "components/feed/feed_feature_list.h"
 #include "components/prefs/testing_pref_service.h"
@@ -46,16 +47,20 @@ class MockResponseDoneCallback {
  public:
   MockResponseDoneCallback() : has_run(false), code(0) {}
 
-  void Done(int32_t http_code, std::vector<uint8_t> response) {
+  void Done(int32_t http_code,
+            std::vector<uint8_t> response,
+            bool is_signed_in) {
     EXPECT_FALSE(has_run);
     has_run = true;
     code = http_code;
     response_bytes = std::move(response);
+    is_signed_in_result = is_signed_in;
   }
 
   bool has_run;
   int32_t code;
   std::vector<uint8_t> response_bytes;
+  bool is_signed_in_result;
 };
 
 }  // namespace
@@ -266,6 +271,15 @@ TEST_F(FeedNetworkingHostTest, ShouldSetHeadersCorrectly) {
   EXPECT_EQ(authorization, "Bearer access_token");
 }
 
+TEST_F(FeedNetworkingHostTest, ProvideIsSignedInBitInResult) {
+  MockResponseDoneCallback done_callback;
+  SendRequestAndRespond("http://foobar.com/feed", "POST", "body", "",
+                        net::HTTP_OK, network::URLLoaderCompletionStatus(),
+                        &done_callback);
+
+  EXPECT_TRUE(done_callback.is_signed_in_result);
+}
+
 TEST_F(FeedNetworkingHostTest, ShouldNotSendContentEncodingForEmptyBody) {
   MockResponseDoneCallback done_callback;
   net::HttpRequestHeaders headers;
@@ -345,7 +359,7 @@ TEST_F(FeedNetworkingHostTest, ShouldIncludeAPIKeyForAuthError) {
 
 // Disabled for chromeos, which doesn't allow for there not to be a signed in
 // user.
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 TEST_F(FeedNetworkingHostTest, ShouldIncludeAPIKeyForNoSignedInUser) {
   identity_env()->ClearPrimaryAccount();
   MockResponseDoneCallback done_callback;

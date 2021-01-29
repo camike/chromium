@@ -33,9 +33,8 @@ class SessionSyncServiceImpl : public SessionSyncService {
   OpenTabsUIDelegate* GetOpenTabsUIDelegate() override;
 
   // Allows client code to be notified when foreign sessions change.
-  std::unique_ptr<base::CallbackList<void()>::Subscription>
-  SubscribeToForeignSessionsChanged(const base::RepeatingClosure& cb) override
-      WARN_UNUSED_RESULT;
+  base::CallbackListSubscription SubscribeToForeignSessionsChanged(
+      const base::RepeatingClosure& cb) override WARN_UNUSED_RESULT;
 
   // For ProfileSyncService to initialize the controller for SESSIONS.
   base::WeakPtr<syncer::ModelTypeControllerDelegate> GetControllerDelegate()
@@ -51,6 +50,10 @@ class SessionSyncServiceImpl : public SessionSyncService {
   // Returns OpenTabsUIDelegate regardless of sync being enabled or disabled,
   // useful for tests.
   OpenTabsUIDelegate* GetUnderlyingOpenTabsUIDelegateForTest();
+
+  SyncSessionsClient* GetSessionsClientForTest() {
+    return sessions_client_.get();
+  }
 
  private:
   void NotifyForeignSessionUpdated();

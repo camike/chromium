@@ -452,7 +452,7 @@ base::Value CreateAutocompleteMatches(
       description_class.Append(std::move(entry));
     }
     dict.SetKey("descriptionClass", std::move(description_class));
-    dict.SetStringKey("destinationUrl", match->destination_url);
+    dict.SetStringKey("destinationUrl", match->destination_url.spec());
     dict.SetIntKey("suggestionGroupId", match->suggestion_group_id);
     dict.SetStringKey("inlineAutocompletion", match->inline_autocompletion);
     dict.SetBoolKey("isSearchType", match->is_search_type);
@@ -989,7 +989,7 @@ v8::Local<v8::Value> NewTabPageBindings::GetMostVisited(v8::Isolate* isolate) {
 
   // This corresponds to "window.devicePixelRatio" in JavaScript.
   float zoom_factor =
-      blink::PageZoomLevelToZoomFactor(render_view->GetZoomLevel());
+      blink::PageZoomLevelToZoomFactor(render_view->GetWebView()->ZoomLevel());
   float device_pixel_ratio = render_frame->GetDeviceScaleFactor() * zoom_factor;
 
   int render_view_id = render_view->GetRoutingID();

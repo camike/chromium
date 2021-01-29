@@ -11,11 +11,11 @@
 
 PendingCastComponent::PendingCastComponent(
     Delegate* delegate,
-    std::unique_ptr<base::fuchsia::StartupContext> startup_context,
+    std::unique_ptr<base::StartupContext> startup_context,
     fidl::InterfaceRequest<fuchsia::sys::ComponentController>
         controller_request,
     base::StringPiece app_id)
-    : delegate_(delegate) {
+    : delegate_(delegate), app_id_(app_id.as_string()) {
   DCHECK(startup_context);
   DCHECK(controller_request);
 
@@ -129,6 +129,8 @@ void PendingCastComponent::MaybeLaunchComponent() {
   // Clear the error handlers on InterfacePtr<>s before passing them, to avoid
   // user-after-free of |this|.
   params_.url_rewrite_rules_provider.set_error_handler(nullptr);
+
+  params_.application_context = application_context_.Unbind();
 
   delegate_->LaunchPendingComponent(this, std::move(params_));
 }

@@ -4,6 +4,7 @@
 
 #include "ash/system/accessibility/floating_accessibility_controller.h"
 
+#include "ash/accelerators/accelerator_controller_impl.h"
 #include "ash/accessibility/accessibility_controller_impl.h"
 #include "ash/autoclick/autoclick_controller.h"
 #include "ash/public/cpp/session/session_types.h"
@@ -38,13 +39,17 @@ class FloatingAccessibilityControllerTest : public AshTestBase {
   }
 
   FloatingAccessibilityController* controller() {
-    return accessibility_controller()->GetFloatingMenuControllerForTesting();
+    return accessibility_controller()->GetFloatingMenuController();
   }
 
   FloatingMenuPosition menu_position() { return controller()->position_; }
 
   FloatingAccessibilityView* menu_view() {
     return controller() ? controller()->menu_view_ : nullptr;
+  }
+
+  views::Widget* widget() {
+    return controller() ? controller()->bubble_widget_ : nullptr;
   }
 
   AutoclickMenuView* autoclick_menu_view() {
@@ -120,6 +125,29 @@ TEST_F(FloatingAccessibilityControllerTest, ShowingMenu) {
             accessibility_controller()->GetFloatingMenuPosition());
 }
 
+TEST_F(FloatingAccessibilityControllerTest, ShowingMenuAfterPrefUpdate) {
+  SetUpKioskSession();
+
+  // If we try to show the floating menu before it is enabled, nothing happens.
+  accessibility_controller()->ShowFloatingMenuIfEnabled();
+  EXPECT_TRUE(controller() == nullptr);
+
+  // As soon as we enable the floating menu, it will show the floating menu
+  // because we tried to show it earlier.
+  accessibility_controller()->floating_menu().SetEnabled(true);
+  EXPECT_FALSE(controller() == nullptr);
+
+  // Disable the floating menu, which should cause it to be hidden.
+  accessibility_controller()->floating_menu().SetEnabled(false);
+  EXPECT_TRUE(controller() == nullptr);
+
+  // Enabling it again will show the menu since we already tried to show
+  // it earlier. As soon as it we request it to be shown at least once, it
+  // should show/hide on enabled state change.
+  accessibility_controller()->floating_menu().SetEnabled(true);
+  EXPECT_FALSE(controller() == nullptr);
+}
+
 TEST_F(FloatingAccessibilityControllerTest, CanChangePosition) {
   SetUpVisibleMenu();
 
@@ -192,7 +220,7 @@ TEST_F(FloatingAccessibilityControllerTest, LocaleChangeObserver) {
   // RTL should position the menu on the bottom left.
   base::i18n::SetICUDefaultLocale("he");
   // Trigger the LocaleChangeObserver, which should cause a layout of the menu.
-  ash::LocaleUpdateController::Get()->OnLocaleChanged(
+  ash::LocaleUpdateController::Get()->ConfirmLocaleChange(
       "en", "en", "he", base::DoNothing::Once<ash::LocaleNotificationResult>());
   EXPECT_TRUE(base::i18n::IsRTL());
   EXPECT_LT(
@@ -201,8 +229,31 @@ TEST_F(FloatingAccessibilityControllerTest, LocaleChangeObserver) {
 
   // LTR should position the menu on the bottom right.
   base::i18n::SetICUDefaultLocale("en");
-  ash::LocaleUpdateController::Get()->OnLocaleChanged(
+  ash::LocaleUpdateController::Get()->ConfirmLocaleChange(
       "he", "he", "en", base::DoNothing::Once<ash::LocaleNotificationResult>());
+  EXPECT_FALSE(base::i18n::IsRTL());
+  EXPECT_LT(GetMenuViewBounds().ManhattanDistanceToPoint(
+                window_bounds.bottom_right()),
+            kMenuViewBoundsBuffer);
+}
+
+TEST_F(FloatingAccessibilityControllerTest,
+       LocaleChangeObserverWithNoNotification) {
+  SetUpVisibleMenu();
+  gfx::Rect window_bounds = Shell::GetPrimaryRootWindow()->bounds();
+
+  // RTL should position the menu on the bottom left.
+  base::i18n::SetICUDefaultLocale("he");
+  // Trigger the LocaleChangeObserver, which should cause a layout of the menu.
+  ash::LocaleUpdateController::Get()->OnLocaleChanged();
+  EXPECT_TRUE(base::i18n::IsRTL());
+  EXPECT_LT(
+      GetMenuViewBounds().ManhattanDistanceToPoint(window_bounds.bottom_left()),
+      kMenuViewBoundsBuffer);
+
+  // LTR should position the menu on the bottom right.
+  base::i18n::SetICUDefaultLocale("en");
+  ash::LocaleUpdateController::Get()->OnLocaleChanged();
   EXPECT_FALSE(base::i18n::IsRTL());
   EXPECT_LT(GetMenuViewBounds().ManhattanDistanceToPoint(
                 window_bounds.bottom_right()),
@@ -267,7 +318,7 @@ TEST_F(FloatingAccessibilityControllerTest, CollisionWithAutoclicksMenu) {
   accessibility_controller()->SetFloatingMenuPosition(
       FloatingMenuPosition::kTopRight);
 
-  accessibility_controller()->SetAutoclickEnabled(true);
+  accessibility_controller()->autoclick().SetEnabled(true);
 
   // Get the full root window bounds to test the position.
   gfx::Rect window_bounds = Shell::GetPrimaryRootWindow()->bounds();
@@ -334,7 +385,7 @@ TEST_F(FloatingAccessibilityControllerTest, ActiveFeaturesButtons) {
                          {FloatingAccessibilityView::ButtonId::kVirtualKeyboard,
                           AccessibilityControllerImpl::kVirtualKeyboard}};
 
-  accessibility_controller()->SetDictationAcceleratorDialogAccepted();
+  accessibility_controller()->dictation().SetDialogAccepted();
 
   gfx::Rect original_bounds = GetMenuViewBounds();
 
@@ -401,6 +452,57 @@ TEST_F(FloatingAccessibilityControllerTest, ActiveFeaturesButtons) {
     loop_disable.Run();
   }
   EXPECT_EQ(GetMenuViewBounds(), original_bounds);
+}
+
+TEST_F(FloatingAccessibilityControllerTest, AccelatorFocusMenu) {
+  SetUpVisibleMenu();
+
+  ASSERT_TRUE(widget());
+  views::FocusManager* focus_manager = widget()->GetFocusManager();
+
+  Shell::Get()->accelerator_controller()->PerformActionIfEnabled(
+      AcceleratorAction::FOCUS_SHELF, {});
+  // If nothing else is enabled, it should focus on the detailed view button.
+  EXPECT_EQ(focus_manager->GetFocusedView(),
+            GetMenuButton(FloatingAccessibilityView::ButtonId::kSettingsList));
+
+  // Focus should be reset if advanced through the menu.
+  focus_manager->AdvanceFocus(false /* reverse */);
+  EXPECT_NE(focus_manager->GetFocusedView(),
+            GetMenuButton(FloatingAccessibilityView::ButtonId::kSettingsList));
+
+  Shell::Get()->accelerator_controller()->PerformActionIfEnabled(
+      AcceleratorAction::FOCUS_SHELF, {});
+  // It should get back to the settings list button.
+  EXPECT_EQ(focus_manager->GetFocusedView(),
+            GetMenuButton(FloatingAccessibilityView::ButtonId::kSettingsList));
+
+  // Now, enable virtual keyboard and spoken feedback.
+  accessibility_controller()->virtual_keyboard().SetEnabled(true);
+  accessibility_controller()->select_to_speak().SetEnabled(true);
+
+  // We should be focused on the first button in the menu.
+  // Order: select to speak, virtual keyboard, settings menu, position.
+  Shell::Get()->accelerator_controller()->PerformActionIfEnabled(
+      AcceleratorAction::FOCUS_SHELF, {});
+  EXPECT_EQ(focus_manager->GetFocusedView(),
+            GetMenuButton(FloatingAccessibilityView::ButtonId::kSelectToSpeak));
+}
+
+TEST_F(FloatingAccessibilityControllerTest, ShowingAlreadyEnabledFeatures) {
+  accessibility_controller()->dictation().SetDialogAccepted();
+  accessibility_controller()->select_to_speak().SetEnabled(true);
+  accessibility_controller()->dictation().SetEnabled(true);
+  accessibility_controller()->virtual_keyboard().SetEnabled(true);
+  SetUpVisibleMenu();
+
+  EXPECT_TRUE(GetMenuButton(FloatingAccessibilityView::ButtonId::kSelectToSpeak)
+                  ->GetVisible());
+  EXPECT_TRUE(GetMenuButton(FloatingAccessibilityView::ButtonId::kDictation)
+                  ->GetVisible());
+  EXPECT_TRUE(
+      GetMenuButton(FloatingAccessibilityView::ButtonId::kVirtualKeyboard)
+          ->GetVisible());
 }
 
 }  // namespace ash

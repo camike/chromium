@@ -7,8 +7,8 @@
 #include <list>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/run_loop.h"
+#include "base/task/current_thread.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/browser_task_environment.h"
@@ -32,7 +32,7 @@ class RecentlyAudibleHelperTest : public testing::Test {
     scoped_context_ =
         std::make_unique<base::TestMockTimeTaskRunner::ScopedContext>(
             task_runner_);
-    base::MessageLoopCurrent::Get()->SetTaskRunner(task_runner_);
+    base::CurrentThread::Get()->SetTaskRunner(task_runner_);
 
     RecentlyAudibleHelper::CreateForWebContents(contents_);
     helper_ = RecentlyAudibleHelper::FromWebContents(contents_);
@@ -44,7 +44,7 @@ class RecentlyAudibleHelperTest : public testing::Test {
 
   void TearDown() override {
     helper_->SetTickClockForTesting(nullptr);
-    subscription_.reset();
+    subscription_ = {};
     task_runner_->RunUntilIdle();
     EXPECT_TRUE(recently_audible_messages_.empty());
 
@@ -115,7 +115,7 @@ class RecentlyAudibleHelperTest : public testing::Test {
   // A test WebContents and its associated helper.
   content::WebContents* contents_;
   RecentlyAudibleHelper* helper_;
-  std::unique_ptr<RecentlyAudibleHelper::Subscription> subscription_;
+  base::CallbackListSubscription subscription_;
 
   std::list<bool> recently_audible_messages_;
 

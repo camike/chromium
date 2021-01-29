@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "base/task/post_task.h"
+#include "build/build_config.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/media/webrtc/media_stream_capture_indicator.h"
 #include "chrome/browser/permissions/permission_manager_factory.h"
@@ -16,14 +17,13 @@
 #include "chrome/browser/usb/usb_tab_helper.h"
 #include "chrome/browser/vr/vr_tab_helper.h"
 #include "chrome/browser/vr/win/vr_browser_renderer_thread_win.h"
-#include "components/content_settings/browser/tab_specific_content_settings.h"
+#include "components/content_settings/browser/page_specific_content_settings.h"
 #include "components/permissions/permission_manager.h"
 #include "components/permissions/permission_result.h"
 #include "content/public/browser/device_service.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/xr_runtime_manager.h"
 #include "device/base/features.h"
-#include "device/vr/buildflags/buildflags.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace vr {
@@ -32,11 +32,17 @@ namespace {
 static constexpr base::TimeDelta kPermissionPromptTimeout =
     base::TimeDelta::FromSeconds(5);
 
+#if defined(OS_WIN)
+// Some runtimes on Windows have quite lengthy lengthy startup animations that
+// may cause indicators/permissions to not be visible during the normal timeout.
+static constexpr base::TimeDelta kFirstWindowsPermissionPromptTimeout =
+    base::TimeDelta::FromSeconds(10);
+#endif
+
 base::TimeDelta GetPermissionPromptTimeout(bool first_time) {
-#if BUILDFLAG(ENABLE_WINDOWS_MR)
-  if (base::FeatureList::IsEnabled(device::features::kWindowsMixedReality) &&
-      first_time)
-    return base::TimeDelta::FromSeconds(10);
+#if defined(OS_WIN)
+  if (first_time)
+    return kFirstWindowsPermissionPromptTimeout;
 #endif
   return kPermissionPromptTimeout;
 }
@@ -324,8 +330,8 @@ void VRUiHostImpl::ShowExternalNotificationPrompt() {
 
   is_external_prompt_showing_in_headset_ = true;
   external_prompt_timeout_task_.Reset(
-      base::BindRepeating(&VRUiHostImpl::RemoveHeadsetNotificationPrompt,
-                          weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&VRUiHostImpl::RemoveHeadsetNotificationPrompt,
+                     weak_ptr_factory_.GetWeakPtr()));
   main_thread_task_runner_->PostDelayedTask(
       FROM_HERE, external_prompt_timeout_task_.callback(),
       kPermissionPromptTimeout);
@@ -382,7 +388,7 @@ void VRUiHostImpl::InitCapturingStates() {
 }
 
 void VRUiHostImpl::PollCapturingState() {
-  poll_capturing_state_task_.Reset(base::BindRepeating(
+  poll_capturing_state_task_.Reset(base::BindOnce(
       &VRUiHostImpl::PollCapturingState, base::Unretained(this)));
   main_thread_task_runner_->PostDelayedTask(
       FROM_HERE, poll_capturing_state_task_.callback(),
@@ -390,30 +396,27 @@ void VRUiHostImpl::PollCapturingState() {
 
   // location, microphone, camera, midi.
   CapturingStateModel active_capturing = active_capturing_;
-  content_settings::TabSpecificContentSettings* settings =
-      content_settings::TabSpecificContentSettings::FromWebContents(
-          web_contents_);
+  // TODO(https://crbug.com/1103176): Plumb the actual frame reference here (we
+  // should get a RFH from VRServiceImpl instead of WebContents)
+  content_settings::PageSpecificContentSettings* settings =
+      content_settings::PageSpecificContentSettings::GetForFrame(
+          web_contents_->GetMainFrame());
+
   if (settings) {
-    const ContentSettingsUsagesState& usages_state =
-        settings->geolocation_usages_state();
-    if (!usages_state.state_map().empty()) {
-      unsigned int state_flags = 0;
-      usages_state.GetDetailedInfo(nullptr, &state_flags);
-      active_capturing.location_access_enabled = !!(
-          state_flags & ContentSettingsUsagesState::TABSTATE_HAS_ANY_ALLOWED);
-    }
+    active_capturing.location_access_enabled =
+        settings->IsContentAllowed(ContentSettingsType::GEOLOCATION);
 
     active_capturing.audio_capture_enabled =
         (settings->GetMicrophoneCameraState() &
-         content_settings::TabSpecificContentSettings::MICROPHONE_ACCESSED) &&
+         content_settings::PageSpecificContentSettings::MICROPHONE_ACCESSED) &&
         !(settings->GetMicrophoneCameraState() &
-          content_settings::TabSpecificContentSettings::MICROPHONE_BLOCKED);
+          content_settings::PageSpecificContentSettings::MICROPHONE_BLOCKED);
 
     active_capturing.video_capture_enabled =
         (settings->GetMicrophoneCameraState() &
-         content_settings::TabSpecificContentSettings::CAMERA_ACCESSED) &
+         content_settings::PageSpecificContentSettings::CAMERA_ACCESSED) &
         !(settings->GetMicrophoneCameraState() &
-          content_settings::TabSpecificContentSettings::CAMERA_BLOCKED);
+          content_settings::PageSpecificContentSettings::CAMERA_BLOCKED);
 
     active_capturing.midi_connected =
         settings->IsContentAllowed(ContentSettingsType::MIDI_SYSEX);
@@ -425,7 +428,8 @@ void VRUiHostImpl::PollCapturingState() {
           ->GetMediaStreamCaptureIndicator();
   active_capturing.screen_capture_enabled =
       indicator->IsBeingMirrored(web_contents_) ||
-      indicator->IsCapturingDesktop(web_contents_);
+      indicator->IsCapturingWindow(web_contents_) ||
+      indicator->IsCapturingDisplay(web_contents_);
 
   // Bluetooth.
   active_capturing.bluetooth_connected =

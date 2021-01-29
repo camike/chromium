@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "ash/public/cpp/app_menu_constants.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
@@ -68,7 +69,7 @@ void AddArcCommandItem(int command_id,
                        const gfx::ImageSkia& icon,
                        apps::mojom::MenuItemsPtr* menu_items) {
   apps::mojom::MenuItemPtr menu_item = apps::mojom::MenuItem::New();
-  menu_item->type = apps::mojom::MenuItemType::kArcCommand;
+  menu_item->type = apps::mojom::MenuItemType::kPublisherCommand;
   menu_item->command_id = command_id;
   menu_item->shortcut_id = shortcut_id;
   menu_item->label = label;
@@ -118,12 +119,7 @@ bool ShouldAddOpenItem(const std::string& app_id,
 
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile);
-  DCHECK(proxy);
-  if (proxy->InstanceRegistry().GetWindows(app_id).empty()) {
-    return true;
-  }
-
-  return false;
+  return proxy->InstanceRegistry().GetWindows(app_id).empty();
 }
 
 bool ShouldAddCloseItem(const std::string& app_id,
@@ -135,12 +131,7 @@ bool ShouldAddCloseItem(const std::string& app_id,
 
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile);
-  DCHECK(proxy);
-  if (proxy->InstanceRegistry().GetWindows(app_id).empty()) {
-    return false;
-  }
-
-  return true;
+  return !proxy->InstanceRegistry().GetWindows(app_id).empty();
 }
 
 void PopulateRadioItemFromMojoMenuItems(
@@ -173,8 +164,10 @@ bool PopulateNewItemFromMojoMenuItems(
     case apps::mojom::MenuItemType::kCommand: {
       const gfx::VectorIcon& icon =
           std::move(get_vector_icon).Run(item->command_id, item->string_id);
-      model->AddItemWithStringIdAndIcon(item->command_id, item->string_id,
-                                        ui::ImageModel::FromVectorIcon(icon));
+      model->AddItemWithStringIdAndIcon(
+          item->command_id, item->string_id,
+          ui::ImageModel::FromVectorIcon(icon, /*color_id=*/-1,
+                                         ash::kAppContextMenuIconSize));
       break;
     }
     case apps::mojom::MenuItemType::kSubmenu:
@@ -184,12 +177,13 @@ bool PopulateNewItemFromMojoMenuItems(
             std::move(get_vector_icon).Run(item->command_id, item->string_id);
         model->AddActionableSubmenuWithStringIdAndIcon(
             item->command_id, item->string_id, submenu,
-            ui::ImageModel::FromVectorIcon(icon));
+            ui::ImageModel::FromVectorIcon(icon, /*color_id=*/-1,
+                                           ash::kAppContextMenuIconSize));
       }
       break;
     case apps::mojom::MenuItemType::kRadio:
     case apps::mojom::MenuItemType::kSeparator:
-    case apps::mojom::MenuItemType::kArcCommand:
+    case apps::mojom::MenuItemType::kPublisherCommand:
       NOTREACHED();
       return false;
   }
@@ -204,7 +198,7 @@ void PopulateItemFromMojoMenuItems(
     case apps::mojom::MenuItemType::kSeparator:
       model->AddSeparator(static_cast<ui::MenuSeparatorType>(item->command_id));
       break;
-    case apps::mojom::MenuItemType::kArcCommand: {
+    case apps::mojom::MenuItemType::kPublisherCommand: {
       model->AddItemWithIcon(item->command_id, base::UTF8ToUTF16(item->label),
                              ui::ImageModel::FromImageSkia(item->image));
       arc::ArcAppShortcutItem arc_shortcut_item;
@@ -218,6 +212,23 @@ void PopulateItemFromMojoMenuItems(
       NOTREACHED();
       break;
   }
+}
+
+base::StringPiece MenuTypeToString(apps::mojom::MenuType menu_type) {
+  switch (menu_type) {
+    case apps::mojom::MenuType::kShelf:
+      return "shelf";
+    case apps::mojom::MenuType::kAppList:
+      return "applist";
+  }
+}
+
+apps::mojom::MenuType MenuTypeFromString(base::StringPiece menu_type) {
+  if (base::LowerCaseEqualsASCII(menu_type, "shelf"))
+    return apps::mojom::MenuType::kShelf;
+  if (base::LowerCaseEqualsASCII(menu_type, "applist"))
+    return apps::mojom::MenuType::kAppList;
+  return apps::mojom::MenuType::kShelf;
 }
 
 }  // namespace apps

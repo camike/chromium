@@ -10,9 +10,10 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observation.h"
 #include "base/timer/timer.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/views/tabs/tab_drag_context.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_types.h"
@@ -20,6 +21,7 @@
 #include "ui/base/models/list_selection_model.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
 
 namespace ui {
@@ -72,6 +74,8 @@ class TabDragController : public views::WidgetObserver {
   static const int kVerticalDetachMagnetism;
 
   TabDragController();
+  TabDragController(const TabDragController&) = delete;
+  TabDragController& operator=(const TabDragController&) = delete;
   ~TabDragController() override;
 
   // Initializes TabDragController to drag the views in |dragging_views|
@@ -126,6 +130,11 @@ class TabDragController : public views::WidgetObserver {
     return current_state_ == DragState::kDraggingWindow;
   }
 
+  // Returns the tab group being dragged, if any. Will only return a value if
+  // the user is dragging a tab group header, not an individual tab or tabs from
+  // a group.
+  const base::Optional<tab_groups::TabGroupId>& group() const { return group_; }
+
   // Returns true if currently dragging a tab with |contents|.
   bool IsDraggingTab(content::WebContents* contents);
 
@@ -138,7 +147,7 @@ class TabDragController : public views::WidgetObserver {
  private:
   friend class TabDragControllerTest;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   class DeferredTargetTabstripObserver;
 #endif
 
@@ -219,6 +228,8 @@ class TabDragController : public views::WidgetObserver {
   // Stores the date associated with a single tab that is being dragged.
   struct TabDragData {
     TabDragData();
+    TabDragData(const TabDragData&) = delete;
+    TabDragData& operator=(const TabDragData&) = delete;
     ~TabDragData();
     TabDragData(TabDragData&&);
 
@@ -249,9 +260,6 @@ class TabDragController : public views::WidgetObserver {
     // Stores the information of the group the tab is in, or nullopt if tab is
     // not grouped.
     base::Optional<TabGroupData> tab_group_data;
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(TabDragData);
   };
 
   typedef std::vector<TabDragData> DragData;
@@ -263,6 +271,7 @@ class TabDragController : public views::WidgetObserver {
   // Overriden from views::WidgetObserver:
   void OnWidgetBoundsChanged(views::Widget* widget,
                              const gfx::Rect& new_bounds) override;
+  void OnWidgetDestroyed(views::Widget* widget) override;
 
   // Forget the source tabstrip. It doesn't exist any more, so it doesn't
   // make sense to insert dragged tabs back into it if the drag is reverted.
@@ -314,8 +323,9 @@ class TabDragController : public views::WidgetObserver {
   void MoveAttachedToNextStackedIndex(const gfx::Point& point_in_screen);
   void MoveAttachedToPreviousStackedIndex(const gfx::Point& point_in_screen);
 
-  // Handles dragging tabs while the tabs are attached.
-  void MoveAttached(const gfx::Point& point_in_screen);
+  // Handles dragging tabs while the tabs are attached. |just_attached| should
+  // be true iff this is the first call to MoveAttached after attaching.
+  void MoveAttached(const gfx::Point& point_in_screen, bool just_attached);
 
   // If necessary starts the |move_stacked_timer_|. The timer is started if
   // close enough to an edge with stacked tabs.
@@ -535,7 +545,7 @@ class TabDragController : public views::WidgetObserver {
   // null if the dragged Tab is detached.
   TabDragContext* attached_context_;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Observe the target TabDragContext to attach to after the drag
   // ends. It's only possible to happen in Chrome OS tablet mode, if the dragged
   // tabs are dragged over an overview window, we should wait until the drag
@@ -685,9 +695,10 @@ class TabDragController : public views::WidgetObserver {
 
   std::unique_ptr<WindowFinder> window_finder_;
 
-  base::WeakPtrFactory<TabDragController> weak_factory_{this};
+  base::ScopedObservation<views::Widget, views::WidgetObserver>
+      widget_observation_{this};
 
-  DISALLOW_COPY_AND_ASSIGN(TabDragController);
+  base::WeakPtrFactory<TabDragController> weak_factory_{this};
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_TABS_TAB_DRAG_CONTROLLER_H_

@@ -16,9 +16,10 @@ import androidx.fragment.app.FragmentTransaction;
 
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
-import org.chromium.chrome.browser.signin.IdentityServicesProvider;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.signin.services.IdentityServicesProvider;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
-import org.chromium.chrome.browser.sync.SyncController;
+import org.chromium.chrome.browser.sync.SyncErrorNotifier;
 import org.chromium.components.signin.base.CoreAccountInfo;
 import org.chromium.components.signin.identitymanager.ConsentLevel;
 
@@ -50,8 +51,9 @@ public class PassphraseActivity extends AppCompatActivity
     protected void onResume() {
         super.onResume();
         Account account = CoreAccountInfo.getAndroidAccountFrom(
-                IdentityServicesProvider.get().getIdentityManager().getPrimaryAccountInfo(
-                        ConsentLevel.SYNC));
+                IdentityServicesProvider.get()
+                        .getIdentityManager(Profile.getLastUsedRegularProfile())
+                        .getPrimaryAccountInfo(ConsentLevel.SYNC));
         if (account == null) {
             finish();
             return;
@@ -132,7 +134,7 @@ public class PassphraseActivity extends AppCompatActivity
     @Override
     public void onPassphraseCanceled() {
         // Re add the notification.
-        SyncController.get().getSyncNotificationController().syncStateChanged();
+        SyncErrorNotifier.get().syncStateChanged();
         finish();
     }
 

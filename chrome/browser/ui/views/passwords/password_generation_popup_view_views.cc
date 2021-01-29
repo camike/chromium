@@ -24,6 +24,8 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/grid_layout.h"
+#include "ui/views/metadata/metadata_header_macros.h"
+#include "ui/views/metadata/metadata_impl_macros.h"
 #include "ui/views/widget/widget.h"
 
 namespace {
@@ -39,6 +41,7 @@ constexpr int kPasswordGenerationMaxWidth = 480;
 class PasswordGenerationPopupViewViews::GeneratedPasswordBox
     : public views::View {
  public:
+  METADATA_HEADER(GeneratedPasswordBox);
   GeneratedPasswordBox() = default;
   ~GeneratedPasswordBox() override = default;
 
@@ -84,7 +87,7 @@ void PasswordGenerationPopupViewViews::GeneratedPasswordBox::Init(
   layout->StartRow(views::GridLayout::kFixedSize, 0);
 
   suggestion_label_ = layout->AddView(std::make_unique<views::Label>(
-      controller_->SuggestedText(), ChromeTextContext::CONTEXT_BODY_TEXT_LARGE,
+      controller_->SuggestedText(), views::style::CONTEXT_DIALOG_BODY_TEXT,
       controller_->state() ==
               PasswordGenerationPopupController::kOfferGeneration
           ? views::style::STYLE_PRIMARY
@@ -92,7 +95,7 @@ void PasswordGenerationPopupViewViews::GeneratedPasswordBox::Init(
 
   DCHECK(!password_label_);
   password_label_ = layout->AddView(std::make_unique<views::Label>(
-      controller_->password(), ChromeTextContext::CONTEXT_BODY_TEXT_LARGE,
+      controller_->password(), views::style::CONTEXT_DIALOG_BODY_TEXT,
       STYLE_SECONDARY_MONOSPACED));
 }
 
@@ -144,16 +147,21 @@ void PasswordGenerationPopupViewViews::GeneratedPasswordBox::BuildColumnSet(
     views::GridLayout* layout) {
   views::ColumnSet* column_set = layout->AddColumnSet(0);
   column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER,
-                        0 /* resize_percent */, views::GridLayout::USE_PREF, 0,
-                        0);
+                        0 /* resize_percent */,
+                        views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
   column_set->AddPaddingColumn(
       0 /* resize_percent */,
       ChromeLayoutProvider::Get()->GetDistanceMetric(
           DISTANCE_BETWEEN_PRIMARY_AND_SECONDARY_LABELS_HORIZONTAL));
   column_set->AddColumn(views::GridLayout::TRAILING, views::GridLayout::CENTER,
-                        1.0 /* resize_percent */, views::GridLayout::USE_PREF,
-                        0, 0);
+                        1.0 /* resize_percent */,
+                        views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
 }
+
+BEGIN_NESTED_METADATA(PasswordGenerationPopupViewViews,
+                      GeneratedPasswordBox,
+                      views::View)
+END_METADATA
 
 PasswordGenerationPopupViewViews::PasswordGenerationPopupViewViews(
     PasswordGenerationPopupController* controller,
@@ -195,7 +203,7 @@ void PasswordGenerationPopupViewViews::UpdateBoundsAndRedrawPopup() {
 
 void PasswordGenerationPopupViewViews::PasswordSelectionUpdated() {
   if (controller_->password_selected())
-    NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
+    NotifyAXSelection(this);
 
   password_view_->UpdateBackground(controller_->password_selected()
                                        ? GetSelectedBackgroundColor()
@@ -226,7 +234,7 @@ void PasswordGenerationPopupViewViews::CreateLayoutAndChildren() {
   PasswordSelectionUpdated();
 
   help_label_ = new views::Label(controller_->HelpText(),
-                                 ChromeTextContext::CONTEXT_BODY_TEXT_LARGE,
+                                 views::style::CONTEXT_DIALOG_BODY_TEXT,
                                  views::style::STYLE_SECONDARY);
   help_label_->SetMultiLine(true);
   help_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);

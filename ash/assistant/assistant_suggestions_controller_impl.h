@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "ash/assistant/assistant_proactive_suggestions_controller.h"
 #include "ash/assistant/model/assistant_suggestions_model.h"
 #include "ash/assistant/model/assistant_ui_model_observer.h"
 #include "ash/public/cpp/assistant/assistant_state.h"
@@ -15,13 +14,9 @@
 #include "ash/public/cpp/assistant/controller/assistant_controller_observer.h"
 #include "ash/public/cpp/assistant/controller/assistant_suggestions_controller.h"
 #include "base/macros.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 
 namespace ash {
-
-class AssistantControllerImpl;
-class AssistantSuggestionsModelObserver;
-class ProactiveSuggestions;
 
 // The implementation of the Assistant controller in charge of suggestions.
 class AssistantSuggestionsControllerImpl
@@ -30,14 +25,11 @@ class AssistantSuggestionsControllerImpl
       public AssistantUiModelObserver,
       public AssistantStateObserver {
  public:
-  explicit AssistantSuggestionsControllerImpl(
-      AssistantControllerImpl* assistant_controller);
+  AssistantSuggestionsControllerImpl();
   ~AssistantSuggestionsControllerImpl() override;
 
   // AssistantSuggestionsController:
   const AssistantSuggestionsModel* GetModel() const override;
-  void AddModelObserver(AssistantSuggestionsModelObserver*) override;
-  void RemoveModelObserver(AssistantSuggestionsModelObserver*) override;
 
   // AssistantControllerObserver:
   void OnAssistantControllerConstructed() override;
@@ -50,31 +42,23 @@ class AssistantSuggestionsControllerImpl
       base::Optional<AssistantEntryPoint> entry_point,
       base::Optional<AssistantExitPoint> exit_point) override;
 
-  // Invoked when the active set of |proactive_suggestions| has changed. Note
-  // that this method should only be called by the sub-controller for the
-  // proactive suggestions feature to update model state.
-  void OnProactiveSuggestionsChanged(
-      scoped_refptr<const ProactiveSuggestions> proactive_suggestions);
-
  private:
   // AssistantStateObserver:
   void OnAssistantContextEnabled(bool enabled) override;
+  void OnAssistantOnboardingModeChanged(
+      chromeos::assistant::prefs::AssistantOnboardingMode onboarding_mode)
+      override;
 
   void UpdateConversationStarters();
   void FetchConversationStarters();
   void ProvideConversationStarters();
 
-  AssistantControllerImpl* const assistant_controller_;  // Owned by Shell.
-
-  // A sub-controller for the proactive suggestions feature. Note that this will
-  // only exist if the proactive suggestions feature is enabled.
-  std::unique_ptr<AssistantProactiveSuggestionsController>
-      proactive_suggestions_controller_;
+  void UpdateOnboardingSuggestions();
 
   AssistantSuggestionsModel model_;
 
-  ScopedObserver<AssistantController, AssistantControllerObserver>
-      assistant_controller_observer_{this};
+  base::ScopedObservation<AssistantController, AssistantControllerObserver>
+      assistant_controller_observation_{this};
 
   // A WeakPtrFactory used to manage lifecycle of conversation starter requests
   // to the server (via the dedicated ConversationStartersClient).

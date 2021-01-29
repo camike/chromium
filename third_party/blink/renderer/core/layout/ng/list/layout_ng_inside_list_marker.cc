@@ -12,13 +12,15 @@ LayoutNGInsideListMarker::LayoutNGInsideListMarker(Element* element)
     : LayoutInline(element) {}
 
 bool LayoutNGInsideListMarker::IsOfType(LayoutObjectType type) const {
+  NOT_DESTROYED();
   return type == kLayoutObjectNGInsideListMarker ||
          LayoutInline::IsOfType(type);
 }
 
 PositionWithAffinity LayoutNGInsideListMarker::PositionForPoint(
     const PhysicalOffset&) const {
-  return CreatePositionWithAffinity(0);
+  NOT_DESTROYED();
+  return PositionBeforeThis();
 }
 
 }  // namespace blink

@@ -6,10 +6,10 @@ package org.chromium.components.browser_ui.widget;
 
 import android.content.Context;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
-import android.util.LayoutDirection;
 import android.view.View;
 import android.view.View.MeasureSpec;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -22,12 +22,14 @@ import org.chromium.base.test.params.ParameterAnnotations.UseRunnerDelegate;
 import org.chromium.base.test.params.ParameterProvider;
 import org.chromium.base.test.params.ParameterSet;
 import org.chromium.base.test.params.ParameterizedRunner;
+import org.chromium.base.test.util.Batch;
 
 import java.util.Arrays;
 import java.util.List;
 
 /** Tests for the {@link WrappingLayout} class. */
 @RunWith(ParameterizedRunner.class)
+@Batch(Batch.UNIT_TESTS)
 @UseRunnerDelegate(BaseJUnit4RunnerDelegate.class)
 public class WrappingLayoutTest {
     /**
@@ -525,7 +527,7 @@ public class WrappingLayoutTest {
             ViewExpectation expectationB, ViewExpectation expectationC) {
         WrappingLayoutSubclass layout = WrappingLayoutSubclass.create(
                 mContext, leftTopPadding, bottomRightPadding, spacing);
-        layout.setLayoutDirection(LayoutDirection.RTL);
+        layout.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         layout.addTestViews(margin);
 
         layout.layoutAtSize(width, height, specWidth, specHeight, 0, 0);

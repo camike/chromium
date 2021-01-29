@@ -2,17 +2,30 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// #import {MetadataItem} from './metadata/metadata_item.m.js';
+// #import {VolumeManager} from '../../../externs/volume_manager.m.js';
+// #import {FileMetadataFormatter} from './ui/file_metadata_formatter.m.js';
+// #import {QuickViewModel} from './quick_view_model.m.js';
+// #import {MetadataModel} from './metadata/metadata_model.m.js';
+// #import {PathComponent} from './path_component.m.js';
+// #import {FileType} from '../../common/js/file_type.m.js';
+// #import {util} from '../../common/js/util.m.js';
+// #import {FilesQuickView} from '../elements/files_quick_view.m.js';
+// #import {assert} from 'chrome://resources/js/assert.m.js';
+
 /**
  * Controller of metadata box.
  * This should be initialized with |init| method.
  */
-class MetadataBoxController {
+/* #export */ class MetadataBoxController {
   /**
-   * @param{!MetadataModel} metadataModel
-   * @param{!QuickViewModel} quickViewModel
-   * @param{!FileMetadataFormatter} fileMetadataFormatter
+   * @param {!MetadataModel} metadataModel
+   * @param {!QuickViewModel} quickViewModel
+   * @param {!FileMetadataFormatter} fileMetadataFormatter
+   * @param {!VolumeManager} volumeManager
    */
-  constructor(metadataModel, quickViewModel, fileMetadataFormatter) {
+  constructor(
+      metadataModel, quickViewModel, fileMetadataFormatter, volumeManager) {
     /**
      * @type {!MetadataModel}
      * @private
@@ -26,7 +39,7 @@ class MetadataBoxController {
     this.quickViewModel_ = quickViewModel;
 
     /**
-     * @type {FilesMetadataBox} metadataBox
+     * @type {FilesMetadataBoxElement} metadataBox
      * @private
      */
     this.metadataBox_ = null;
@@ -42,6 +55,12 @@ class MetadataBoxController {
      * @private
      */
     this.fileMetadataFormatter_ = fileMetadataFormatter;
+
+    /**
+     * @type {!VolumeManager}
+     * @private
+     */
+    this.volumeManager_ = volumeManager;
 
     /**
      * @type {Entry}
@@ -152,13 +171,24 @@ class MetadataBoxController {
     this.updateModificationTime_(entry, items);
 
     if (!entry.isDirectory) {
-      const sniffMimeType = (item.externalFileUrl || item.alternateUrl) ?
-          'contentMimeType' :
-          'mediaMimeType';
-      this.metadataModel_.get([entry], [sniffMimeType]).then(items => {
-        this.metadataBox_.mediaMimeType = items[0][sniffMimeType] || '';
-        this.metadataBox_.metadataRendered('mime');
-      });
+      let media = [];  // Extra metadata types for local video media.
+
+      let sniffMimeType = 'mediaMimeType';
+      if (item.externalFileUrl || item.alternateUrl) {
+        sniffMimeType = 'contentMimeType';
+      } else if (type === 'video') {
+        media = MetadataBoxController.EXTRA_METADATA_NAMES;
+      }
+
+      this.metadataModel_.get([entry], [sniffMimeType].concat(media))
+          .then(items => {
+            this.metadataBox_.mediaMimeType = items[0][sniffMimeType] || '';
+            this.metadataBox_.metadataRendered('mime');
+          })
+          .then(() => {
+            this.metadataBox_.fileLocation = this.getFileLocationLabel_(entry);
+            this.metadataBox_.metadataRendered('location');
+          });
     }
 
     if (['image', 'video', 'audio'].includes(type)) {
@@ -284,6 +314,18 @@ class MetadataBoxController {
       this.metadataBox_.isSizeLoading = false;
       this.metadataBox_.metadataRendered('size');
     });
+  }
+
+  /**
+   * Returns a label to display the file's location.
+   * @param {!Entry} entry
+   * @return {string}
+   * @private
+   */
+  getFileLocationLabel_(entry) {
+    const components =
+        PathComponent.computeComponentsFromEntry(entry, this.volumeManager_);
+    return components.map(c => c.name).join('/');
   }
 }
 

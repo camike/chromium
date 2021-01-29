@@ -5,15 +5,18 @@
 #import "ios/chrome/browser/ui/browser_view/browser_coordinator.h"
 
 #include "base/files/file_util.h"
-#include "base/test/scoped_feature_list.h"
 #include "ios/chrome/browser/download/download_directory_util.h"
 #import "ios/chrome/browser/download/external_app_util.h"
 #include "ios/chrome/browser/main/test_browser.h"
 #import "ios/chrome/browser/ui/commands/browser_coordinator_commands.h"
 #import "ios/chrome/browser/ui/commands/command_dispatcher.h"
-#import "ios/chrome/browser/ui/download/features.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_features.h"
+#import "ios/chrome/browser/ui/incognito_reauth/incognito_reauth_scene_agent.h"
+#import "ios/chrome/browser/ui/main/scene_state.h"
+#import "ios/chrome/browser/ui/main/scene_state_browser_agent.h"
 #import "ios/chrome/browser/url_loading/url_loading_notifier_browser_agent.h"
+#import "ios/chrome/browser/web/web_navigation_browser_agent.h"
+#import "ios/chrome/common/ui/reauthentication/reauthentication_module.h"
 #include "ios/web/public/test/web_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
@@ -30,8 +33,19 @@ class BrowserCoordinatorTest : public PlatformTest {
  protected:
   BrowserCoordinatorTest()
       : base_view_controller_([[UIViewController alloc] init]),
-        browser_(std::make_unique<TestBrowser>()) {
+        browser_(std::make_unique<TestBrowser>()),
+        scene_state_([[SceneState alloc] initWithAppState:nil]) {
     UrlLoadingNotifierBrowserAgent::CreateForBrowser(browser_.get());
+    SceneStateBrowserAgent::CreateForBrowser(browser_.get(), scene_state_);
+    WebNavigationBrowserAgent::CreateForBrowser(browser_.get());
+
+    IncognitoReauthSceneAgent* reauthAgent = [[IncognitoReauthSceneAgent alloc]
+        initWithReauthModule:[[ReauthenticationModule alloc] init]];
+    [scene_state_ addAgent:reauthAgent];
+
+    CommandDispatcher* dispatcher = browser_->GetCommandDispatcher();
+    [dispatcher startDispatchingToTarget:reauthAgent
+                             forProtocol:@protocol(IncognitoReauthCommands)];
   }
 
   BrowserCoordinator* GetBrowserCoordinator() {
@@ -43,15 +57,11 @@ class BrowserCoordinatorTest : public PlatformTest {
   web::WebTaskEnvironment task_environment_;
   UIViewController* base_view_controller_;
   std::unique_ptr<TestBrowser> browser_;
+  SceneState* scene_state_;
 };
 
 // Tests if the URL to open the downlads directory from files.app is valid.
 TEST_F(BrowserCoordinatorTest, ShowDownloadsFolder) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitWithFeaturesAndParameters(
-      {{kOpenDownloadsInFilesApp, {}},
-       {fullscreen::features::kFullscreenControllerBrowserScoped, {}}},
-      {});
 
   base::FilePath download_dir;
   GetDownloadsDirectory(&download_dir);

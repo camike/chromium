@@ -5,8 +5,9 @@
 #include "chrome/browser/crash_upload_list/crash_upload_list.h"
 
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 
-#if defined(OS_MACOSX) || defined(OS_WIN)
+#if defined(OS_MAC) || defined(OS_WIN)
 #include "chrome/browser/crash_upload_list/crash_upload_list_crashpad.h"
 #else
 #include "base/files/file_path.h"
@@ -24,7 +25,7 @@
 #endif
 
 scoped_refptr<UploadList> CreateCrashUploadList() {
-#if defined(OS_MACOSX) || defined(OS_WIN)
+#if defined(OS_MAC) || defined(OS_WIN)
   return new CrashUploadListCrashpad();
 #elif defined(OS_ANDROID)
   base::FilePath cache_dir;
@@ -38,7 +39,7 @@ scoped_refptr<UploadList> CreateCrashUploadList() {
 // ChromeOS uses crash_sender as its uploader even when Crashpad is enabled,
 // which isn't compatible with CrashUploadListCrashpad. crash_sender continues
 // to log uploads in CrashUploadList::kReporterLogFilename.
-#if !defined(OS_CHROMEOS)
+#if !(BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS))
   if (crash_reporter::IsCrashpadEnabled()) {
     return new CrashUploadListCrashpad();
   }
@@ -49,5 +50,5 @@ scoped_refptr<UploadList> CreateCrashUploadList() {
   base::FilePath upload_log_path =
       crash_dir_path.AppendASCII(CrashUploadList::kReporterLogFilename);
   return new TextLogUploadList(upload_log_path);
-#endif  // defined(OS_MACOSX) || defined(OS_WIN)
+#endif  // defined(OS_MAC) || defined(OS_WIN)
 }

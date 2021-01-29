@@ -14,7 +14,6 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/json_pref_store.h"
 #include "components/prefs/pref_filter.h"
@@ -105,10 +104,10 @@ double ChromeZoomLevelPrefs::GetDefaultZoomLevelPref() const {
   return default_zoom_level;
 }
 
-std::unique_ptr<ChromeZoomLevelPrefs::DefaultZoomLevelSubscription>
+base::CallbackListSubscription
 ChromeZoomLevelPrefs::RegisterDefaultZoomLevelCallback(
-    const base::Closure& callback) {
-  return default_zoom_changed_callbacks_.Add(callback);
+    base::RepeatingClosure callback) {
+  return default_zoom_changed_callbacks_.Add(std::move(callback));
 }
 
 void ChromeZoomLevelPrefs::OnZoomLevelChanged(
@@ -140,7 +139,7 @@ void ChromeZoomLevelPrefs::OnZoomLevelChanged(
   }
 
   if (modification_is_removal) {
-    host_zoom_dictionary_weak->RemoveWithoutPathExpansion(change.host, nullptr);
+    host_zoom_dictionary_weak->RemoveKey(change.host);
   } else {
     base::DictionaryValue dict;
     dict.SetDouble(kZoomLevelPath, level);
@@ -212,7 +211,7 @@ void ChromeZoomLevelPrefs::ExtractPerHostZoomLevels(
     host_zoom_dictionaries->GetDictionary(partition_key_,
                                           &host_zoom_dictionary);
     for (const std::string& s : keys_to_remove)
-      host_zoom_dictionary->RemoveWithoutPathExpansion(s, nullptr);
+      host_zoom_dictionary->RemoveKey(s);
   }
 }
 
@@ -234,8 +233,8 @@ void ChromeZoomLevelPrefs::InitHostZoomMap(
   if (host_zoom_dictionaries->GetDictionary(partition_key_,
                                             &host_zoom_dictionary)) {
     // Since we're calling this before setting up zoom_subscription_ below we
-    // don't need to worry that host_zoom_dictionary is indirectly affected
-    // by calls to HostZoomMap::SetZoomLevelForHost().
+    // don't need to worry that host_zoom_dictionary is indirectly affected by
+    // calls to HostZoomMap::SetZoomLevelForHost().
     ExtractPerHostZoomLevels(host_zoom_dictionary,
                              true /* sanitize_partition_host_zoom_levels */);
   }

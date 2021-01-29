@@ -22,8 +22,8 @@
 #include "base/no_destructor.h"
 #include "base/numerics/ranges.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
+#include "chromecast/media/audio/wav_header.h"
 #include "chromecast/media/cma/backend/cast_audio_json.h"
-#include "chromecast/media/cma/backend/cplay/wav_header.h"
 #include "chromecast/media/cma/backend/mixer/mixer_input.h"
 #include "chromecast/media/cma/backend/mixer/mixer_pipeline.h"
 #include "chromecast/media/cma/backend/mixer/post_processing_pipeline_impl.h"
@@ -129,8 +129,18 @@ class WavMixerInputSource : public MixerInput::Source {
                               ::media::AudioBus* buffer) override {
     CHECK(buffer);
     size_t bytes_written;
-    CHECK_EQ(num_frames, buffer->frames());
-    CHECK(input_handler_->CopyTo(buffer, cursor_, &bytes_written));
+    CHECK_LE(num_frames, buffer->frames());
+    if (num_frames < buffer->frames()) {
+      std::vector<float*> channel_data;
+      for (int i = 0; i < buffer->channels(); ++i) {
+        channel_data.push_back(buffer->channel(i));
+      }
+      std::unique_ptr<::media::AudioBus> buffer_wrapper =
+          ::media::AudioBus::WrapVector(num_frames, channel_data);
+      CHECK(input_handler_->CopyTo(buffer_wrapper.get(), cursor_, &bytes_written));
+    } else {
+      CHECK(input_handler_->CopyTo(buffer, cursor_, &bytes_written));
+    }
     cursor_ += bytes_written;
     return bytes_written / bytes_per_frame_;
   }
@@ -246,7 +256,7 @@ Parameters ReadArgs(int argc, char* argv[]) {
   Parameters params;
   params.cast_audio_json_path = CastAudioJson::GetFilePath();
   int opt;
-  while ((opt = getopt(argc, argv, "i:o:c:v:d:r:")) != -1) {
+  while ((opt = getopt(argc, argv, "i:o:c:v:d:r:s")) != -1) {
     switch (opt) {
       case 'i':
         params.input_file_path = base::FilePath(optarg);

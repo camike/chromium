@@ -7,6 +7,8 @@
 #include <utility>
 
 #include "base/strings/string_util.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
@@ -43,6 +45,7 @@ base::string16 GetMessageTextForOrigin(
 
 }  // namespace
 
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 // static
 void ExternalProtocolHandler::RunExternalProtocolDialog(
     const GURL& url,
@@ -63,6 +66,7 @@ void ExternalProtocolHandler::RunExternalProtocolDialog(
   new ExternalProtocolDialog(web_contents, url, program_name,
                              initiating_origin);
 }
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 ExternalProtocolDialog::ExternalProtocolDialog(
     WebContents* web_contents,
@@ -73,27 +77,26 @@ ExternalProtocolDialog::ExternalProtocolDialog(
       url_(url),
       program_name_(program_name),
       initiating_origin_(initiating_origin) {
-  DialogDelegate::SetDefaultButton(ui::DIALOG_BUTTON_CANCEL);
-  DialogDelegate::SetButtonLabel(
-      ui::DIALOG_BUTTON_OK,
-      l10n_util::GetStringFUTF16(IDS_EXTERNAL_PROTOCOL_OK_BUTTON_TEXT,
-                                 program_name_));
-  DialogDelegate::SetButtonLabel(
+  SetDefaultButton(ui::DIALOG_BUTTON_CANCEL);
+  SetButtonLabel(ui::DIALOG_BUTTON_OK,
+                 l10n_util::GetStringFUTF16(
+                     IDS_EXTERNAL_PROTOCOL_OK_BUTTON_TEXT, program_name_));
+  SetButtonLabel(
       ui::DIALOG_BUTTON_CANCEL,
       l10n_util::GetStringUTF16(IDS_EXTERNAL_PROTOCOL_CANCEL_BUTTON_TEXT));
 
-  DialogDelegate::SetAcceptCallback(base::BindOnce(
-      &ExternalProtocolDialog::OnDialogAccepted, base::Unretained(this)));
-  DialogDelegate::SetCancelCallback(base::BindOnce(
+  SetAcceptCallback(base::BindOnce(&ExternalProtocolDialog::OnDialogAccepted,
+                                   base::Unretained(this)));
+  SetCancelCallback(base::BindOnce(
       &ExternalProtocolHandler::RecordHandleStateMetrics,
       false /* checkbox_selected */, ExternalProtocolHandler::BLOCK));
-  DialogDelegate::SetCloseCallback(base::BindOnce(
+  SetCloseCallback(base::BindOnce(
       &ExternalProtocolHandler::RecordHandleStateMetrics,
       false /* checkbox_selected */, ExternalProtocolHandler::BLOCK));
+  SetModalType(ui::MODAL_TYPE_CHILD);
 
-  views::MessageBoxView::InitParams params(
-      GetMessageTextForOrigin(initiating_origin_));
-  message_box_view_ = new views::MessageBoxView(params);
+  message_box_view_ =
+      new views::MessageBoxView(GetMessageTextForOrigin(initiating_origin_));
 
   ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
   set_margins(
@@ -173,16 +176,12 @@ views::View* ExternalProtocolDialog::GetContentsView() {
   return message_box_view_;
 }
 
-ui::ModalType ExternalProtocolDialog::GetModalType() const {
-  return ui::MODAL_TYPE_CHILD;
-}
-
 views::Widget* ExternalProtocolDialog::GetWidget() {
-  return message_box_view_->GetWidget();
+  return message_box_view_ ? message_box_view_->GetWidget() : nullptr;
 }
 
 const views::Widget* ExternalProtocolDialog::GetWidget() const {
-  return message_box_view_->GetWidget();
+  return message_box_view_ ? message_box_view_->GetWidget() : nullptr;
 }
 
 void ExternalProtocolDialog::SetRememberSelectionCheckboxCheckedForTesting(

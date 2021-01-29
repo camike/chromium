@@ -14,8 +14,8 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -39,6 +39,7 @@
 #include "base/threading/thread.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
@@ -77,7 +78,7 @@
 #include "chrome/browser/ui/webui/theme_source.h"
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include <map>
 
 #include "base/base64.h"
@@ -101,7 +102,7 @@ constexpr char kCreditsJsPath[] = "credits.js";
 constexpr char kStatsJsPath[] = "stats.js";
 constexpr char kStringsJsPath[] = "strings.js";
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 
 constexpr char kKeyboardUtilsPath[] = "keyboard_utils.js";
 
@@ -437,10 +438,10 @@ class CrostiniCreditsHandler
       ResponseOnUIThread();
       return;
     }
-    auto* component_manager =
+    auto component_manager =
         g_browser_process->platform_part()->cros_component_manager();
     if (!component_manager) {
-      LoadCredits(base::FilePath(chrome::kLinuxCreditsPath));
+      RespondWithPlaceholder();
       return;
     }
     component_manager->Load(
@@ -461,8 +462,8 @@ class CrostiniCreditsHandler
 
   void LoadCrostiniCreditsFileAsync(base::FilePath credits_file_path) {
     if (!base::ReadFileToString(credits_file_path, &contents_)) {
-      // File with credits not found, ResponseOnUIThread will load credits
-      // from resources if contents_ is empty.
+      // File with credits not found, ResponseOnUIThread will load a placeholder
+      // if contents_ is empty.
       contents_.clear();
     }
   }
@@ -473,18 +474,19 @@ class CrostiniCreditsHandler
       LoadCredits(path.Append(kTerminaCreditsPath));
       return;
     }
-    LoadCredits(base::FilePath(chrome::kLinuxCreditsPath));
+    RespondWithPlaceholder();
+  }
+
+  void RespondWithPlaceholder() {
+    contents_.clear();
+    ResponseOnUIThread();
   }
 
   void ResponseOnUIThread() {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
-    // If we fail to load Linux credits from disk, load the placeholder from
-    // resources.
-    // TODO(rjwright): Add a linux-specific placeholder in resources.
+    // If we fail to load Linux credits from disk, use the placeholder.
     if (contents_.empty() && path_ != kKeyboardUtilsPath) {
-      contents_ =
-          ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(
-              IDR_OS_CREDITS_HTML);
+      contents_ = l10n_util::GetStringUTF8(IDS_CROSTINI_CREDITS_PLACEHOLDER);
     }
     std::move(callback_).Run(base::RefCountedString::TakeString(&contents_));
   }
@@ -544,14 +546,28 @@ std::string ChromeURLs() {
   std::string html;
   AppendHeader(&html, 0, "Chrome URLs");
   AppendBody(&html);
+
   html += "<h2>List of Chrome URLs</h2>\n<ul>\n";
   std::vector<std::string> hosts(
       chrome::kChromeHostURLs,
       chrome::kChromeHostURLs + chrome::kNumberOfChromeHostURLs);
   std::sort(hosts.begin(), hosts.end());
-  for (std::vector<std::string>::const_iterator i = hosts.begin();
-       i != hosts.end(); ++i)
-    html += "<li><a href='chrome://" + *i + "/'>chrome://" + *i + "</a></li>\n";
+  for (const std::string& host : hosts) {
+    html +=
+        "<li><a href='chrome://" + host + "/'>chrome://" + host + "</a></li>\n";
+  }
+
+  html += "</ul><h2>List of chrome://internals pages</h2>\n<ul>\n";
+  std::vector<std::string> internals_paths(
+      chrome::kChromeInternalsPathURLs,
+      chrome::kChromeInternalsPathURLs +
+          chrome::kNumberOfChromeInternalsPathURLs);
+  std::sort(internals_paths.begin(), internals_paths.end());
+  for (const std::string& path : internals_paths) {
+    html += "<li><a href='chrome://internals/" + path +
+            "'>chrome://internals/" + path + "</a></li>\n";
+  }
+
   html += "</ul>\n<h2>For Debug</h2>\n"
       "<p>The following pages are for debugging purposes only. Because they "
       "crash or hang the renderer, they're not linked directly; you can type "
@@ -559,11 +575,12 @@ std::string ChromeURLs() {
   for (size_t i = 0; i < chrome::kNumberOfChromeDebugURLs; i++)
     html += "<li>" + std::string(chrome::kChromeDebugURLs[i]) + "</li>\n";
   html += "</ul>\n";
+
   AppendFooter(&html);
   return html;
 }
 
-#if defined(OS_LINUX) || defined(OS_OPENBSD)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_OPENBSD)
 std::string AboutLinuxProxyConfig() {
   std::string data;
   AppendHeader(&data, 0,
@@ -609,7 +626,7 @@ void AboutUIHTMLSource::StartDataRequest(
     int idr = IDR_ABOUT_UI_CREDITS_HTML;
     if (path == kCreditsJsPath)
       idr = IDR_ABOUT_UI_CREDITS_JS;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     else if (path == kKeyboardUtilsPath)
       idr = IDR_KEYBOARD_UTILS_JS;
 #endif
@@ -619,11 +636,11 @@ void AboutUIHTMLSource::StartDataRequest(
       response =
           ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(idr);
     }
-#if defined(OS_LINUX) || defined(OS_OPENBSD)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_OPENBSD)
   } else if (source_name_ == chrome::kChromeUILinuxProxyConfigHost) {
     response = AboutLinuxProxyConfig();
 #endif
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   } else if (source_name_ == chrome::kChromeUIOSCreditsHost) {
     ChromeOSCreditsHandler::Start(path, std::move(callback));
     return;
@@ -633,7 +650,7 @@ void AboutUIHTMLSource::StartDataRequest(
 #endif
 #if !defined(OS_ANDROID)
   } else if (source_name_ == chrome::kChromeUITermsHost) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     if (!path.empty()) {
       ChromeOSTermsHandler::Start(path, std::move(callback));
       return;
@@ -656,19 +673,18 @@ void AboutUIHTMLSource::FinishDataRequest(
 }
 
 std::string AboutUIHTMLSource::GetMimeType(const std::string& path) {
-  if (path == kCreditsJsPath     ||
-#if defined(OS_CHROMEOS)
+  if (path == kCreditsJsPath ||
+#if BUILDFLAG(IS_CHROMEOS_ASH)
       path == kKeyboardUtilsPath ||
 #endif
-      path == kStatsJsPath       ||
-      path == kStringsJsPath) {
+      path == kStatsJsPath || path == kStringsJsPath) {
     return "application/javascript";
   }
   return "text/html";
 }
 
 bool AboutUIHTMLSource::ShouldAddContentSecurityPolicy() {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (source_name_ == chrome::kChromeUIOSCreditsHost ||
       source_name_ == chrome::kChromeUICrostiniCreditsHost) {
     return false;
@@ -677,9 +693,18 @@ bool AboutUIHTMLSource::ShouldAddContentSecurityPolicy() {
   return content::URLDataSource::ShouldAddContentSecurityPolicy();
 }
 
+std::string AboutUIHTMLSource::GetContentSecurityPolicy(
+    network::mojom::CSPDirectiveName directive) {
+  if (source_name_ == chrome::kChromeUICreditsHost &&
+      directive == network::mojom::CSPDirectiveName::TrustedTypes) {
+    return "trusted-types credits-static;";
+  }
+  return content::URLDataSource::GetContentSecurityPolicy(directive);
+}
+
 std::string AboutUIHTMLSource::GetAccessControlAllowOriginForOrigin(
     const std::string& origin) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Allow chrome://oobe to load chrome://terms via XHR.
   if (source_name_ == chrome::kChromeUITermsHost &&
       base::StartsWith(chrome::kChromeUIOobeURL, origin,

@@ -9,13 +9,13 @@ import android.app.Activity;
 import androidx.annotation.Nullable;
 
 import org.chromium.chrome.browser.AppHooks;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.components.external_intents.AuthenticatorNavigationInterceptor;
 import org.chromium.components.external_intents.ExternalNavigationHandler;
+import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResult;
 import org.chromium.components.external_intents.InterceptNavigationDelegateClient;
 import org.chromium.components.external_intents.InterceptNavigationDelegateImpl;
-import org.chromium.components.external_intents.RedirectHandlerImpl;
+import org.chromium.components.external_intents.RedirectHandler;
 import org.chromium.components.navigation_interception.NavigationParams;
 import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.content_public.browser.WebContents;
@@ -75,16 +75,13 @@ public class InterceptNavigationDelegateClientImpl implements InterceptNavigatio
     }
 
     @Override
-    public RedirectHandlerImpl getOrCreateRedirectHandler() {
+    public RedirectHandler getOrCreateRedirectHandler() {
         return RedirectHandlerTabHelper.getOrCreateHandlerFor(mTab);
     }
 
     @Override
     public AuthenticatorNavigationInterceptor createAuthenticatorNavigationInterceptor() {
-        // NOTE: This will be transitioned back to calling
-        // AppHooks#createAuthenticatorNavigationInterceptor() once the latter has been transitioned
-        // to talk in terms of the //components-level interface.
-        return AppHooks.get().createAuthenticatorNavigationInterceptorV2(mTab);
+        return AppHooks.get().createAuthenticatorNavigationInterceptor(mTab);
     }
 
     @Override
@@ -114,11 +111,15 @@ public class InterceptNavigationDelegateClientImpl implements InterceptNavigatio
 
     @Override
     public void closeTab() {
-        TabModelSelector.from(mTab).closeTab(mTab);
+        mTab.getActivity().getTabModelSelector().closeTab(mTab);
     }
 
     @Override
     public void onNavigationStarted(NavigationParams params) {}
+
+    @Override
+    public void onDecisionReachedForNavigation(
+            NavigationParams params, OverrideUrlLoadingResult overrideUrlLoadingResult) {}
 
     public void initializeWithDelegate(InterceptNavigationDelegateImpl delegate) {
         mInterceptNavigationDelegate = delegate;

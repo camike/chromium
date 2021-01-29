@@ -45,9 +45,9 @@ INSTANTIATE_TEST_SUITE_P(All, ParameterizedLocalCaretRectTest, testing::Bool());
 
 TEST_P(ParameterizedLocalCaretRectTest, DOMAndFlatTrees) {
   const char* body_content =
-      "<p id='host'><b id='one'>1</b></p><b id='two'>22</b>";
+      "<p id='host'><b slot='#one' id='one'>1</b></p><b id='two'>22</b>";
   const char* shadow_content =
-      "<b id='two'>22</b><content select=#one></content><b id='three'>333</b>";
+      "<b id='two'>22</b><slot name=#one></slot><b id='three'>333</b>";
   SetBodyContent(body_content);
   SetShadowContent(shadow_content, "host");
 
@@ -445,13 +445,10 @@ TEST_P(ParameterizedLocalCaretRectTest, SoftLineWrapBetweenMultipleTextNodes) {
           PositionWithAffinity(after_c, TextAffinity::kDownstream)));
 
   const Position before_d(text_d, 0);
-  // TODO(xiaochengh): Should return the same result for legacy and LayoutNG.
-  EXPECT_EQ(LayoutNGEnabled() ? LocalCaretRect(text_c->GetLayoutObject(),
-                                               PhysicalRect(29, 0, 1, 10))
-                              : LocalCaretRect(text_d->GetLayoutObject(),
-                                               PhysicalRect(0, 10, 1, 10)),
-            LocalCaretRectOfPosition(
-                PositionWithAffinity(before_d, TextAffinity::kUpstream)));
+  EXPECT_EQ(
+      LocalCaretRect(text_d->GetLayoutObject(), PhysicalRect(0, 10, 1, 10)),
+      LocalCaretRectOfPosition(
+          PositionWithAffinity(before_d, TextAffinity::kUpstream)));
   EXPECT_EQ(
       LocalCaretRect(text_d->GetLayoutObject(), PhysicalRect(0, 10, 1, 10)),
       LocalCaretRectOfPosition(
@@ -487,13 +484,10 @@ TEST_P(ParameterizedLocalCaretRectTest,
           PositionWithAffinity(after_c, TextAffinity::kDownstream)));
 
   const Position before_d(text_d, 0);
-  // TODO(xiaochengh): Should return the same result for legacy and LayoutNG.
-  EXPECT_EQ(LayoutNGEnabled() ? LocalCaretRect(text_c->GetLayoutObject(),
-                                               PhysicalRect(0, 0, 1, 10))
-                              : LocalCaretRect(text_d->GetLayoutObject(),
-                                               PhysicalRect(29, 10, 1, 10)),
-            LocalCaretRectOfPosition(
-                PositionWithAffinity(before_d, TextAffinity::kUpstream)));
+  EXPECT_EQ(
+      LocalCaretRect(text_d->GetLayoutObject(), PhysicalRect(29, 10, 1, 10)),
+      LocalCaretRectOfPosition(
+          PositionWithAffinity(before_d, TextAffinity::kUpstream)));
   EXPECT_EQ(
       LocalCaretRect(text_d->GetLayoutObject(), PhysicalRect(29, 10, 1, 10)),
       LocalCaretRectOfPosition(
@@ -654,8 +648,8 @@ TEST_P(ParameterizedLocalCaretRectTest, TextAndImageMixedHeight) {
                 Position::AfterNode(img), TextAffinity::kDownstream)));
 
   // TODO(xiaochengh): Should return the same result for legacy and LayoutNG.
-  EXPECT_EQ(LayoutNGEnabled() ? LocalCaretRect(img.GetLayoutObject(),
-                                               PhysicalRect(9, -5, 1, 10))
+  EXPECT_EQ(LayoutNGEnabled() ? LocalCaretRect(text2->GetLayoutObject(),
+                                               PhysicalRect(20, 0, 1, 10))
                               : LocalCaretRect(text2->GetLayoutObject(),
                                                PhysicalRect(20, 5, 1, 10)),
             LocalCaretRectOfPosition(PositionWithAffinity(
@@ -788,9 +782,9 @@ TEST_P(ParameterizedLocalCaretRectTest, CollapsedSpace) {
   // TODO(yoichio): Following should return valid rect: crbug.com/812535.
   EXPECT_EQ(
       LocalCaretRect(first_span->GetLayoutObject(), PhysicalRect(0, 0, 0, 0)),
-      LocalCaretRectOfPosition(PositionWithAffinity(
-          Position(first_span, PositionAnchorType::kAfterChildren),
-          TextAffinity::kDownstream)));
+      LocalCaretRectOfPosition(
+          PositionWithAffinity(Position::LastPositionInNode(*first_span),
+                               TextAffinity::kDownstream)));
   EXPECT_EQ(LayoutNGEnabled() ? LocalCaretRect(foo->GetLayoutObject(),
                                                PhysicalRect(30, 0, 1, 10))
                               : LocalCaretRect(white_spaces->GetLayoutObject(),
@@ -813,10 +807,10 @@ TEST_P(ParameterizedLocalCaretRectTest, CollapsedSpace) {
 
 TEST_P(ParameterizedLocalCaretRectTest, AbsoluteCaretBoundsOfWithShadowDOM) {
   const char* body_content =
-      "<p id='host'><b id='one'>11</b><b id='two'>22</b></p>";
+      "<p id='host'><b slot='#one' id='one'>11</b><b name='#two' "
+      "id='two'>22</b></p>";
   const char* shadow_content =
-      "<div><content select=#two></content><content "
-      "select=#one></content></div>";
+      "<div><slot name=#two></slot><slot name=#one></slot></div>";
   SetBodyContent(body_content);
   SetShadowContent(shadow_content, "host");
 
@@ -838,9 +832,8 @@ TEST_P(ParameterizedLocalCaretRectTest, AbsoluteSelectionBoundsOfWithImage) {
   SetBodyContent("<div>foo<img></div>");
 
   Node* node = GetDocument().QuerySelector("img");
-  IntRect rect =
-      AbsoluteSelectionBoundsOf(VisiblePosition::Create(PositionWithAffinity(
-          Position(node, PositionAnchorType::kAfterChildren))));
+  IntRect rect = AbsoluteSelectionBoundsOf(VisiblePosition::Create(
+      PositionWithAffinity(Position::LastPositionInNode(*node))));
   EXPECT_FALSE(rect.IsEmpty());
 }
 

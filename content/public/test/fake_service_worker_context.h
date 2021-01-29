@@ -45,12 +45,11 @@ class FakeServiceWorkerContext : public ServiceWorkerContext {
   ServiceWorkerExternalRequestResult FinishedExternalRequest(
       int64_t service_worker_version_id,
       const std::string& request_uuid) override;
-  void CountExternalRequestsForTest(
-      const GURL& url,
-      CountExternalRequestsCallback callback) override;
+  size_t CountExternalRequestsForTest(const url::Origin& origin) override;
+  bool MaybeHasRegistrationForOrigin(const url::Origin& origin) override;
   void GetAllOriginsInfo(GetUsageInfoCallback callback) override;
-  void DeleteForOrigin(const GURL& origin, ResultCallback callback) override;
-  void PerformStorageCleanup(base::OnceClosure callback) override;
+  void DeleteForOrigin(const url::Origin& origin,
+                       ResultCallback callback) override;
   void CheckHasServiceWorker(const GURL& url,
                              CheckHasServiceWorkerCallback callback) override;
   void CheckOfflineCapability(
@@ -61,7 +60,8 @@ class FakeServiceWorkerContext : public ServiceWorkerContext {
   void StartWorkerForScope(
       const GURL& scope,
       ServiceWorkerContext::StartWorkerCallback info_callback,
-      base::OnceClosure failure_callback) override;
+      ServiceWorkerContext::StartWorkerFailureCallback failure_callback)
+      override;
   void StartServiceWorkerAndDispatchMessage(
       const GURL& scope,
       blink::TransferableMessage message,
@@ -69,7 +69,7 @@ class FakeServiceWorkerContext : public ServiceWorkerContext {
   void StartServiceWorkerForNavigationHint(
       const GURL& document_url,
       StartServiceWorkerForNavigationHintCallback callback) override;
-  void StopAllServiceWorkersForOrigin(const GURL& origin) override;
+  void StopAllServiceWorkersForOrigin(const url::Origin& origin) override;
   void StopAllServiceWorkers(base::OnceClosure callback) override;
   const base::flat_map<int64_t, ServiceWorkerRunningInfo>&
   GetRunningServiceWorkerInfos() override;
@@ -78,6 +78,9 @@ class FakeServiceWorkerContext : public ServiceWorkerContext {
   void NotifyObserversOnVersionActivated(int64_t version_id, const GURL& scope);
   void NotifyObserversOnVersionRedundant(int64_t version_id, const GURL& scope);
   void NotifyObserversOnNoControllees(int64_t version_id, const GURL& scope);
+
+  // Inserts |origin| into |registered_origins_| if it doesn't already exist.
+  void AddRegistrationToRegisteredOrigins(const url::Origin& origin);
 
   bool start_service_worker_for_navigation_hint_called() {
     return start_service_worker_for_navigation_hint_called_;
@@ -93,7 +96,7 @@ class FakeServiceWorkerContext : public ServiceWorkerContext {
     return start_service_worker_and_dispatch_long_running_message_calls_;
   }
 
-  const std::vector<GURL>& stop_all_service_workers_for_origin_calls() {
+  const std::vector<url::Origin>& stop_all_service_workers_for_origin_calls() {
     return stop_all_service_workers_for_origin_calls_;
   }
 
@@ -106,11 +109,13 @@ class FakeServiceWorkerContext : public ServiceWorkerContext {
   std::vector<StartServiceWorkerAndDispatchMessageArgs>
       start_service_worker_and_dispatch_long_running_message_calls_;
 
-  std::vector<GURL> stop_all_service_workers_for_origin_calls_;
+  std::vector<url::Origin> stop_all_service_workers_for_origin_calls_;
 
   base::ObserverList<ServiceWorkerContextObserver, true>::Unchecked observers_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeServiceWorkerContext);
+
+  std::set<url::Origin> registered_origins_;
 };
 
 }  // namespace content

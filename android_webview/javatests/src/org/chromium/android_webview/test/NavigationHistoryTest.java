@@ -5,7 +5,8 @@
 package org.chromium.android_webview.test;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -64,8 +65,8 @@ public class NavigationHistoryTest {
 
     private void checkHistoryItem(NavigationEntry item, String url, String originalUrl,
             String title, boolean faviconNull) {
-        Assert.assertEquals(url, item.getUrl());
-        Assert.assertEquals(originalUrl, item.getOriginalUrl());
+        Assert.assertEquals(url, item.getUrl().getSpec());
+        Assert.assertEquals(originalUrl, item.getOriginalUrl().getSpec());
         Assert.assertEquals(title, item.getTitle());
         if (faviconNull) {
             Assert.assertNull(item.getFavicon());

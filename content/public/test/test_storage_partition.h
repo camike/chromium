@@ -8,9 +8,11 @@
 #include "base/callback_forward.h"
 #include "base/files/file_path.h"
 #include "build/build_config.h"
+#include "components/services/storage/public/mojom/cache_storage_control.mojom.h"
 #include "components/services/storage/public/mojom/indexed_db_control.mojom.h"
 #include "content/public/browser/storage_partition.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 
 namespace leveldb_proto {
 class ProtoDatabaseProvider;
@@ -22,7 +24,7 @@ class AppCacheService;
 class BackgroundSyncContext;
 class DevToolsBackgroundServicesContext;
 class DOMStorageContext;
-class NativeFileSystemEntryFactory;
+class FileSystemAccessEntryFactory;
 class PlatformNotificationContext;
 class ServiceWorkerContext;
 
@@ -64,16 +66,6 @@ class TestStoragePartition : public StoragePartition {
     cookie_manager_for_browser_process_ = cookie_manager_for_browser_process;
   }
   network::mojom::CookieManager* GetCookieManagerForBrowserProcess() override;
-  void CreateRestrictedCookieManager(
-      network::mojom::RestrictedCookieManagerRole role,
-      const url::Origin& origin,
-      const net::SiteForCookies& site_for_cookies,
-      const url::Origin& top_frame_origin,
-      bool is_service_worker,
-      int process_id,
-      int routing_id,
-      mojo::PendingReceiver<network::mojom::RestrictedCookieManager> receiver)
-      override;
 
   void CreateHasTrustTokensAnswerer(
       mojo::PendingReceiver<network::mojom::HasTrustTokensAnswerer> receiver,
@@ -94,6 +86,8 @@ class TestStoragePartition : public StoragePartition {
   }
   storage::FileSystemContext* GetFileSystemContext() override;
 
+  FontAccessContext* GetFontAccessContext() override;
+
   void set_background_sync_context(BackgroundSyncContext* context) {
     background_sync_context_ = context;
   }
@@ -111,7 +105,7 @@ class TestStoragePartition : public StoragePartition {
 
   storage::mojom::IndexedDBControl& GetIndexedDBControl() override;
 
-  NativeFileSystemEntryFactory* GetNativeFileSystemEntryFactory() override;
+  FileSystemAccessEntryFactory* GetFileSystemAccessEntryFactory() override;
 
   void set_service_worker_context(ServiceWorkerContext* context) {
     service_worker_context_ = context;
@@ -128,6 +122,7 @@ class TestStoragePartition : public StoragePartition {
   void set_cache_storage_context(CacheStorageContext* context) {
     cache_storage_context_ = context;
   }
+  storage::mojom::CacheStorageControl* GetCacheStorageControl() override;
   CacheStorageContext* GetCacheStorageContext() override;
 
   void set_generated_code_cache_context(GeneratedCodeCacheContext* context) {
@@ -150,6 +145,8 @@ class TestStoragePartition : public StoragePartition {
   leveldb_proto::ProtoDatabaseProvider* GetProtoDatabaseProvider() override;
   void SetProtoDatabaseProvider(
       std::unique_ptr<leveldb_proto::ProtoDatabaseProvider> proto_db_provider)
+      override;
+  leveldb_proto::ProtoDatabaseProvider* GetProtoDatabaseProviderForTesting()
       override;
 
   void set_content_index_context(ContentIndexContext* context) {
@@ -202,13 +199,21 @@ class TestStoragePartition : public StoragePartition {
 
   void ResetURLLoaderFactories() override;
 
+  void AddObserver(DataRemovalObserver* observer) override;
+  void RemoveObserver(DataRemovalObserver* observer) override;
+  int GetDataRemovalObserverCount();
+
   void ClearBluetoothAllowedDevicesMapForTesting() override;
   void FlushNetworkInterfaceForTesting() override;
   void WaitForDeletionTasksForTesting() override;
   void WaitForCodeCacheShutdownForTesting() override;
+  void SetNetworkContextForTesting(
+      mojo::PendingRemote<network::mojom::NetworkContext>
+          network_context_remote) override;
 
  private:
   base::FilePath file_path_;
+  mojo::Remote<network::mojom::NetworkContext> network_context_remote_;
   network::mojom::NetworkContext* network_context_ = nullptr;
   network::mojom::CookieManager* cookie_manager_for_browser_process_ = nullptr;
   storage::QuotaManager* quota_manager_ = nullptr;
@@ -221,6 +226,7 @@ class TestStoragePartition : public StoragePartition {
   ServiceWorkerContext* service_worker_context_ = nullptr;
   DedicatedWorkerService* dedicated_worker_service_ = nullptr;
   SharedWorkerService* shared_worker_service_ = nullptr;
+  mojo::Remote<storage::mojom::CacheStorageControl> cache_storage_control_;
   CacheStorageContext* cache_storage_context_ = nullptr;
   GeneratedCodeCacheContext* generated_code_cache_context_ = nullptr;
   PlatformNotificationContext* platform_notification_context_ = nullptr;
@@ -232,6 +238,7 @@ class TestStoragePartition : public StoragePartition {
   HostZoomLevelContext* host_zoom_level_context_ = nullptr;
   ZoomLevelDelegate* zoom_level_delegate_ = nullptr;
 #endif  // !defined(OS_ANDROID)
+  int data_removal_observer_count_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(TestStoragePartition);
 };

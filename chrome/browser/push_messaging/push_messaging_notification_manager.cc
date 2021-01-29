@@ -10,17 +10,19 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/feature_list.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
-#include "chrome/browser/engagement/site_engagement_service.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/notifications/platform_notification_service_factory.h"
 #include "chrome/browser/notifications/platform_notification_service_impl.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/push_messaging/push_messaging_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/site_engagement/content/site_engagement_service.h"
 #include "components/url_formatter/elide_url.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -49,7 +51,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/chromeos/android_sms/android_sms_service_factory.h"
 #include "chrome/browser/chromeos/android_sms/android_sms_urls.h"
 #include "chrome/browser/chromeos/multidevice_setup/multidevice_setup_client_factory.h"
@@ -94,19 +96,6 @@ NotificationDatabaseData CreateDatabaseData(
   return database_data;
 }
 
-int CountVisibleNotifications(
-    const std::vector<NotificationDatabaseData>& data) {
-  if (!base::FeatureList::IsEnabled(features::kNotificationTriggers))
-    return data.size();
-
-  return std::count_if(
-      data.begin(), data.end(),
-      [](const NotificationDatabaseData& notification) {
-        return notification.has_triggered ||
-               !notification.notification_data.show_trigger_timestamp;
-      });
-}
-
 }  // namespace
 
 PushMessagingNotificationManager::PushMessagingNotificationManager(
@@ -121,7 +110,7 @@ void PushMessagingNotificationManager::EnforceUserVisibleOnlyRequirements(
     EnforceRequirementsCallback message_handled_callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (ShouldSkipUserVisibleOnlyRequirements(origin)) {
     std::move(message_handled_callback)
         .Run(/* did_show_generic_notification= */ false);
@@ -133,20 +122,20 @@ void PushMessagingNotificationManager::EnforceUserVisibleOnlyRequirements(
   scoped_refptr<PlatformNotificationContext> notification_context =
       GetStoragePartition(profile_, origin)->GetPlatformNotificationContext();
 
-  notification_context->ReadAllNotificationDataForServiceWorkerRegistration(
+  notification_context->CountVisibleNotificationsForServiceWorkerRegistration(
       origin, service_worker_registration_id,
       base::BindOnce(
-          &PushMessagingNotificationManager::DidGetNotificationsFromDatabase,
+          &PushMessagingNotificationManager::DidCountVisibleNotifications,
           weak_factory_.GetWeakPtr(), origin, service_worker_registration_id,
           std::move(message_handled_callback)));
 }
 
-void PushMessagingNotificationManager::DidGetNotificationsFromDatabase(
+void PushMessagingNotificationManager::DidCountVisibleNotifications(
     const GURL& origin,
     int64_t service_worker_registration_id,
     EnforceRequirementsCallback message_handled_callback,
     bool success,
-    const std::vector<NotificationDatabaseData>& data) {
+    int notification_count) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // TODO(johnme): Hiding an existing notification should also count as a useful
   // user-visible action done in response to a push message - but make sure that
@@ -155,9 +144,11 @@ void PushMessagingNotificationManager::DidGetNotificationsFromDatabase(
   // TODO(knollr): Scheduling a notification should count as a user-visible
   // action, if it is not immediately cancelled or the |origin| schedules too
   // many notifications too far in the future.
-  int notification_count = success ? CountVisibleNotifications(data) : 0;
   bool notification_shown = notification_count > 0;
   bool notification_needed = true;
+
+  base::UmaHistogramCounts100("PushMessaging.VisibleNotificationCount",
+                              notification_count);
 
   // Sites with a currently visible tab don't need to show notifications.
 #if defined(OS_ANDROID)
@@ -179,20 +170,10 @@ void PushMessagingNotificationManager::DidGetNotificationsFromDatabase(
   // If more than one notification is showing for this Service Worker, close
   // the default notification if it happens to be part of this group.
   if (notification_count >= 2) {
-    for (const auto& notification_database_data : data) {
-      if (notification_database_data.notification_data.tag !=
-          kPushMessagingForcedNotificationTag) {
-        continue;
-      }
-
-      scoped_refptr<PlatformNotificationContext> notification_context =
-          GetStoragePartition(profile_, origin)
-              ->GetPlatformNotificationContext();
-      notification_context->DeleteNotificationData(
-          notification_database_data.notification_id, origin,
-          /* close_notification= */ true, base::DoNothing());
-      break;
-    }
+    scoped_refptr<PlatformNotificationContext> notification_context =
+        GetStoragePartition(profile_, origin)->GetPlatformNotificationContext();
+    notification_context->DeleteAllNotificationDataWithTag(
+        kPushMessagingForcedNotificationTag, origin, base::DoNothing());
   }
 
   if (notification_needed && !notification_shown) {
@@ -305,7 +286,7 @@ void PushMessagingNotificationManager::DidWriteNotificationData(
       .Run(/* did_show_generic_notification= */ true);
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 bool PushMessagingNotificationManager::ShouldSkipUserVisibleOnlyRequirements(
     const GURL& origin) {
   // This is a short-term exception to user visible only enforcement added

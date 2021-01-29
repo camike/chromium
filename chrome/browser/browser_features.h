@@ -10,21 +10,35 @@
 
 #include "base/feature_list.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 
 namespace features {
 
 // All features in alphabetical order. The features should be documented
 // alongside the definition of their values in the .cc file.
 
-#if defined(OS_CHROMEOS)
+extern const base::Feature kClosedTabCache;
+
+extern const base::Feature kDestroyProfileOnBrowserClose;
+
+extern const base::Feature kPromoBrowserCommands;
+extern const char kPromoBrowserCommandIdParam[];
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 extern const base::Feature kDoubleTapToZoomInTabletMode;
 #endif
 
 #if !defined(OS_ANDROID)
-extern const base::Feature kNearbySharing;
+extern const base::Feature kCopyLinkToText;
+extern const base::Feature kMuteNotificationsDuringScreenShare;
+extern const base::Feature kShutdownSupportForKeepalive;
 #endif
 
-#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+#if defined(OS_MAC)
+extern const base::Feature kNewMacNotificationAPI;
+#endif
+
+#if !defined(OS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
 extern const base::Feature kUserDataSnapshot;
 #endif
 

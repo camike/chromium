@@ -4,37 +4,30 @@
 
 #include "chrome/browser/enterprise/connectors/analysis_service_settings.h"
 
+#include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/enterprise/connectors/service_provider_config.h"
 #include "components/policy/core/browser/url_util.h"
 
 namespace enterprise_connectors {
 
-namespace {
-
-// Keys used to read a connector's policy values.
-constexpr char kKeyServiceProvider[] = "service_provider";
-constexpr char kKeyEnable[] = "enable";
-constexpr char kKeyDisable[] = "disable";
-constexpr char kKeyUrlList[] = "url_list";
-constexpr char kKeyTags[] = "tags";
-constexpr char kKeyBlockUntilVerdict[] = "block_until_verdict";
-constexpr char kKeyBlockPasswordProtected[] = "block_password_protected";
-constexpr char kKeyBlockLargeFiles[] = "block_large_files";
-constexpr char kKeyBlockUnsupportedFileTypes[] = "block_unsupported_file_types";
-
-}  // namespace
-
 AnalysisServiceSettings::AnalysisServiceSettings(
-    const base::Value& settings_value) {
+    const base::Value& settings_value,
+    const ServiceProviderConfig& service_provider_config) {
   if (!settings_value.is_dict())
     return;
 
-  // The service provider identifier should always be there.
-  const std::string* service_provider =
+  // The service provider identifier should always be there, and it should match
+  // an existing provider.
+  const std::string* service_provider_name =
       settings_value.FindStringKey(kKeyServiceProvider);
-  if (service_provider)
-    service_provider_ = *service_provider;
-  else
+  if (service_provider_name) {
+    service_provider_ =
+        service_provider_config.GetServiceProvider(*service_provider_name);
+    if (!service_provider_)
+      return;
+  } else {
     return;
+  }
 
   // Add the patterns to the settings, which configures settings.matcher and
   // settings.*_pattern_settings. No enable patterns implies the settings are
@@ -42,7 +35,7 @@ AnalysisServiceSettings::AnalysisServiceSettings(
   matcher_ = std::make_unique<url_matcher::URLMatcher>();
   url_matcher::URLMatcherConditionSet::ID id(0);
   const base::Value* enable = settings_value.FindListKey(kKeyEnable);
-  if (enable && enable->is_list()) {
+  if (enable && enable->is_list() && !enable->GetList().empty()) {
     for (const base::Value& value : enable->GetList())
       AddUrlPatternSettings(value, true, &id);
   } else {
@@ -67,6 +60,29 @@ AnalysisServiceSettings::AnalysisServiceSettings(
       settings_value.FindBoolKey(kKeyBlockLargeFiles).value_or(false);
   block_unsupported_file_types_ =
       settings_value.FindBoolKey(kKeyBlockUnsupportedFileTypes).value_or(false);
+  minimum_data_size_ =
+      settings_value.FindIntKey(kKeyMinimumDataSize).value_or(100);
+
+  const base::Value* custom_messages =
+      settings_value.FindListKey(kKeyCustomMessages);
+  if (custom_messages && custom_messages->is_list() &&
+      !custom_messages->GetList().empty()) {
+    // As of now, this list can only contain one value. At some point, it
+    // might be necessary to iterate further in order to find the most
+    // appropriate message, for instance by considering the message and
+    // browser's locales or other signals.
+    const base::Value& value = custom_messages->GetList()[0];
+    const std::string* message = value.FindStringKey(kKeyCustomMessagesMessage);
+    // This string originates as a protobuf string on the server, which are utf8
+    // and it's used in the UI where it needs to be encoded as utf16. Do the
+    // conversion now, otherwise code down the line may not be able to determine
+    // if the std::string is ASCII or UTF8 before passing it to the UI.
+    custom_message_text_ = base::UTF8ToUTF16(message ? *message : "");
+
+    const std::string* url =
+        value.FindStringKey(kKeyCustomMessagesLearnMoreUrl);
+    custom_message_learn_more_url_ = url ? GURL(*url) : GURL();
+  }
 }
 
 // static
@@ -111,8 +127,19 @@ base::Optional<AnalysisSettings> AnalysisServiceSettings::GetAnalysisSettings(
   settings.block_password_protected_files = block_password_protected_files_;
   settings.block_large_files = block_large_files_;
   settings.block_unsupported_file_types = block_unsupported_file_types_;
+  settings.analysis_url = GURL(service_provider_->analysis_url());
+  DCHECK(settings.analysis_url.is_valid());
+  settings.minimum_data_size = minimum_data_size_;
+  settings.custom_message_text = custom_message_text_;
+  settings.custom_message_learn_more_url = custom_message_learn_more_url_;
 
   return settings;
+}
+
+bool AnalysisServiceSettings::ShouldBlockUntilVerdict() const {
+  if (!IsValid())
+    return false;
+  return block_until_verdict_ == BlockUntilVerdict::BLOCK;
 }
 
 void AnalysisServiceSettings::AddUrlPatternSettings(
@@ -120,6 +147,7 @@ void AnalysisServiceSettings::AddUrlPatternSettings(
     bool enabled,
     url_matcher::URLMatcherConditionSet::ID* id) {
   DCHECK(id);
+  DCHECK(service_provider_);
   if (enabled)
     DCHECK(disabled_patterns_settings_.empty());
   else
@@ -130,8 +158,10 @@ void AnalysisServiceSettings::AddUrlPatternSettings(
   const base::Value* tags = url_settings_value.FindListKey(kKeyTags);
   if (tags && tags->is_list()) {
     for (const base::Value& tag : tags->GetList()) {
-      if (tag.is_string())
+      if (tag.is_string() &&
+          (service_provider_->analysis_tags().count(tag.GetString()) == 1)) {
         setting.tags.insert(tag.GetString());
+      }
     }
   } else {
     return;
@@ -186,7 +216,7 @@ std::set<std::string> AnalysisServiceSettings::GetTags(
 
 bool AnalysisServiceSettings::IsValid() const {
   // The settings are invalid if no provider was given.
-  if (service_provider_.empty())
+  if (!service_provider_)
     return false;
 
   // The settings are invalid if no enabled pattern(s) exist since that would

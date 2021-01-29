@@ -37,27 +37,30 @@ TEST(TabWebContentsDelegateAndroidTest,
      AdjustPreviewsStateForNavigationAllowsPreviews) {
   TestTabWebContentsDelegateAndroid browser_display_delegate(
       blink::mojom::DisplayMode::kBrowser);
-  content::PreviewsState noscript_previews_state = content::NOSCRIPT_ON;
-  browser_display_delegate.AdjustPreviewsStateForNavigation(
-      nullptr, &noscript_previews_state);
-  EXPECT_EQ(content::NOSCRIPT_ON, noscript_previews_state);
+  blink::PreviewsState previews_state =
+      blink::PreviewsTypes::DEFER_ALL_SCRIPT_ON;
+  browser_display_delegate.AdjustPreviewsStateForNavigation(nullptr,
+                                                            &previews_state);
+  EXPECT_EQ(blink::PreviewsTypes::DEFER_ALL_SCRIPT_ON, previews_state);
 }
 
 TEST(TabWebContentsDelegateAndroidTest,
      AdjustPreviewsStateForNavigationBlocksPreviews) {
   TestTabWebContentsDelegateAndroid standalone_display_delegate(
       blink::mojom::DisplayMode::kStandalone);
-  content::PreviewsState noscript_previews_state = content::NOSCRIPT_ON;
+  blink::PreviewsState previews_state_standalone =
+      blink::PreviewsTypes::DEFER_ALL_SCRIPT_ON;
   standalone_display_delegate.AdjustPreviewsStateForNavigation(
-      nullptr, &noscript_previews_state);
-  EXPECT_EQ(content::PREVIEWS_OFF, noscript_previews_state);
+      nullptr, &previews_state_standalone);
+  EXPECT_EQ(blink::PreviewsTypes::PREVIEWS_OFF, previews_state_standalone);
 
   TestTabWebContentsDelegateAndroid minimal_ui_display_delegate(
       blink::mojom::DisplayMode::kMinimalUi);
-  content::PreviewsState litepage_previews_state = content::SERVER_LITE_PAGE_ON;
+  blink::PreviewsState previews_state_minimal =
+      blink::PreviewsTypes::DEFER_ALL_SCRIPT_ON;
   minimal_ui_display_delegate.AdjustPreviewsStateForNavigation(
-      nullptr, &litepage_previews_state);
-  EXPECT_EQ(content::PREVIEWS_OFF, litepage_previews_state);
+      nullptr, &previews_state_minimal);
+  EXPECT_EQ(blink::PreviewsTypes::PREVIEWS_OFF, previews_state_minimal);
 }
 
 }  // namespace android

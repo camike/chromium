@@ -12,6 +12,7 @@ import './site_list.js';
 import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
+import {loadTimeData} from '../i18n_setup.js';
 import {ContentSetting, ContentSettingsTypes, SiteSettingSource} from './constants.js';
 import {SiteSettingsBehavior} from './site_settings_behavior.js';
 
@@ -52,6 +53,19 @@ Polymer({
      */
     blockHeader: String,
 
+    /** @private */
+    enableContentSettingsRedesign_: {
+      type: Boolean,
+      value() {
+        return loadTimeData.getBoolean('enableContentSettingsRedesign');
+      }
+    },
+
+    /**
+     * The heading text for the allowed exception list.
+     */
+    allowHeader: String,
+
     searchFilter: String,
 
     /**
@@ -90,7 +104,7 @@ Polymer({
    * @private
    */
   computeShowAllowSiteList_() {
-    return this.category != ContentSettingsTypes.NATIVE_FILE_SYSTEM_WRITE;
+    return this.category !== ContentSettingsTypes.FILE_SYSTEM_WRITE;
   },
 
   /**

@@ -25,7 +25,6 @@
 #include "third_party/blink/renderer/core/dom/document_encoding_data.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
 #include "third_party/blink/renderer/core/dom/document_init.h"
-#include "third_party/blink/renderer/core/dom/dom_implementation.h"
 #include "third_party/blink/renderer/core/dom/ignore_opens_during_unload_count_incrementer.h"
 #include "third_party/blink/renderer/core/editing/serializers/serialization.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
@@ -35,6 +34,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
+#include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/xml/document_xslt.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
@@ -68,6 +68,9 @@ Document* XSLTProcessor::CreateDocumentFromSource(
     const String& source_mime_type,
     Node* source_node,
     LocalFrame* frame) {
+  if (!source_node->GetExecutionContext())
+    return nullptr;
+
   KURL url = NullURL();
   Document* owner_document = &source_node->GetDocument();
   if (owner_document == source_node)
@@ -85,8 +88,10 @@ Document* XSLTProcessor::CreateDocumentFromSource(
   }
 
   if (frame) {
-    auto params = std::make_unique<WebNavigationParams>();
-    params->url = url;
+    auto* previous_document_loader = frame->Loader().GetDocumentLoader();
+    DCHECK(previous_document_loader);
+    std::unique_ptr<WebNavigationParams> params =
+        previous_document_loader->CreateWebNavigationParamsToCloneDocument();
     WebNavigationParams::FillStaticResponse(
         params.get(), mime_type,
         source_encoding.IsEmpty() ? "UTF-8" : source_encoding,
@@ -100,13 +105,21 @@ Document* XSLTProcessor::CreateDocumentFromSource(
       DocumentInit::Create()
           .WithURL(url)
           .WithTypeFrom(mime_type)
-          .WithContextDocument(owner_document->ContextDocument());
-  Document* document = DOMImplementation::createDocument(init);
-  DocumentEncodingData data;
-  data.SetEncoding(source_encoding.IsEmpty()
-                       ? UTF8Encoding()
-                       : WTF::TextEncoding(source_encoding));
-  document->SetEncodingData(data);
+          .WithExecutionContext(owner_document->GetExecutionContext());
+  Document* document = init.CreateDocument();
+  auto parsed_source_encoding = source_encoding.IsEmpty()
+                                    ? UTF8Encoding()
+                                    : WTF::TextEncoding(source_encoding);
+  if (parsed_source_encoding.IsValid()) {
+    DocumentEncodingData data;
+    data.SetEncoding(parsed_source_encoding);
+    document->SetEncodingData(data);
+  } else {
+    document_->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+        mojom::blink::ConsoleMessageSource::kXml,
+        mojom::blink::ConsoleMessageLevel::kWarning,
+        String("Document encoding not valid: ") + source_encoding));
+  }
   document->SetContent(document_source);
   return document;
 }
@@ -166,7 +179,7 @@ void XSLTProcessor::reset() {
   parameters_.clear();
 }
 
-void XSLTProcessor::Trace(Visitor* visitor) {
+void XSLTProcessor::Trace(Visitor* visitor) const {
   visitor->Trace(stylesheet_);
   visitor->Trace(stylesheet_root_node_);
   visitor->Trace(document_);

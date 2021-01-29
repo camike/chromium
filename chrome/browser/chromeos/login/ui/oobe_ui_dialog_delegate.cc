@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "ash/public/cpp/login_accelerators.h"
 #include "ash/public/cpp/login_screen.h"
 #include "ash/public/cpp/login_screen_model.h"
 #include "ash/public/cpp/shelf_config.h"
@@ -23,6 +24,7 @@
 #include "chrome/browser/ui/webui/chromeos/login/core_oobe_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/gaia_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/aura/window.h"
@@ -41,9 +43,6 @@ namespace chromeos {
 namespace {
 
 constexpr char kGaiaURL[] = "chrome://oobe/gaia-signin";
-constexpr char kAppLaunchBailout[] = "app_launch_bailout";
-constexpr char kAppLaunchNetworkConfig[] = "app_launch_network_config";
-constexpr char kCancel[] = "cancel";
 
 CoreOobeView::DialogPaddingMode ConvertDialogPaddingMode(
     OobeDialogPaddingMode padding) {
@@ -121,6 +120,7 @@ class LayoutWidgetDelegateView : public views::WidgetDelegateView {
   LayoutWidgetDelegateView(OobeUIDialogDelegate* dialog_delegate,
                            OobeWebDialogView* oobe_view)
       : dialog_delegate_(dialog_delegate), oobe_view_(oobe_view) {
+    SetFocusTraversesOut(true);
     AddChildView(oobe_view_);
   }
 
@@ -143,8 +143,6 @@ class LayoutWidgetDelegateView : public views::WidgetDelegateView {
   // views::WidgetDelegateView:
   ui::ModalType GetModalType() const override { return ui::MODAL_TYPE_WINDOW; }
 
-  bool ShouldAdvanceFocusToTopLevelWidget() const override { return true; }
-
   void Layout() override {
     if (fullscreen_) {
       for (views::View* child : children()) {
@@ -157,7 +155,11 @@ class LayoutWidgetDelegateView : public views::WidgetDelegateView {
     gfx::Rect bounds;
     const int shelf_height =
         has_shelf_ ? ash::ShelfConfig::Get()->shelf_size() : 0;
-    CalculateOobeDialogBounds(GetContentsBounds(), shelf_height, &bounds,
+    const gfx::Size display_size =
+        display::Screen::GetScreen()->GetPrimaryDisplay().size();
+    const bool is_horizontal = display_size.width() > display_size.height();
+    CalculateOobeDialogBounds(GetContentsBounds(), shelf_height, is_horizontal,
+                              features::IsNewOobeLayoutEnabled(), &bounds,
                               &padding_);
 
     for (views::View* child : children()) {
@@ -303,18 +305,25 @@ class CaptivePortalDialogDelegate
 OobeUIDialogDelegate::OobeUIDialogDelegate(
     base::WeakPtr<LoginDisplayHostMojo> controller)
     : controller_(controller) {
+  set_can_resize(false);
   keyboard_observer_.Add(ChromeKeyboardControllerClient::Get());
 
-  accel_map_[ui::Accelerator(
-      ui::VKEY_S, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)] = kAppLaunchBailout;
-  accel_map_[ui::Accelerator(ui::VKEY_N,
-                             ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)] =
-      kAppLaunchNetworkConfig;
-  accel_map_[ui::Accelerator(ui::VKEY_ESCAPE, 0)] = kCancel;
+  for (size_t i = 0; i < ash::kLoginAcceleratorDataLength; ++i) {
+    if (ash::kLoginAcceleratorData[i].global)
+      continue;
+    if (!(ash::kLoginAcceleratorData[i].scope &
+          (ash::kScopeLogin | ash::kScopeLock))) {
+      continue;
+    }
+
+    accel_map_[ui::Accelerator(ash::kLoginAcceleratorData[i].keycode,
+                               ash::kLoginAcceleratorData[i].modifiers)] =
+        ash::kLoginAcceleratorData[i].action;
+  }
 
   DCHECK(!dialog_view_ && !widget_);
-  // Life cycle of |dialog_view_| is managed by the widget:
-  // Widget owns a root view which has |dialog_view_| as its child view.
+  // Life cycle of `dialog_view_` is managed by the widget:
+  // Widget owns a root view which has `dialog_view_` as its child view.
   // Before the widget is destroyed, it will clean up the view hierarchy
   // starting from root view.
   dialog_view_ =
@@ -430,6 +439,10 @@ gfx::NativeWindow OobeUIDialogDelegate::GetNativeWindow() const {
   return widget_ ? widget_->GetNativeWindow() : nullptr;
 }
 
+views::View* OobeUIDialogDelegate::GetWebDialogView() {
+  return dialog_view_;
+}
+
 ui::ModalType OobeUIDialogDelegate::GetDialogModalType() const {
   return ui::MODAL_TYPE_WINDOW;
 }
@@ -447,10 +460,6 @@ void OobeUIDialogDelegate::GetWebUIMessageHandlers(
 
 void OobeUIDialogDelegate::GetDialogSize(gfx::Size* size) const {
   // Dialog will be resized externally by LayoutWidgetDelegateView.
-}
-
-bool OobeUIDialogDelegate::CanResizeDialog() const {
-  return false;
 }
 
 std::string OobeUIDialogDelegate::GetDialogArgs() const {
@@ -491,9 +500,9 @@ bool OobeUIDialogDelegate::AcceleratorPressed(
   auto entry = accel_map_.find(accelerator);
   if (entry == accel_map_.end())
     return false;
-
-  GetOobeUI()->ForwardAccelerator(entry->second);
-  return true;
+  if (controller_)
+    return controller_->HandleAccelerator(entry->second);
+  return false;
 }
 
 void OobeUIDialogDelegate::OnViewBoundsChanged(views::View* observed_view) {
@@ -501,6 +510,8 @@ void OobeUIDialogDelegate::OnViewBoundsChanged(views::View* observed_view) {
     return;
   GetOobeUI()->GetCoreOobeView()->SetDialogPaddingMode(
       ConvertDialogPaddingMode(layout_view_->padding()));
+  GetOobeUI()->GetCoreOobeView()->UpdateClientAreaSize(
+      layout_view_->GetContentsBounds().size());
 }
 
 void OobeUIDialogDelegate::OnKeyboardVisibilityChanged(bool visible) {

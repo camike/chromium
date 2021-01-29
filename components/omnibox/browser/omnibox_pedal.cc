@@ -6,8 +6,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <numeric>
 
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/memory_usage_estimator.h"
 #include "components/omnibox/browser/omnibox_client.h"
 #include "components/omnibox/browser/omnibox_edit_controller.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
@@ -44,10 +46,18 @@ bool EraseTokenSubsequence(OmniboxPedal::Tokens* from,
 
 OmniboxPedal::LabelStrings::LabelStrings(int id_hint,
                                          int id_hint_short,
-                                         int id_suggestion_contents)
+                                         int id_suggestion_contents,
+                                         int id_accessibility_suffix,
+                                         int id_accessibility_hint)
     : hint(l10n_util::GetStringUTF16(id_hint)),
       hint_short(l10n_util::GetStringUTF16(id_hint_short)),
-      suggestion_contents(l10n_util::GetStringUTF16(id_suggestion_contents)) {}
+      suggestion_contents(l10n_util::GetStringUTF16(id_suggestion_contents)),
+      id_accessibility_suffix(id_accessibility_suffix),
+      accessibility_hint(l10n_util::GetStringUTF16(id_accessibility_hint)) {}
+
+OmniboxPedal::LabelStrings::LabelStrings(const LabelStrings&) = default;
+
+OmniboxPedal::LabelStrings::~LabelStrings() = default;
 
 // =============================================================================
 
@@ -88,10 +98,29 @@ void OmniboxPedal::SynonymGroup::AddSynonym(OmniboxPedal::Tokens&& synonym) {
   synonyms_.push_back(std::move(synonym));
 }
 
+size_t OmniboxPedal::SynonymGroup::EstimateMemoryUsage() const {
+  return base::trace_event::EstimateMemoryUsage(synonyms_);
+}
+
 // =============================================================================
 
-OmniboxPedal::OmniboxPedal(LabelStrings strings, GURL url)
-    : strings_(strings), url_(url) {}
+namespace base {
+namespace trace_event {
+size_t EstimateMemoryUsage(const OmniboxPedal::LabelStrings& self) {
+  size_t total = 0;
+  total += base::trace_event::EstimateMemoryUsage(self.hint);
+  total += base::trace_event::EstimateMemoryUsage(self.hint_short);
+  total += base::trace_event::EstimateMemoryUsage(self.suggestion_contents);
+  total += base::trace_event::EstimateMemoryUsage(self.accessibility_hint);
+  return total;
+}
+}  // namespace trace_event
+}  // namespace base
+
+// =============================================================================
+
+OmniboxPedal::OmniboxPedal(OmniboxPedalId id, LabelStrings strings, GURL url)
+    : id_(id), strings_(strings), url_(url) {}
 
 OmniboxPedal::~OmniboxPedal() {}
 
@@ -113,6 +142,7 @@ void OmniboxPedal::Execute(OmniboxPedal::ExecutionContext& context) const {
 }
 
 bool OmniboxPedal::IsReadyToTrigger(
+    const AutocompleteInput& input,
     const AutocompleteProviderClient& client) const {
   return true;
 }
@@ -131,6 +161,14 @@ void OmniboxPedal::AddSynonymGroup(SynonymGroup&& group) {
   synonym_groups_.push_back(std::move(group));
 }
 
+size_t OmniboxPedal::EstimateMemoryUsage() const {
+  size_t total = 0;
+  total += base::trace_event::EstimateMemoryUsage(url_);
+  total += base::trace_event::EstimateMemoryUsage(strings_);
+  total += base::trace_event::EstimateMemoryUsage(synonym_groups_);
+  return total;
+}
+
 bool OmniboxPedal::IsConceptMatch(const Tokens& match_sequence) const {
   Tokens remaining(match_sequence);
   for (const auto& group : synonym_groups_) {
@@ -142,8 +180,13 @@ bool OmniboxPedal::IsConceptMatch(const Tokens& match_sequence) const {
 
 void OmniboxPedal::OpenURL(OmniboxPedal::ExecutionContext& context,
                            const GURL& url) const {
+  // destination_url_entered_without_scheme is used to determine whether
+  // navigations typed without a scheme and upgraded to HTTPS should fall back
+  // to HTTP. The URL might have been entered without a scheme, but pedal
+  // destination URLs don't need a fallback so it's fine to pass false here.
   context.controller_.OnAutocompleteAccept(
       url, nullptr, WindowOpenDisposition::CURRENT_TAB,
       ui::PAGE_TRANSITION_GENERATED, AutocompleteMatchType::PEDAL,
-      context.match_selection_timestamp_);
+      context.match_selection_timestamp_,
+      /*destination_url_entered_without_scheme=*/false);
 }

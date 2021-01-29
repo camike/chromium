@@ -12,19 +12,19 @@
 namespace subresource_filter {
 
 TestSubresourceFilterObserver::TestSubresourceFilterObserver(
-    content::WebContents* web_contents)
-    : scoped_observer_(this) {
+    content::WebContents* web_contents) {
   auto* manager =
       SubresourceFilterObserverManager::FromWebContents(web_contents);
   DCHECK(manager);
-  scoped_observer_.Add(manager);
+  scoped_observation_.Observe(manager);
   Observe(web_contents);
 }
 
 TestSubresourceFilterObserver::~TestSubresourceFilterObserver() {}
 
 void TestSubresourceFilterObserver::OnSubresourceFilterGoingAway() {
-  scoped_observer_.RemoveAll();
+  DCHECK(scoped_observation_.IsObserving());
+  scoped_observation_.Reset();
 }
 
 void TestSubresourceFilterObserver::OnPageActivationComputed(

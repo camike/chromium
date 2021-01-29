@@ -9,10 +9,12 @@
 
 #include "chrome/browser/chromeos/printing/cups_print_job_manager_factory.h"
 #include "chrome/browser/chromeos/printing/history/print_job_database_impl.h"
+#include "chrome/browser/chromeos/printing/history/print_job_history_service.h"
 #include "chrome/browser/chromeos/printing/history/print_job_history_service_impl.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/storage_partition.h"
 
 namespace chromeos {
@@ -44,8 +46,7 @@ KeyedService* PrintJobHistoryServiceFactory::BuildServiceInstanceFor(
 
   // We do not want an instance of PrintJobHistory on the lock screen.  The
   // result is multiple print job notifications. https://crbug.com/1011532
-  if (ProfileHelper::IsLockScreenAppProfile(profile) ||
-      ProfileHelper::IsSigninProfile(profile)) {
+  if (!ProfileHelper::IsRegularProfile(profile)) {
     return nullptr;
   }
 
@@ -53,14 +54,18 @@ KeyedService* PrintJobHistoryServiceFactory::BuildServiceInstanceFor(
       content::BrowserContext::GetDefaultStoragePartition(profile)
           ->GetProtoDatabaseProvider();
 
-  std::unique_ptr<PrintJobDatabase> print_job_database =
-      std::make_unique<PrintJobDatabaseImpl>(database_provider,
-                                             profile->GetPath());
+  auto print_job_database = std::make_unique<PrintJobDatabaseImpl>(
+      database_provider, profile->GetPath());
   CupsPrintJobManager* print_job_manager =
       chromeos::CupsPrintJobManagerFactory::GetForBrowserContext(profile);
 
   return new PrintJobHistoryServiceImpl(std::move(print_job_database),
                                         print_job_manager, profile->GetPrefs());
+}
+
+void PrintJobHistoryServiceFactory::RegisterProfilePrefs(
+    user_prefs::PrefRegistrySyncable* user_prefs) {
+  chromeos::PrintJobHistoryService::RegisterProfilePrefs(user_prefs);
 }
 
 }  // namespace chromeos

@@ -19,9 +19,9 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -30,8 +30,6 @@
 #include "ui/base/l10n/l10n_util.h"
 
 using base::ProcessEntry;
-using content::BrowserThread;
-
 namespace {
 
 struct Process {
@@ -140,12 +138,12 @@ void MemoryDetails::CollectProcessData(
 
   process_data_.push_back(current_browser);
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   base::GetSwapInfo(&swap_info_);
 #endif
 
   // Finally return to the browser thread.
-  base::PostTask(
-      FROM_HERE, {BrowserThread::UI},
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&MemoryDetails::CollectChildInfoOnUIThread, this));
 }

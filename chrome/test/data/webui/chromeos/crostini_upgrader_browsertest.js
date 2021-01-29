@@ -6,8 +6,9 @@
  * @fileoverview Test suite for the Crostini Upgrader page.
  */
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
+
 GEN('#include "chromeos/constants/chromeos_features.h"');
-GEN('#include "services/network/public/cpp/features.h"');
+GEN('#include "content/public/test/browser_test.h"');
 
 function CrostiniUpgraderBrowserTest() {}
 
@@ -17,17 +18,9 @@ CrostiniUpgraderBrowserTest.prototype = {
   browsePreload:
       'chrome://crostini-upgrader/test_loader.html?module=chromeos/crostini_upgrader_app_test.js',
 
-  extraLibraries: [
-    '//third_party/mocha/mocha.js',
-    '//chrome/test/data/webui/mocha_adapter.js',
-  ],
+  extraLibraries: [],
 
-  featureList: {
-    enabled: [
-      'chromeos::features::kCrostiniWebUIUpgrader',
-      'network::features::kOutOfBlinkCors'
-    ]
-  },
+  featureList: {enabled: ['chromeos::features::kCrostiniWebUIUpgrader']},
 };
 
 

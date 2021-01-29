@@ -9,7 +9,6 @@ import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
-import android.os.SystemClock;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -21,6 +20,7 @@ import androidx.annotation.IntDef;
 import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 import androidx.collection.ArraySet;
+import androidx.fragment.app.FragmentActivity;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 
@@ -32,9 +32,10 @@ import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.historyreport.AppIndexingReporter;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.preferences.Pref;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.browser_ui.settings.SettingsUtils;
 import org.chromium.components.browser_ui.settings.SpinnerPreference;
+import org.chromium.components.user_prefs.UserPrefs;
 import org.chromium.ui.widget.ButtonCompat;
 
 import java.lang.annotation.Retention;
@@ -212,9 +213,6 @@ public abstract class ClearBrowsingDataFragment extends PreferenceFragmentCompat
     // important domains from being cleared.
     private ConfirmImportantSitesDialogFragment mConfirmImportantSitesDialog;
 
-    // Time in ms, when the dialog was created.
-    private long mDialogOpened;
-
     /**
      * @return All available {@link DialogOption} entries.
      */
@@ -317,8 +315,8 @@ public abstract class ClearBrowsingDataFragment extends PreferenceFragmentCompat
      * Requests the browsing data corresponding to the given dialog options to be deleted.
      * @param options The dialog options whose corresponding data should be deleted.
      */
-    private void clearBrowsingData(Set<Integer> options, @Nullable String[] blacklistedDomains,
-            @Nullable int[] blacklistedDomainReasons, @Nullable String[] ignoredDomains,
+    private void clearBrowsingData(Set<Integer> options, @Nullable String[] excludedDomains,
+            @Nullable int[] excludedDomainReasons, @Nullable String[] ignoredDomains,
             @Nullable int[] ignoredDomainReasons) {
         onClearBrowsingData();
         showProgressDialog();
@@ -326,9 +324,6 @@ public abstract class ClearBrowsingDataFragment extends PreferenceFragmentCompat
         for (@DialogOption Integer option : options) {
             dataTypes.add(getDataType(option));
         }
-
-        RecordHistogram.recordMediumTimesHistogram("History.ClearBrowsingData.TimeSpentInDialog",
-                SystemClock.elapsedRealtime() - mDialogOpened);
 
         final @CookieOrCacheDeletionChoice int choice;
         if (dataTypes.contains(BrowsingDataType.COOKIES)) {
@@ -350,9 +345,9 @@ public abstract class ClearBrowsingDataFragment extends PreferenceFragmentCompat
         int timePeriod = ((TimePeriodSpinnerOption) spinnerSelection).getTimePeriod();
         // TODO(bsazonov): Change integerListToIntArray to handle Collection<Integer>.
         int[] dataTypesArray = CollectionUtil.integerListToIntArray(new ArrayList<>(dataTypes));
-        if (blacklistedDomains != null && blacklistedDomains.length != 0) {
+        if (excludedDomains != null && excludedDomains.length != 0) {
             BrowsingDataBridge.getInstance().clearBrowsingDataExcludingDomains(this, dataTypesArray,
-                    timePeriod, blacklistedDomains, blacklistedDomainReasons, ignoredDomains,
+                    timePeriod, excludedDomains, excludedDomainReasons, ignoredDomains,
                     ignoredDomainReasons);
         } else {
             BrowsingDataBridge.getInstance().clearBrowsingData(this, dataTypesArray, timePeriod);
@@ -435,7 +430,8 @@ public abstract class ClearBrowsingDataFragment extends PreferenceFragmentCompat
                 && mFetcher.isDialogAboutOtherFormsOfBrowsingHistoryEnabled()
                 && !OtherFormsOfHistoryDialogFragment.wasDialogShown()) {
             mDialogAboutOtherFormsOfBrowsingHistory = new OtherFormsOfHistoryDialogFragment();
-            mDialogAboutOtherFormsOfBrowsingHistory.show(getActivity());
+            FragmentActivity fragmentActivity = (FragmentActivity) getActivity();
+            mDialogAboutOtherFormsOfBrowsingHistory.show(fragmentActivity);
             dismissProgressDialog();
             RecordHistogram.recordBooleanHistogram(DIALOG_HISTOGRAM, true);
         } else {
@@ -521,7 +517,6 @@ public abstract class ClearBrowsingDataFragment extends PreferenceFragmentCompat
         if (savedInstanceState != null) {
             mFetcher = savedInstanceState.getParcelable(CLEAR_BROWSING_DATA_FETCHER);
         }
-        mDialogOpened = SystemClock.elapsedRealtime();
         getActivity().setTitle(R.string.clear_browsing_data_title);
         SettingsUtils.addPreferencesFromResource(this, R.xml.clear_browsing_data_preferences_tab);
         List<Integer> options = getDialogOptions();
@@ -533,8 +528,8 @@ public abstract class ClearBrowsingDataFragment extends PreferenceFragmentCompat
 
             // It is possible to disable the deletion of browsing history.
             if (option == DialogOption.CLEAR_HISTORY
-                    && !PrefServiceBridge.getInstance().getBoolean(
-                            Pref.ALLOW_DELETING_BROWSER_HISTORY)) {
+                    && !UserPrefs.get(Profile.getLastUsedRegularProfile())
+                                .getBoolean(Pref.ALLOW_DELETING_BROWSER_HISTORY)) {
                 enabled = false;
                 BrowsingDataBridge.getInstance().setBrowsingDataDeletionPreference(
                         getDataType(DialogOption.CLEAR_HISTORY), ClearBrowsingDataTab.BASIC, false);
@@ -590,7 +585,7 @@ public abstract class ClearBrowsingDataFragment extends PreferenceFragmentCompat
 
         // Add button to bottom of the preferences view.
         ButtonCompat clearButton =
-                (ButtonCompat) inflater.inflate(R.xml.clear_browsing_data_button, view, false);
+                (ButtonCompat) inflater.inflate(R.layout.clear_browsing_data_button, view, false);
         clearButton.setOnClickListener((View v) -> onClearButtonClicked());
         view.addView(clearButton);
 

@@ -228,8 +228,8 @@ FileBrowserHandlerExecutor::SetupFileAccessPermissions(
     base::FilePath virtual_path = url.virtual_path();
 
     const bool is_native_file =
-        url.type() == storage::kFileSystemTypeNativeLocal ||
-        url.type() == storage::kFileSystemTypeRestrictedNativeLocal;
+        url.type() == storage::kFileSystemTypeLocal ||
+        url.type() == storage::kFileSystemTypeRestrictedLocal;
 
     // If the file is from a physical volume, actual file must be found.
     if (is_native_file) {
@@ -300,6 +300,9 @@ void FileBrowserHandlerExecutor::ExecuteDoneOnUIThread(
     std::string failure_reason) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (done_) {
+    // In a multiprofile session, extension handlers will open on the desktop
+    // corresponding to the profile that owns the files, so return
+    // TASK_RESULT_MESSAGE_SENT.
     std::move(done_).Run(
         success
             ? extensions::api::file_manager_private::TASK_RESULT_MESSAGE_SENT

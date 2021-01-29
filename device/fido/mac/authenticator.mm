@@ -94,6 +94,7 @@ void TouchIdAuthenticator::MakeCredential(CtapMakeCredentialRequest request,
 }
 
 void TouchIdAuthenticator::GetAssertion(CtapGetAssertionRequest request,
+                                        CtapGetAssertionOptions options,
                                         GetAssertionCallback callback) {
   if (__builtin_available(macOS 10.12.2, *)) {
     DCHECK(!operation_);
@@ -125,10 +126,6 @@ void TouchIdAuthenticator::Cancel() {
 
 std::string TouchIdAuthenticator::GetId() const {
   return "TouchIdAuthenticator";
-}
-
-base::string16 TouchIdAuthenticator::GetDisplayName() const {
-  return base::string16();
 }
 
 base::Optional<FidoTransportProtocol>

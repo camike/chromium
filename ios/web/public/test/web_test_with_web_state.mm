@@ -5,10 +5,10 @@
 #import "ios/web/public/test/web_test_with_web_state.h"
 
 #include "base/ios/ios_util.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/run_loop.h"
 #include "base/scoped_observer.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/task/current_thread.h"
 #import "base/test/ios/wait_util.h"
 #include "ios/web/common/features.h"
 #import "ios/web/js_messaging/crw_js_injector.h"
@@ -16,6 +16,7 @@
 #import "ios/web/navigation/navigation_manager_impl.h"
 #import "ios/web/navigation/wk_navigation_util.h"
 #include "ios/web/public/deprecated/url_verification_constants.h"
+#import "ios/web/public/test/js_test_util.h"
 #import "ios/web/public/web_client.h"
 #include "ios/web/public/web_state_observer.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
@@ -74,8 +75,7 @@ void WebTestWithWebState::AddPendingItem(const GURL& url,
   GetWebController(web_state())
       .webStateImpl->GetNavigationManagerImpl()
       .AddPendingItem(url, Referrer(), transition,
-                      web::NavigationInitiationType::BROWSER_INITIATED,
-                      web::NavigationManager::UserAgentOverrideOption::INHERIT);
+                      web::NavigationInitiationType::BROWSER_INITIATED);
 }
 
 void WebTestWithWebState::AddTransientItem(const GURL& url) {
@@ -194,7 +194,7 @@ void WebTestWithWebState::WaitForBackgroundTasks() {
   // Because tasks can add new tasks to either queue, the loop continues until
   // the first pass where no activity is seen from either queue.
   bool activitySeen = false;
-  base::MessageLoopCurrent messageLoop = base::MessageLoopCurrent::Get();
+  base::CurrentThread messageLoop = base::CurrentThread::Get();
   messageLoop->AddTaskObserver(this);
   do {
     activitySeen = false;
@@ -230,17 +230,37 @@ id WebTestWithWebState::ExecuteJavaScript(NSString* script) {
         // Most of executed JS does not return the result, and there is no need
         // to log WKErrorJavaScriptResultTypeIsUnsupported error code.
         if (error && error.code != WKErrorJavaScriptResultTypeIsUnsupported) {
-          DLOG(WARNING) << base::SysNSStringToUTF8(error.localizedDescription);
+          DLOG(WARNING) << "Script execution of:" << script
+                        << "\nfailed with error: "
+                        << base::SysNSStringToUTF8(error.description);
         }
         execution_result = [result copy];
         execution_completed = true;
       }];
-  EXPECT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^{
-    return execution_completed;
-  }));
+  EXPECT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout,
+                                          ^{
+                                            return execution_completed;
+                                          }))
+      << "Timed out trying to execute: " << script;
 
   return execution_result;
 }
+
+#if defined(__IPHONE_14_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_14_0
+// Synchronously executes |script| in |content_world| and returns result.
+id WebTestWithWebState::ExecuteJavaScript(WKContentWorld* content_world,
+                                          NSString* script) {
+  DCHECK(base::ios::IsRunningOnIOS14OrLater());
+
+  WKWebView* web_view = [GetWebController(web_state()) ensureWebViewCreated];
+
+  if (@available(ios 14, *)) {
+    return web::test::ExecuteJavaScript(web_view, content_world, script);
+  }
+
+  return nil;
+}
+#endif  // defined(__IPHONE14_0)
 
 void WebTestWithWebState::DestroyWebState() {
   web_state_.reset();

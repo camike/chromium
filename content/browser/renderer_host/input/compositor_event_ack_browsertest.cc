@@ -16,23 +16,22 @@
 #include "content/browser/renderer_host/render_widget_host_input_event_router.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/web_contents/web_contents_impl.h"
-#include "content/common/input/synthetic_web_input_event_builders.h"
 #include "content/common/input_messages.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/hit_test_region_observer.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
+#include "third_party/blink/public/common/input/synthetic_web_input_event_builders.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "ui/events/base_event_utils.h"
 #include "ui/events/event_switches.h"
 #include "ui/latency/latency_info.h"
-
-using blink::WebInputEvent;
 
 namespace {
 
@@ -165,7 +164,7 @@ class CompositorEventAckBrowserTest : public ContentBrowserTest {
     // This event never completes its processing. As kCompositorEventAckDataURL
     // will block the renderer's main thread once it is received.
     blink::WebMouseWheelEvent wheel_event =
-        SyntheticWebMouseWheelEventBuilder::Build(
+        blink::SyntheticWebMouseWheelEventBuilder::Build(
             10, 10, 0, -53, 0, ui::ScrollGranularity::kScrollByPrecisePixel);
     wheel_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;
     GetWidgetHost()->ForwardWheelEvent(wheel_event);
@@ -228,7 +227,7 @@ IN_PROC_BROWSER_TEST_F(CompositorEventAckBrowserTest, MouseWheel) {
 }
 
 // Disabled on MacOS because it doesn't support touch input.
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #define MAYBE_TouchStart DISABLED_TouchStart
 #else
 #define MAYBE_TouchStart TouchStart
@@ -239,7 +238,7 @@ IN_PROC_BROWSER_TEST_F(CompositorEventAckBrowserTest, MAYBE_TouchStart) {
 }
 
 // Disabled on MacOS because it doesn't support touch input.
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #define MAYBE_TouchStartDuringFling DISABLED_TouchStartDuringFling
 #else
 #define MAYBE_TouchStartDuringFling TouchStartDuringFling
@@ -254,12 +253,11 @@ IN_PROC_BROWSER_TEST_F(CompositorEventAckBrowserTest,
   auto* input_event_router = GetWidgetHost()->delegate()->GetInputEventRouter();
 
   // Send a TouchStart so that we can set allowed touch action to Auto.
-  SyntheticWebTouchEvent touch_event;
+  blink::SyntheticWebTouchEvent touch_event;
   touch_event.PressPoint(50, 50);
   touch_event.SetTimeStamp(ui::EventTimeForNow());
   input_event_router->RouteTouchEvent(root_view, &touch_event,
                                       ui::LatencyInfo());
-  GetWidgetHost()->input_router()->OnSetTouchAction(cc::TouchAction::kAuto);
 
   // Send GSB to start scrolling sequence.
   blink::WebGestureEvent gesture_scroll_begin(
@@ -303,7 +301,7 @@ IN_PROC_BROWSER_TEST_F(CompositorEventAckBrowserTest,
   // test will timeout if the touch start event is cancelable since there is a
   // busy loop in the blocking touch start event listener.
   InputEventAckWaiter touch_start_ack_observer(
-      GetWidgetHost(), WebInputEvent::Type::kTouchStart);
+      GetWidgetHost(), blink::WebInputEvent::Type::kTouchStart);
   touch_event.PressPoint(50, 50);
   touch_event.SetTimeStamp(ui::EventTimeForNow());
   input_event_router->RouteTouchEvent(root_view, &touch_event,
@@ -312,7 +310,7 @@ IN_PROC_BROWSER_TEST_F(CompositorEventAckBrowserTest,
 }
 
 // Disabled on MacOS because it doesn't support touch input.
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #define MAYBE_PassiveTouchStartBlockingTouchEnd \
   DISABLED_PassiveTouchStartBlockingTouchEnd
 #else

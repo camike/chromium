@@ -18,16 +18,17 @@
 
 namespace blink {
 
-class AbortSignal;
-class ExecutionContext;
-class NFCProxy;
 class NDEFScanOptions;
+class NDEFWriteOptions;
+class NFCProxy;
 class ScriptPromiseResolver;
+class StringOrArrayBufferOrArrayBufferViewOrNDEFMessageInit;
+
+using NDEFMessageSource = StringOrArrayBufferOrArrayBufferViewOrNDEFMessageInit;
 
 class MODULES_EXPORT NDEFReader : public EventTargetWithInlineData,
                                   public ActiveScriptWrappable<NDEFReader>,
                                   public ExecutionContextLifecycleObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(NDEFReader);
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -43,47 +44,70 @@ class MODULES_EXPORT NDEFReader : public EventTargetWithInlineData,
   // ActiveScriptWrappable overrides.
   bool HasPendingActivity() const override;
 
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(error, kError)
   DEFINE_ATTRIBUTE_EVENT_LISTENER(reading, kReading)
-  ScriptPromise scan(ScriptState*, const NDEFScanOptions*, ExceptionState&);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(readingerror, kReadingerror)
 
-  void Trace(Visitor*) override;
+  // Scan from an NFC tag.
+  ScriptPromise scan(ScriptState* script_state,
+                     const NDEFScanOptions* options,
+                     ExceptionState& exception_state);
+
+  // Write NDEFMessageSource asynchronously to NFC tag.
+  ScriptPromise write(ScriptState* script_state,
+                      const NDEFMessageSource& write_message,
+                      const NDEFWriteOptions* options,
+                      ExceptionState& exception_state);
+
+  void Trace(Visitor*) const override;
 
   // Called by NFCProxy for dispatching events.
   virtual void OnReading(const String& serial_number,
                          const device::mojom::blink::NDEFMessage&);
-  virtual void OnError(const String& message);
+  virtual void OnReadingError(const String& message);
 
   // Called by NFCProxy for notification about connection error.
-  void OnMojoConnectionError();
+  void ReadOnMojoConnectionError();
+  void WriteOnMojoConnectionError();
 
  private:
   // ExecutionContextLifecycleObserver overrides.
   void ContextDestroyed() override;
 
-  void Abort(AbortSignal* signal);
-
   NFCProxy* GetNfcProxy() const;
 
-  void OnScanRequestCompleted(device::mojom::blink::NDEFErrorPtr error);
+  void ReadAbort();
+  void ReadOnRequestCompleted(device::mojom::blink::NDEFErrorPtr error);
 
-  // Permission handling
-  void OnRequestPermission(const NDEFScanOptions* options,
-                           mojom::blink::PermissionStatus status);
-  mojom::blink::PermissionService* GetPermissionService();
+  void WriteAbort();
+  void WriteOnRequestCompleted(ScriptPromiseResolver* resolver,
+                               device::mojom::blink::NDEFErrorPtr error);
+
+  // Read Permission handling
+  void ReadOnRequestPermission(const NDEFScanOptions* options,
+                               mojom::blink::PermissionStatus status);
+
+  // Write Permission handling
+  void WriteOnRequestPermission(
+      ScriptPromiseResolver* resolver,
+      const NDEFWriteOptions* options,
+      device::mojom::blink::NDEFMessagePtr ndef_message,
+      mojom::blink::PermissionStatus status);
+
+  // |scan_resolver_| is kept here to handle Mojo connection failures because in
+  // that case the callback passed to Watch() won't be called and
+  // mojo::WrapCallbackWithDefaultInvokeIfNotRun() is forbidden in Blink.
+  Member<ScriptPromiseResolver> scan_resolver_;
+
   HeapMojoRemote<mojom::blink::PermissionService,
                  HeapMojoWrapperMode::kWithoutContextObserver>
       permission_service_;
+  mojom::blink::PermissionService* GetPermissionService();
 
-  // |resolver_| is kept here to handle Mojo connection failures because in that
-  // case the callback passed to Watch() won't be called and
+  // |write_requests_| are kept here to handle Mojo connection failures because
+  // in that case the callback passed to Push() won't be called and
   // mojo::WrapCallbackWithDefaultInvokeIfNotRun() is forbidden in Blink.
-  Member<ScriptPromiseResolver> resolver_;
-
-  // Currently AbortSignal has no method to remove an algorithm so this
-  // field tracks the most recently configured AbortSignal so that others
-  // can be ignored.
-  Member<AbortSignal> signal_;
+  // This list will also be used by AbortSignal.
+  HeapHashSet<Member<ScriptPromiseResolver>> write_requests_;
 };
 
 }  // namespace blink

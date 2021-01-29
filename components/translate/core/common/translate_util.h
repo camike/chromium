@@ -5,18 +5,17 @@
 #ifndef COMPONENTS_TRANSLATE_CORE_COMMON_TRANSLATE_UTIL_H_
 #define COMPONENTS_TRANSLATE_CORE_COMMON_TRANSLATE_UTIL_H_
 
-#include <string>
-#include <vector>
-
 #include "base/feature_list.h"
-
-class GURL;
+#include "url/gurl.h"
 
 namespace translate {
 
 // Controls whether translation applies to sub frames as well as the
 // main frame.
 extern const base::Feature kTranslateSubFrames;
+
+// Controls whether the TFLite-based language detection is enabled.
+extern const base::Feature kTFLiteLanguageDetectionEnabled;
 
 // Isolated world sets following security-origin by default.
 extern const char kSecurityOrigin[];
@@ -27,6 +26,12 @@ GURL GetTranslateSecurityOrigin();
 
 // Return whether sub frame translation is enabled.
 bool IsSubFrameTranslationEnabled();
+
+// Return whether sub frame language detection is enabled.
+bool IsSubFrameLanguageDetectionEnabled();
+
+// Return whether TFLIte-based language detection is enabled.
+bool IsTFLiteLanguageDetectionEnabled();
 
 }  // namespace translate
 

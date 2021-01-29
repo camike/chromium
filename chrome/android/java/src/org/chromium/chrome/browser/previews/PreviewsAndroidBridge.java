@@ -4,11 +4,10 @@
 
 package org.chromium.chrome.browser.previews;
 
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.NativeMethods;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.url.URI;
-
-import java.net.URISyntaxException;
 
 /**
  * Java bridge class to C++ Previews code.
@@ -36,28 +35,6 @@ public final class PreviewsAndroidBridge {
     }
 
     /**
-     * Returns the original host name for visibleURL. This should only be used on preview pages.
-     */
-    public String getOriginalHost(String visibleURL) {
-        try {
-            return new URI(visibleURL).getHost();
-        } catch (URISyntaxException e) {
-        }
-        return "";
-    }
-
-    /**
-     * If the current preview is a stale preview, this returns the timestamp text to display to the
-     * user. An empty string is returned if the current preview is not a stale preview.
-     */
-    public String getStalePreviewTimestamp(WebContents webContents) {
-        assert shouldShowPreviewUI(webContents)
-            : "getStalePreviewTimestamp called on a non-preview page";
-        return PreviewsAndroidBridgeJni.get().getStalePreviewTimestamp(
-                mNativePreviewsAndroidBridge, PreviewsAndroidBridge.this, webContents);
-    }
-
-    /**
      * Requests that the original page be loaded.
      */
     public void loadOriginal(WebContents webContents) {
@@ -74,16 +51,29 @@ public final class PreviewsAndroidBridge {
                 mNativePreviewsAndroidBridge, PreviewsAndroidBridge.this, webContents);
     }
 
+    /**
+     * Returns whether LiteMode https image compression is applied.
+     */
+    public boolean isHttpsImageCompressionApplied(WebContents webContents) {
+        return PreviewsAndroidBridgeJni.get().isHttpsImageCompressionApplied(
+                mNativePreviewsAndroidBridge, PreviewsAndroidBridge.this, webContents);
+    }
+
+    @CalledByNative
+    private static boolean createHttpsImageCompressionInfoBar(final Tab tab) {
+        return HttpsImageCompressionUtils.createInfoBar(tab);
+    }
+
     @NativeMethods
     interface Natives {
         long init(PreviewsAndroidBridge caller);
         boolean shouldShowPreviewUI(long nativePreviewsAndroidBridge, PreviewsAndroidBridge caller,
                 WebContents webContents);
-        String getStalePreviewTimestamp(long nativePreviewsAndroidBridge,
-                PreviewsAndroidBridge caller, WebContents webContents);
         void loadOriginal(long nativePreviewsAndroidBridge, PreviewsAndroidBridge caller,
                 WebContents webContents);
         String getPreviewsType(long nativePreviewsAndroidBridge, PreviewsAndroidBridge caller,
                 WebContents webContents);
+        boolean isHttpsImageCompressionApplied(long nativePreviewsAndroidBridge,
+                PreviewsAndroidBridge caller, WebContents webContents);
     }
 }

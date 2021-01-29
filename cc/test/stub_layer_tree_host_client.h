@@ -5,6 +5,8 @@
 #ifndef CC_TEST_STUB_LAYER_TREE_HOST_CLIENT_H_
 #define CC_TEST_STUB_LAYER_TREE_HOST_CLIENT_H_
 
+#include <memory>
+
 #include "cc/paint/element_id.h"
 #include "cc/trees/layer_tree_host_client.h"
 
@@ -26,23 +28,23 @@ class StubLayerTreeHostClient : public LayerTreeHostClient {
   void RecordEndOfFrameMetrics(base::TimeTicks,
                                ActiveFrameSequenceTrackers) override {}
   std::unique_ptr<BeginMainFrameMetrics> GetBeginMainFrameMetrics() override;
+  std::unique_ptr<WebVitalMetrics> GetWebVitalMetrics() override;
   void NotifyThroughputTrackerResults(CustomTrackerResults results) override {}
   void BeginMainFrameNotExpectedSoon() override {}
   void BeginMainFrameNotExpectedUntil(base::TimeTicks time) override {}
   void UpdateLayerTreeHost() override {}
   void ApplyViewportChanges(const ApplyViewportChangesArgs&) override {}
-  void RecordManipulationTypeCounts(ManipulationInfo info) override {}
-  void SendOverscrollEventFromImplSide(
-      const gfx::Vector2dF& overscroll_delta,
-      ElementId scroll_latched_element_id) override {}
-  void SendScrollEndEventFromImplSide(
-      ElementId scroll_latched_element_id) override {}
+  void UpdateCompositorScrollState(
+      const CompositorCommitData& commit_data) override {}
   void RequestNewLayerTreeFrameSink() override {}
   void DidInitializeLayerTreeFrameSink() override {}
   void DidFailToInitializeLayerTreeFrameSink() override {}
   void WillCommit() override {}
   void DidCommit(base::TimeTicks) override {}
   void DidCommitAndDrawFrame() override {}
+  void DidObserveFirstScrollDelay(
+      base::TimeDelta first_scroll_delay,
+      base::TimeTicks first_scroll_timestamp) override {}
   void DidReceiveCompositorFrameAck() override {}
   void DidCompletePageScaleAnimation() override {}
   void DidPresentCompositorFrame(

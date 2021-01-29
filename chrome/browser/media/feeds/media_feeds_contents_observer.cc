@@ -4,8 +4,8 @@
 
 #include "chrome/browser/media/feeds/media_feeds_contents_observer.h"
 
-#include "chrome/browser/media/history/media_history_keyed_service.h"
-#include "chrome/browser/media/history/media_history_keyed_service_factory.h"
+#include "chrome/browser/media/feeds/media_feeds_service.h"
+#include "chrome/browser/media/feeds/media_feeds_service_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_render_frame.mojom.h"
@@ -20,7 +20,13 @@
 
 MediaFeedsContentsObserver::MediaFeedsContentsObserver(
     content::WebContents* web_contents)
-    : content::WebContentsObserver(web_contents) {}
+    : content::WebContentsObserver(web_contents) {
+  // The cookie observer cannot be created at initialization of
+  // MediaFeedsService because the network service is not ready and therefore we
+  // should create it when we get a web contents.
+  if (auto* service = GetService())
+    service->EnsureCookieObserver();
+}
 
 MediaFeedsContentsObserver::~MediaFeedsContentsObserver() = default;
 
@@ -30,6 +36,17 @@ void MediaFeedsContentsObserver::DidFinishNavigation(
     return;
 
   render_frame_.reset();
+
+  auto new_origin = url::Origin::Create(web_contents()->GetLastCommittedURL());
+  if (last_origin_ == new_origin)
+    return;
+
+  ResetFeed();
+  last_origin_ = new_origin;
+}
+
+void MediaFeedsContentsObserver::WebContentsDestroyed() {
+  ResetFeed();
 }
 
 void MediaFeedsContentsObserver::DidFinishLoad(
@@ -44,6 +61,9 @@ void MediaFeedsContentsObserver::DidFinishLoad(
       std::move(test_closure_).Run();
     return;
   }
+
+  // Clear the old binding for the old frame.
+  render_frame_.reset();
 
   render_frame_host->GetRemoteAssociatedInterfaces()->GetInterface(
       &render_frame_);
@@ -71,8 +91,15 @@ void MediaFeedsContentsObserver::DidFindMediaFeed(
       return;
     }
 
+    base::Optional<GURL> favicon;
+    for (auto& found : web_contents()->GetFaviconURLs()) {
+      if (found->icon_type == blink::mojom::FaviconIconType::kFavicon) {
+        favicon = found->icon_url;
+      }
+    }
+
     CHECK(url->SchemeIsCryptographic());
-    service->DiscoverMediaFeed(*url);
+    service->DiscoverMediaFeed(*url, favicon);
 
     ukm::UkmRecorder* ukm_recorder = ukm::UkmRecorder::Get();
     if (!ukm_recorder)
@@ -88,12 +115,26 @@ void MediaFeedsContentsObserver::DidFindMediaFeed(
     std::move(test_closure_).Run();
 }
 
-media_history::MediaHistoryKeyedService*
-MediaFeedsContentsObserver::GetService() {
+media_feeds::MediaFeedsService* MediaFeedsContentsObserver::GetService() {
   auto* profile =
       Profile::FromBrowserContext(web_contents()->GetBrowserContext());
 
-  return media_history::MediaHistoryKeyedServiceFactory::GetForProfile(profile);
+  if (profile->IsOffTheRecord())
+    return nullptr;
+
+  return media_feeds::MediaFeedsServiceFactory::GetForProfile(profile);
+}
+
+void MediaFeedsContentsObserver::ResetFeed() {
+  if (!last_origin_.has_value())
+    return;
+
+  if (auto* service = GetService()) {
+    service->ResetMediaFeed(*last_origin_,
+                            media_feeds::mojom::ResetReason::kVisit);
+  }
+
+  last_origin_.reset();
 }
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(MediaFeedsContentsObserver)

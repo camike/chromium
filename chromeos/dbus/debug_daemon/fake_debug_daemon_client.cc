@@ -14,10 +14,10 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/location.h"
 #include "base/optional.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chromeos/dbus/constants/dbus_switches.h"
@@ -127,6 +127,13 @@ void FakeDebugDaemonClient::GetScrubbedBigLogs(
       FROM_HERE, base::BindOnce(std::move(callback), false, sample));
 }
 
+void FakeDebugDaemonClient::BackupArcBugReport(
+    const cryptohome::AccountIdentifier& id,
+    VoidDBusMethodCallback callback) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), true));
+}
+
 void FakeDebugDaemonClient::GetAllLogs(GetLogsCallback callback) {
   std::map<std::string, std::string> sample;
   sample["Sample Log"] = "Your email address is abc@abc.com";
@@ -155,7 +162,10 @@ void FakeDebugDaemonClient::TestICMPWithOptions(
       FROM_HERE, base::BindOnce(std::move(callback), base::nullopt));
 }
 
-void FakeDebugDaemonClient::UploadCrashes() {}
+void FakeDebugDaemonClient::UploadCrashes(UploadCrashesCallback callback) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), true));
+}
 
 void FakeDebugDaemonClient::EnableDebuggingFeatures(
     const std::string& password,
@@ -245,16 +255,6 @@ void FakeDebugDaemonClient::CupsRemovePrinter(
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(std::move(callback), has_printer));
-}
-
-void FakeDebugDaemonClient::StartConcierge(ConciergeCallback callback) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), true));
-}
-
-void FakeDebugDaemonClient::StopConcierge(ConciergeCallback callback) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), true));
 }
 
 void FakeDebugDaemonClient::StartPluginVmDispatcher(

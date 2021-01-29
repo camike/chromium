@@ -130,16 +130,15 @@ base::Optional<int32_t> GetWifiSignalLevel() {
   return signal_strength;
 }
 
-internal::ConfigParsePosixResult GetDnsServers(
-    std::vector<IPEndPoint>* dns_servers,
-    bool* dns_over_tls_active,
-    std::string* dns_over_tls_hostname) {
+bool GetDnsServers(std::vector<IPEndPoint>* dns_servers,
+                   bool* dns_over_tls_active,
+                   std::string* dns_over_tls_hostname) {
   JNIEnv* env = AttachCurrentThread();
   // Get the DNS status for the active network.
   ScopedJavaLocalRef<jobject> result =
       Java_AndroidNetworkLibrary_getDnsStatus(env, nullptr /* network */);
   if (result.is_null())
-    return internal::CONFIG_PARSE_POSIX_NO_NAMESERVERS;
+    return false;
 
   // Parse the DNS servers.
   std::vector<std::vector<uint8_t>> dns_servers_data;
@@ -155,8 +154,12 @@ internal::ConfigParsePosixResult GetDnsServers(
   *dns_over_tls_hostname = base::android::ConvertJavaStringToUTF8(
       Java_DnsStatus_getPrivateDnsServerName(env, result));
 
-  return dns_servers->size() ? internal::CONFIG_PARSE_POSIX_OK
-                             : internal::CONFIG_PARSE_POSIX_NO_NAMESERVERS;
+  return !dns_servers->empty();
+}
+
+bool ReportBadDefaultNetwork() {
+  return Java_AndroidNetworkLibrary_reportBadDefaultNetwork(
+      AttachCurrentThread());
 }
 
 void TagSocket(SocketDescriptor socket, uid_t uid, int32_t tag) {

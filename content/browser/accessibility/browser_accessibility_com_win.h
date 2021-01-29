@@ -181,6 +181,7 @@ class __declspec(uuid("562072fe-3390-43b1-9e2c-dd4118f5ac79"))
   CONTENT_EXPORT IFACEMETHODIMP get_nHyperlinks(LONG* hyperlink_count) override;
 
   CONTENT_EXPORT IFACEMETHODIMP
+  // A hyperlink represents an embedded object character (leading to a subtree).
   get_hyperlink(LONG index, IAccessibleHyperlink** hyperlink) override;
 
   CONTENT_EXPORT IFACEMETHODIMP
@@ -356,9 +357,6 @@ class __declspec(uuid("562072fe-3390-43b1-9e2c-dd4118f5ac79"))
 
   BrowserAccessibilityManager* Manager() const;
 
-  // Private helper methods.
-  bool ShouldFireHypertextEvents() const;
-
   //
   // AXPlatformNode overrides
   //
@@ -402,10 +400,6 @@ class __declspec(uuid("562072fe-3390-43b1-9e2c-dd4118f5ac79"))
   // TODO(nektar): Could we use globally unique IDs everywhere?
   // TODO(nektar): Rename this function to GetFromNodeID.
   BrowserAccessibilityComWin* GetFromID(int32_t id) const;
-
-  // Returns true if this is a list box option with a parent of type list box,
-  // or a menu list option with a parent of type menu list popup.
-  bool IsListBoxOptionOrMenuListOption();
 
   // Fire a Windows-specific accessibility event notification on this node.
   void FireNativeEvent(LONG win_event_type) const;

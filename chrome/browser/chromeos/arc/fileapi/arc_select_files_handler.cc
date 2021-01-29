@@ -11,6 +11,7 @@
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_content_file_system_url_util.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_documents_provider_util.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_select_files_util.h"
@@ -18,6 +19,7 @@
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/file_manager/path_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/views/select_file_dialog_extension.h"
@@ -95,6 +97,7 @@ void OnGetElementsScriptResults(
     ConvertToElementVector(value.FindKey("dirNames"),
                            &result->directory_elements);
     ConvertToElementVector(value.FindKey("fileNames"), &result->file_elements);
+    // TODO(niwa): Fill result->search_query.
   }
   std::move(callback).Run(std::move(result));
 }
@@ -246,14 +249,15 @@ void ArcSelectFilesHandler::SelectFiles(
   ui::SelectFileDialog::FileTypeInfo file_type_info;
   BuildFileTypeInfo(request, &file_type_info);
   base::FilePath default_path = GetInitialFilePath(request);
+  std::string search_query = request->search_query.value_or(std::string());
 
   // Android picker apps should be shown in GET_CONTENT mode.
   bool show_android_picker_apps =
       request->action_type == mojom::SelectFilesActionType::GET_CONTENT;
 
-  bool success =
-      dialog_holder_->SelectFile(dialog_type, default_path, &file_type_info,
-                                 request->task_id, show_android_picker_apps);
+  bool success = dialog_holder_->SelectFile(
+      dialog_type, default_path, &file_type_info, request->task_id,
+      search_query, show_android_picker_apps);
   if (!success) {
     std::move(callback_).Run(mojom::SelectFilesResult::New());
   }
@@ -310,8 +314,8 @@ void ArcSelectFilesHandler::FilesSelectedInternal(
     file_system_urls.push_back(file_system_context->CrackURL(gurl));
   }
 
-  file_manager::util::ConvertToContentUrls(
-      file_system_urls,
+  arc::ConvertToContentUrlsAndShare(
+      ProfileManager::GetPrimaryUserProfile(), file_system_urls,
       base::BindOnce(&ContentUrlsResolved, std::move(callback_)));
 }
 
@@ -376,6 +380,7 @@ bool SelectFileDialogHolder::SelectFile(
     const base::FilePath& default_path,
     const ui::SelectFileDialog::FileTypeInfo* file_types,
     int task_id,
+    const std::string& search_query,
     bool show_android_picker_apps) {
   aura::Window* owner_window = nullptr;
   for (auto* window : ChromeLauncherController::instance()->GetArcWindows()) {
@@ -389,12 +394,15 @@ bool SelectFileDialogHolder::SelectFile(
     return false;
   }
 
+  // TODO(niwa): Pass search query as well.
+  SelectFileDialogExtension::Owner owner;
+  owner.window = owner_window;
+  owner.android_task_id = task_id;
   select_file_dialog_->SelectFileWithFileManagerParams(
       type,
       /*title=*/base::string16(), default_path, file_types,
       /*file_type_index=*/0,
-      /*default_extension=*/base::FilePath::StringType(), owner_window,
-      /*params=*/nullptr, task_id, show_android_picker_apps);
+      /*params=*/nullptr, owner, search_query, show_android_picker_apps);
   return true;
 }
 

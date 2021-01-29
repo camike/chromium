@@ -12,23 +12,22 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_process_impl.h"
 #include "chrome/browser/chrome_content_browser_client.h"
-#include "chrome/browser/metrics/subprocess_metrics_provider.h"
+#include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
+#include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
 #include "chrome/browser/previews/previews_test_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_features.h"
-#include "components/optimization_guide/hints_component_info.h"
-#include "components/optimization_guide/hints_component_util.h"
-#include "components/optimization_guide/optimization_guide_constants.h"
-#include "components/optimization_guide/optimization_guide_features.h"
-#include "components/optimization_guide/optimization_guide_service.h"
+#include "components/optimization_guide/core/hints_component_info.h"
+#include "components/optimization_guide/core/hints_component_util.h"
+#include "components/optimization_guide/core/optimization_guide_constants.h"
+#include "components/optimization_guide/core/optimization_guide_features.h"
+#include "components/optimization_guide/core/optimization_hints_component_update_listener.h"
+#include "components/optimization_guide/core/test_hints_component_creator.h"
 #include "components/optimization_guide/proto/hints.pb.h"
-#include "components/optimization_guide/test_hints_component_creator.h"
 #include "components/previews/core/previews_features.h"
 #include "components/previews/core/previews_switches.h"
 #include "content/public/test/browser_test.h"
@@ -93,6 +92,13 @@ class DeferAllScriptPriorityBrowserTest
     https_url_ = https_server_->GetURL("/defer_all_script_priority_test.html");
     ASSERT_TRUE(https_url_.SchemeIs(url::kHttpsScheme));
 
+    // Override the target decision to |kTrue| to trigger a preview for the new
+    // decision.
+    OptimizationGuideKeyedServiceFactory::GetForProfile(browser()->profile())
+        ->OverrideTargetDecisionForTesting(
+            optimization_guide::proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD,
+            optimization_guide::OptimizationGuideDecision::kTrue);
+
     InProcessBrowserTest::SetUpOnMainThread();
   }
 
@@ -103,10 +109,10 @@ class DeferAllScriptPriorityBrowserTest
     cmd->AppendSwitch("optimization-guide-disable-installer");
     cmd->AppendSwitch("purge_hint_cache_store");
 
-    // Due to race conditions, it's possible that blacklist data is not loaded
+    // Due to race conditions, it's possible that blocklist data is not loaded
     // at the time of first navigation. That may prevent Preview from
     // triggering, and causing the test to flake.
-    cmd->AppendSwitch(previews::switches::kIgnorePreviewsBlacklist);
+    cmd->AppendSwitch(previews::switches::kIgnorePreviewsBlocklist);
   }
 
   // Returns a unique script for each request, to test service worker update.
@@ -171,8 +177,8 @@ class DeferAllScriptPriorityBrowserTest
       const optimization_guide::HintsComponentInfo& component_info) {
     base::HistogramTester histogram_tester;
 
-    g_browser_process->optimization_guide_service()->MaybeUpdateHintsComponent(
-        component_info);
+    optimization_guide::OptimizationHintsComponentUpdateListener::GetInstance()
+        ->MaybeUpdateHintsComponent(component_info);
 
     RetryForHistogramUntilCountReached(
         &histogram_tester,
@@ -201,7 +207,7 @@ class DeferAllScriptPriorityBrowserTest
     ProcessHintsComponent(
         test_hints_component_creator_.CreateHintsComponentInfoWithPageHints(
             optimization_guide::proto::DEFER_ALL_SCRIPT,
-            {hint_setup_url.host()}, page_pattern, {}));
+            {hint_setup_url.host()}, page_pattern));
     LoadHintsForUrl(hint_setup_url);
   }
 
@@ -226,6 +232,16 @@ class DeferAllScriptPriorityBrowserTest
 
   DISALLOW_COPY_AND_ASSIGN(DeferAllScriptPriorityBrowserTest);
 };
+
+namespace {
+
+GURL SetQuery(GURL url, const std::string& query) {
+  url::Replacements<char> repls;
+  repls.SetQuery(query.c_str(), url::Component(0, query.length()));
+  return url.ReplaceComponents(repls);
+}
+
+}  // namespace
 
 // Parameter is true if the test should be run with defer feature enabled.
 INSTANTIATE_TEST_SUITE_P(All,
@@ -254,7 +270,9 @@ IN_PROC_BROWSER_TEST_P(
     SetDeferAllScriptHintWithPageWithPattern(url, "*");
   }
 
-  ui_test_utils::NavigateToURL(browser(), url);
+  // Set query to ensure that it's not treated as a reload as preview metrics
+  // are not recorded for reloads.
+  ui_test_utils::NavigateToURL(browser(), SetQuery(url, "foo"));
 
   double delay_milliseconds = GetFetchTimeForJavaScriptFileInMilliseconds();
 

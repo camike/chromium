@@ -9,6 +9,7 @@
 
 #include "ash/public/cpp/new_window_delegate.h"
 #include "ash/public/cpp/wallpaper_controller.h"
+#include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
@@ -137,15 +138,22 @@ void ArcIntentHelperBridge::OnIconInvalidated(const std::string& package_name) {
   icon_loader_.InvalidateIcons(package_name);
 }
 
+void ArcIntentHelperBridge::OnIntentFiltersUpdated(
+    std::vector<IntentFilter> filters) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  intent_filters_.clear();
+
+  for (auto& filter : filters)
+    intent_filters_[filter.package_name()].push_back(std::move(filter));
+
+  for (auto& observer : observer_list_)
+    observer.OnIntentFiltersUpdated(base::nullopt);
+}
+
 void ArcIntentHelperBridge::OnOpenDownloads() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   RecordOpenType(ArcIntentHelperOpenType::DOWNLOADS);
-  // TODO(607411): If the FileManager is not yet open this will open to
-  // downloads by default, which is what we want.  However if it is open it will
-  // simply be brought to the forgeground without forcibly being navigated to
-  // downloads, which is probably not ideal.
-  // TODO(mash): Support this functionality without ash::Shell access in Chrome.
-  ash::NewWindowDelegate::GetInstance()->OpenFileManager();
+  ash::NewWindowDelegate::GetInstance()->OpenDownloadsFolder();
 }
 
 void ArcIntentHelperBridge::OnOpenUrl(const std::string& url) {
@@ -160,10 +168,17 @@ void ArcIntentHelperBridge::OnOpenUrl(const std::string& url) {
     g_open_url_delegate->OpenUrlFromArc(gurl);
 }
 
+void ArcIntentHelperBridge::OnOpenCustomTabDeprecated(
+    const std::string& url,
+    int32_t task_id,
+    int32_t surface_id,
+    int32_t top_margin,
+    OnOpenCustomTabCallback callback) {
+  OnOpenCustomTab(url, task_id, std::move(callback));
+}
+
 void ArcIntentHelperBridge::OnOpenCustomTab(const std::string& url,
                                             int32_t task_id,
-                                            int32_t surface_id,
-                                            int32_t top_margin,
                                             OnOpenCustomTabCallback callback) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   RecordOpenType(ArcIntentHelperOpenType::CUSTOM_TAB);
@@ -171,11 +186,10 @@ void ArcIntentHelperBridge::OnOpenCustomTab(const std::string& url,
   const GURL gurl(url_formatter::FixupURL(url, /*desired_tld=*/std::string()));
   if (!gurl.is_valid() ||
       allowed_arc_schemes_.find(gurl.scheme()) == allowed_arc_schemes_.end()) {
-    std::move(callback).Run(nullptr);
+    std::move(callback).Run(mojo::NullRemote());
     return;
   }
-  g_open_url_delegate->OpenArcCustomTab(gurl, task_id, surface_id, top_margin,
-                                        std::move(callback));
+  g_open_url_delegate->OpenArcCustomTab(gurl, task_id, std::move(callback));
 }
 
 void ArcIntentHelperBridge::OnOpenChromePage(mojom::ChromePage page) {
@@ -320,6 +334,11 @@ bool ArcIntentHelperBridge::ShouldChromeHandleUrl(const GURL& url) {
   return true;
 }
 
+void ArcIntentHelperBridge::SetAdaptiveIconDelegate(
+    AdaptiveIconDelegate* delegate) {
+  icon_loader_.SetAdaptiveIconDelegate(delegate);
+}
+
 void ArcIntentHelperBridge::AddObserver(ArcIntentHelperObserver* observer) {
   observer_list_.AddObserver(observer);
 }
@@ -354,6 +373,33 @@ void ArcIntentHelperBridge::HandleCameraResult(
   instance->HandleCameraResult(intent_id, action, data, std::move(callback));
 }
 
+void ArcIntentHelperBridge::SendNewCaptureBroadcast(bool is_video,
+                                                    std::string file_path) {
+  auto* arc_service_manager = arc::ArcServiceManager::Get();
+  arc::mojom::IntentHelperInstance* instance = nullptr;
+
+  if (arc_service_manager) {
+    instance = ARC_GET_INSTANCE_FOR_METHOD(
+        arc_service_manager->arc_bridge_service()->intent_helper(),
+        SendBroadcast);
+  }
+  if (!instance) {
+    LOG(ERROR) << "Failed to get instance for SendBroadcast().";
+    return;
+  }
+
+  std::string action =
+      is_video ? "org.chromium.arc.intent_helper.ACTION_SEND_NEW_VIDEO"
+               : "org.chromium.arc.intent_helper.ACTION_SEND_NEW_PICTURE";
+  base::DictionaryValue value;
+  value.SetString("file_path", file_path);
+  std::string extras;
+  base::JSONWriter::Write(value, &extras);
+
+  instance->SendBroadcast(action, "org.chromium.arc.intent_helper",
+                          /*cls=*/std::string(), extras);
+}
+
 // static
 bool ArcIntentHelperBridge::IsIntentHelperPackage(
     const std::string& package_name) {
@@ -371,18 +417,6 @@ ArcIntentHelperBridge::FilterOutIntentHelper(
     handlers_filtered.push_back(std::move(handler));
   }
   return handlers_filtered;
-}
-
-void ArcIntentHelperBridge::OnIntentFiltersUpdated(
-    std::vector<IntentFilter> filters) {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  intent_filters_.clear();
-
-  for (auto& filter : filters)
-    intent_filters_[filter.package_name()].push_back(std::move(filter));
-
-  for (auto& observer : observer_list_)
-    observer.OnIntentFiltersUpdated(base::nullopt);
 }
 
 const std::vector<IntentFilter>&

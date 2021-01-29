@@ -229,9 +229,6 @@ class COMPONENT_EXPORT(URL) GURL {
   // Returns true if the scheme is "http" or "https".
   bool SchemeIsHTTPOrHTTPS() const;
 
-  // Returns true if the scheme is valid for use as a referrer.
-  bool SchemeIsValidForReferrer() const;
-
   // Returns true is the scheme is "ws" or "wss".
   bool SchemeIsWSOrWSS() const;
 
@@ -436,6 +433,10 @@ class COMPONENT_EXPORT(URL) GURL {
   // Estimates dynamic memory usage.
   // See base/trace_event/memory_usage_estimator.h for more info.
   size_t EstimateMemoryUsage() const;
+
+  // Helper used by GURL::IsAboutUrl and KURL::IsAboutURL.
+  static bool IsAboutPath(base::StringPiece actual_path,
+                          base::StringPiece allowed_path);
 
  private:
   // Variant of the string parsing constructor that allows the caller to elect

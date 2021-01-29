@@ -8,11 +8,15 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.rule.ActivityTestRule;
+import android.support.test.runner.lifecycle.Stage;
 
 import androidx.fragment.app.Fragment;
 
 import org.junit.Assert;
+
+import org.chromium.base.test.BaseActivityTestRule;
+import org.chromium.base.test.util.ApplicationTestUtils;
+import org.chromium.components.browser_ui.settings.SettingsLauncher;
 
 /**
  * Activity test rule that launch {@link SettingsActivity} in tests.
@@ -23,7 +27,7 @@ import org.junit.Assert;
  * @param <T> Fragment that will be attached to the SettingsActivity.
  */
 public class SettingsActivityTestRule<T extends Fragment>
-        extends ActivityTestRule<SettingsActivity> {
+        extends BaseActivityTestRule<SettingsActivity> {
     private final Class<T> mFragmentClass;
 
     /**
@@ -31,16 +35,7 @@ public class SettingsActivityTestRule<T extends Fragment>
      * @param fragmentClass Fragment that will be attached after the activity starts.
      */
     public SettingsActivityTestRule(Class<T> fragmentClass) {
-        this(fragmentClass, false);
-    }
-
-    /**
-     * Create the settings activity test rule with an specific fragment class.
-     * @param fragmentClass Fragment that will be attached after the activity starts.
-     * @param initialTouchMode Whether in touch mode after the activity starts.
-     */
-    public SettingsActivityTestRule(Class<T> fragmentClass, boolean initialTouchMode) {
-        super(SettingsActivity.class, initialTouchMode, false);
+        super(SettingsActivity.class);
         mFragmentClass = fragmentClass;
     }
 
@@ -62,10 +57,9 @@ public class SettingsActivityTestRule<T extends Fragment>
         SettingsLauncher settingsLauncher = new SettingsLauncherImpl();
         Intent intent = settingsLauncher.createSettingsActivityIntent(
                 context, mFragmentClass.getName(), fragmentArgs);
-        SettingsActivity activity = super.launchActivity(intent);
-        Assert.assertNotNull(activity);
-
-        return activity;
+        launchActivity(intent);
+        ApplicationTestUtils.waitForActivityState(getActivity(), Stage.RESUMED);
+        return getActivity();
     }
 
     /**

@@ -4,12 +4,16 @@
 
 #include "chrome/browser/ui/browser_commands.h"
 
+#include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/reading_list/features/reading_list_switches.h"
+#include "content/public/test/browser_test.h"
 
 namespace chrome {
 
@@ -116,13 +120,13 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandsTest, MoveToExistingWindow) {
 
   // Single tab move to an existing window.
   std::vector<int> indices = {0};
-  chrome::MoveToExistingWindow(browser(), second_window, indices);
+  chrome::MoveTabsToExistingWindow(browser(), second_window, indices);
   ASSERT_TRUE(browser()->tab_strip_model()->count() == 2);
   ASSERT_TRUE(second_window->tab_strip_model()->count() == 3);
 
   // Multiple tab move to an existing window.
   indices = {0, 2};
-  chrome::MoveToExistingWindow(second_window, browser(), indices);
+  chrome::MoveTabsToExistingWindow(second_window, browser(), indices);
   ASSERT_TRUE(browser()->tab_strip_model()->count() == 4);
   ASSERT_TRUE(second_window->tab_strip_model()->count() == 1);
 }
@@ -162,6 +166,55 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandsTest, MoveActiveTabToNewWindow) {
             url1);
   EXPECT_EQ(active_browser->tab_strip_model()->GetActiveWebContents()->GetURL(),
             url2);
+}
+
+class ReadLaterBrowserCommandsTest : public BrowserCommandsTest {
+ public:
+  ReadLaterBrowserCommandsTest() {
+    feature_list_.InitAndEnableFeature(reading_list::switches::kReadLater);
+  }
+  ~ReadLaterBrowserCommandsTest() override = default;
+
+  void SetUpOnMainThread() override {
+    // Navigate to a url that can be added to the reading list.
+    ui_test_utils::NavigateToURL(browser(), GURL("https://www.google.com"));
+    BrowserCommandsTest::SetUpOnMainThread();
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+// Verify that the bookmark bar is shown the first time someone saves to read
+// later and the metric is properly recorded.
+IN_PROC_BROWSER_TEST_F(ReadLaterBrowserCommandsTest,
+                       PRE_ReadLaterOpensBookmarksBarOnFirstUse) {
+  base::HistogramTester histogram_tester;
+  constexpr char kFirstAddHistogramName[] =
+      "ReadingList.BookmarkBarState.OnFirstAddToReadingList";
+
+  histogram_tester.ExpectTotalCount(kFirstAddHistogramName, 0);
+  EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());
+  // Verify the bookmark bar is shown after saving to the reading list.
+  MoveCurrentTabToReadLater(browser());
+  EXPECT_EQ(BookmarkBar::SHOW, browser()->bookmark_bar_state());
+  histogram_tester.ExpectTotalCount(kFirstAddHistogramName, 1);
+  ToggleBookmarkBar(browser());
+  EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());
+  // Verify the bookmark bar isn't reshown on subsequent saves to the reading
+  // list.
+  MoveCurrentTabToReadLater(browser());
+  EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());
+  histogram_tester.ExpectTotalCount(kFirstAddHistogramName, 1);
+}
+
+// Verify that the bookmark bar is not reshown after Chrome restarts.
+IN_PROC_BROWSER_TEST_F(ReadLaterBrowserCommandsTest,
+                       ReadLaterOpensBookmarksBarOnFirstUse) {
+  EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());
+  // Verify the bookmark bar is still hidden after saving to the reading list.
+  MoveCurrentTabToReadLater(browser());
+  EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());
 }
 
 }  // namespace chrome

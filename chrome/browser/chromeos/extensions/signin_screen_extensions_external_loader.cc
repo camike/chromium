@@ -17,6 +17,7 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/extensions/pending_extension_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chromeos/constants/chromeos_paths.h"
 #include "components/prefs/pref_service.h"
@@ -27,16 +28,9 @@ namespace chromeos {
 
 namespace {
 
-base::FilePath GetExtensionsCachePath() {
-  base::FilePath extensions_cache_path;
-  CHECK(base::PathService::Get(DIR_SIGNIN_PROFILE_EXTENSIONS,
-                               &extensions_cache_path));
-  return extensions_cache_path;
-}
-
 base::Value GetForceInstalledExtensionsFromPrefs(const PrefService* prefs) {
   const PrefService::Preference* const login_screen_extensions_pref =
-      prefs->FindPreference(extensions::pref_names::kLoginScreenExtensions);
+      prefs->FindPreference(extensions::pref_names::kInstallForceList);
   CHECK(login_screen_extensions_pref);
   if (!login_screen_extensions_pref->IsManaged() &&
       !login_screen_extensions_pref->IsDefaultValue()) {
@@ -44,7 +38,7 @@ base::Value GetForceInstalledExtensionsFromPrefs(const PrefService* prefs) {
     // (This branch could be triggered if, for example, an attacker modified the
     // Local State file trying to inject some extensions into the Login Screen.)
     LOG(WARNING) << "Ignoring untrusted value of the "
-                 << extensions::pref_names::kLoginScreenExtensions << " pref";
+                 << extensions::pref_names::kInstallForceList << " pref";
     return base::Value(base::Value::Type::DICTIONARY);
   }
   const base::Value* login_screen_extensions_pref_value =
@@ -56,17 +50,21 @@ base::Value GetForceInstalledExtensionsFromPrefs(const PrefService* prefs) {
 }  // namespace
 
 SigninScreenExtensionsExternalLoader::SigninScreenExtensionsExternalLoader(
-    Profile* profile)
+    Profile* profile,
+    extensions::PendingExtensionManager* pending_extension_manager)
     : profile_(profile),
-      external_cache_(GetExtensionsCachePath(),
-                      g_browser_process->shared_url_loader_factory(),
-                      base::ThreadPool::CreateSequencedTaskRunner(
-                          {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
-                           base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}),
-                      this,
-                      /*always_check_updates=*/true,
-                      /*wait_for_cache_initialization=*/false) {
+      pending_extension_manager_(pending_extension_manager),
+      external_cache_(
+          base::PathService::CheckedGet(DIR_SIGNIN_PROFILE_EXTENSIONS),
+          g_browser_process->shared_url_loader_factory(),
+          base::ThreadPool::CreateSequencedTaskRunner(
+              {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+               base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}),
+          this,
+          /*always_check_updates=*/true,
+          /*wait_for_cache_initialization=*/false) {
   DCHECK(ProfileHelper::IsSigninProfile(profile));
+  DCHECK(pending_extension_manager);
 }
 
 void SigninScreenExtensionsExternalLoader::StartLoading() {
@@ -91,15 +89,9 @@ void SigninScreenExtensionsExternalLoader::OnExtensionListsUpdated(
   LoadFinished(prefs->CreateDeepCopy());
 }
 
-void SigninScreenExtensionsExternalLoader::OnExtensionLoadedInCache(
-    const std::string& id) {}
-
-void SigninScreenExtensionsExternalLoader::OnExtensionDownloadFailed(
-    const std::string& id) {}
-
-std::string SigninScreenExtensionsExternalLoader::GetInstalledExtensionVersion(
-    const std::string& id) {
-  return std::string();
+void SigninScreenExtensionsExternalLoader::OnCachedExtensionFileDeleted(
+    const extensions::ExtensionId& id) {
+  pending_extension_manager_->Remove(id);
 }
 
 SigninScreenExtensionsExternalLoader::~SigninScreenExtensionsExternalLoader() =
@@ -113,9 +105,10 @@ void SigninScreenExtensionsExternalLoader::OnPrefsInitialized(
 void SigninScreenExtensionsExternalLoader::SubscribeAndInitializeFromPrefs() {
   pref_change_registrar_.Init(profile_->GetPrefs());
   pref_change_registrar_.Add(
-      extensions::pref_names::kLoginScreenExtensions,
-      base::Bind(&SigninScreenExtensionsExternalLoader::UpdateStateFromPrefs,
-                 base::Unretained(this)));
+      extensions::pref_names::kInstallForceList,
+      base::BindRepeating(
+          &SigninScreenExtensionsExternalLoader::UpdateStateFromPrefs,
+          base::Unretained(this)));
 
   UpdateStateFromPrefs();
 }

@@ -4,15 +4,15 @@
 
 #import "ios/web/test/web_int_test.h"
 
-#include "base/base_paths.h"
 #import "base/ios/block_types.h"
 #include "base/memory/ptr_util.h"
-#include "base/path_service.h"
 #include "base/scoped_observer.h"
+#include "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
+#import "ios/web/common/uikit_ui_util.h"
 #import "ios/web/common/web_view_creation_util.h"
-#import "ios/web/public/test/http_server/http_server.h"
 #import "ios/web/public/test/js_test_util.h"
+#import "ios/web/public/test/web_view_interaction_test_util.h"
 #include "ios/web/public/web_state_observer.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -59,14 +59,6 @@ WebIntTest::~WebIntTest() {}
 void WebIntTest::SetUp() {
   WebTest::SetUp();
 
-  // Start the http server.
-  web::test::HttpServer& server = web::test::HttpServer::GetSharedInstance();
-  ASSERT_FALSE(server.IsRunning());
-
-  base::FilePath test_data_dir;
-  ASSERT_TRUE(base::PathService::Get(base::DIR_SOURCE_ROOT, &test_data_dir));
-  server.StartOrDie(test_data_dir.Append("."));
-
   // Remove any previously existing WKWebView data.
   RemoveWKWebViewCreatedData([WKWebsiteDataStore defaultDataStore],
                              [WKWebsiteDataStore allWebsiteDataTypes]);
@@ -76,8 +68,7 @@ void WebIntTest::SetUp() {
   web_state_ = web::WebState::Create(web_state_create_params);
 
   // Resize the webview so that pages can be properly rendered.
-  web_state()->GetView().frame =
-      [UIApplication sharedApplication].keyWindow.bounds;
+  web_state()->GetView().frame = GetAnyKeyWindow().bounds;
 
   web_state()->SetDelegate(&web_state_delegate_);
   web_state()->SetKeepRenderProcessAlive(true);
@@ -87,16 +78,15 @@ void WebIntTest::TearDown() {
   RemoveWKWebViewCreatedData([WKWebsiteDataStore defaultDataStore],
                              [WKWebsiteDataStore allWebsiteDataTypes]);
 
-  web::test::HttpServer& server = web::test::HttpServer::GetSharedInstance();
-  server.Stop();
-  EXPECT_FALSE(server.IsRunning());
-
   WebTest::TearDown();
 }
 
-id WebIntTest::ExecuteJavaScript(NSString* script) {
-  return web::test::ExecuteJavaScript(web_state()->GetJSInjectionReceiver(),
-                                      script);
+std::unique_ptr<base::Value> WebIntTest::ExecuteJavaScript(NSString* script) {
+  return web::test::ExecuteJavaScript(web_state(),
+                                      base::SysNSStringToUTF8(script));
+  //  web_state()->ExecuteJavaScript
+  //  return web::test::ExecuteJavaScript(web_state()->GetJSInjectionReceiver(),
+  //                                      script);
 }
 
 bool WebIntTest::ExecuteBlockAndWaitForLoad(const GURL& url,

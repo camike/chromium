@@ -4,10 +4,13 @@
 
 #include "net/dns/host_resolver.h"
 
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/check.h"
+#include "base/immediate_crash.h"
 #include "base/macros.h"
 #include "base/no_destructor.h"
 #include "base/notreached.h"
@@ -56,8 +59,10 @@ class FailingRequestImpl : public HostResolver::ResolveHostRequest,
     return *nullopt_result;
   }
 
-  const base::Optional<EsniContent>& GetEsniResults() const override {
-    static const base::NoDestructor<base::Optional<EsniContent>> nullopt_result;
+  const base::Optional<std::vector<std::string>>& GetDnsAliasResults()
+      const override {
+    static const base::NoDestructor<base::Optional<std::vector<std::string>>>
+        nullopt_result;
     return *nullopt_result;
   }
 
@@ -79,6 +84,11 @@ class FailingRequestImpl : public HostResolver::ResolveHostRequest,
 };
 
 }  // namespace
+
+const base::Optional<std::vector<bool>>&
+HostResolver::ResolveHostRequest::GetExperimentalResultsForTesting() const {
+  IMMEDIATE_CRASH();
+}
 
 const size_t HostResolver::ManagerOptions::kDefaultRetryAttempts =
     static_cast<size_t>(-1);
@@ -107,14 +117,6 @@ HostResolver::ResolveHostParameters::ResolveHostParameters(
 
 HostResolver::~HostResolver() = default;
 
-std::unique_ptr<HostResolver::ResolveHostRequest> HostResolver::CreateRequest(
-    const HostPortPair& host,
-    const NetLogWithSource& net_log,
-    const base::Optional<ResolveHostParameters>& optional_parameters) {
-  return CreateRequest(host, NetworkIsolationKey(), net_log,
-                       optional_parameters);
-}
-
 std::unique_ptr<HostResolver::ProbeRequest>
 HostResolver::CreateDohProbeRequest() {
   // Should be overridden in any HostResolver implementation where this method
@@ -136,8 +138,8 @@ HostCache* HostResolver::GetHostCache() {
   return nullptr;
 }
 
-std::unique_ptr<base::Value> HostResolver::GetDnsConfigAsValue() const {
-  return nullptr;
+base::Value HostResolver::GetDnsConfigAsValue() const {
+  return base::Value(base::Value::Type::DICTIONARY);
 }
 
 void HostResolver::SetRequestContext(URLRequestContext* request_context) {

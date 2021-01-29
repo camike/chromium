@@ -13,8 +13,9 @@
 
 #include "base/files/file_path.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
 #include "base/mac/scoped_mach_port.h"
 #endif
 
@@ -22,7 +23,7 @@
 #include <windows.h>
 #endif
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #include <signal.h>
 #endif
 
@@ -37,7 +38,7 @@ class CrashReportDatabase;
 
 namespace crash_reporter {
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 // TODO(jperaza): Remove kEnableCrashpad and IsCrashpadEnabled() when Crashpad
 // is fully enabled on Linux.
 extern const char kEnableCrashpad[];
@@ -107,7 +108,7 @@ crashpad::CrashpadClient& GetCrashpadClient();
 
 // ChromeOS has its own, OS-level consent system; Chrome does not maintain a
 // separate Upload Consent on ChromeOS.
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 
 // Enables or disables crash report upload, taking the given consent to upload
 // into account. Consent may be ignored, uploads may not be enabled even with
@@ -122,7 +123,7 @@ void SetUploadConsent(bool consent);
 // Determines whether uploads are enabled or disabled. This information is only
 // available in the browser process.
 bool GetUploadsEnabled();
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 enum class ReportUploadState {
   NotUploaded,
@@ -151,11 +152,11 @@ void RequestSingleCrashUpload(const std::string& local_id);
 
 void DumpWithoutCrashing();
 
-#if defined(OS_LINUX) || defined(OS_ANDROID)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
 // Logs message and immediately crashes the current process without triggering a
 // crash dump.
 void CrashWithoutDumping(const std::string& message);
-#endif  // defined(OS_LINUX) || defined(OS_ANDROID)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
 
 // Returns the Crashpad database path, only valid in the browser.
 base::FilePath GetCrashpadDatabasePath();
@@ -175,7 +176,7 @@ base::FilePath::StringType::const_pointer GetCrashpadDatabasePathImpl();
 // The implementation function for ClearReportsBetween.
 void ClearReportsBetweenImpl(time_t begin, time_t end);
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
 // Captures a minidump for the process named by its |task_port| and stores it
 // in the current crash report database.
 void DumpProcessWithoutCrashing(task_t task_port);
@@ -188,12 +189,12 @@ void DumpProcessWithoutCrashing(task_t task_port);
 class CrashReporterClient;
 bool DumpWithoutCrashingForClient(CrashReporterClient* client);
 
-// Used under WebView to whitelist a memory range so it's accessible using
-// crashpad's ProcessMemory interface.
-void WhitelistMemoryRange(void* begin, size_t size);
+// If a CrashReporterClient has enabled sanitization, this function specifies
+// regions of memory which are allowed to be collected by Crashpad.
+void AllowMemoryRange(void* begin, size_t size);
 #endif  // OS_ANDROID
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 // Install a handler that gets a chance to handle faults before Crashpad. This
 // is used by V8 for trap-based bounds checks.
 void SetFirstChanceExceptionHandler(bool (*handler)(int, siginfo_t*, void*));
@@ -201,7 +202,7 @@ void SetFirstChanceExceptionHandler(bool (*handler)(int, siginfo_t*, void*));
 // Gets the socket and process ID of the Crashpad handler connected to this
 // process, valid if this function returns `true`.
 bool GetHandlerSocket(int* sock, pid_t* pid);
-#endif  // OS_LINUX
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
 
 namespace internal {
 

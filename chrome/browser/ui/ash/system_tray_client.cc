@@ -11,9 +11,11 @@
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/user_metrics.h"
+#include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+#include "chrome/browser/ash/accessibility/accessibility_manager.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
-#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
@@ -32,8 +34,12 @@
 #include "chrome/browser/ui/webui/chromeos/internet_config_dialog.h"
 #include "chrome/browser/ui/webui/chromeos/internet_detail_dialog.h"
 #include "chrome/browser/ui/webui/chromeos/multidevice_setup/multidevice_setup_dialog.h"
+#include "chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.h"
+#include "chrome/browser/ui/webui/settings/chromeos/constants/setting.mojom.h"
 #include "chrome/browser/upgrade_detector/upgrade_detector.h"
+#include "chrome/browser/web_applications/components/web_app_id_constants.h"
 #include "chrome/common/url_constants.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager/session_manager_client.h"
@@ -70,8 +76,14 @@ void ShowSettingsSubPageForActiveUser(const std::string& sub_page) {
       ProfileManager::GetActiveUserProfile(), sub_page);
 }
 
-// Returns the severity of a pending Chrome / Chrome OS update.
-ash::UpdateSeverity GetUpdateSeverity(UpgradeDetector* detector) {
+// Returns the severity of a pending update.
+ash::UpdateSeverity GetUpdateSeverity(ash::UpdateType update_type,
+                                      UpgradeDetector* detector) {
+  // Lacros is always "low", which is the same severity OS updates start with.
+  if (update_type == ash::UpdateType::kLacros)
+    return ash::UpdateSeverity::kLow;
+
+  // OS updates use UpgradeDetector's severity mapping.
   switch (detector->upgrade_notification_stage()) {
     case UpgradeDetector::UPGRADE_ANNOYANCE_NONE:
       return ash::UpdateSeverity::kNone;
@@ -84,11 +96,8 @@ ash::UpdateSeverity GetUpdateSeverity(UpgradeDetector* detector) {
     case UpgradeDetector::UPGRADE_ANNOYANCE_HIGH:
       return ash::UpdateSeverity::kHigh;
     case UpgradeDetector::UPGRADE_ANNOYANCE_CRITICAL:
-      break;
+      return ash::UpdateSeverity::kCritical;
   }
-  DCHECK_EQ(detector->upgrade_notification_stage(),
-            UpgradeDetector::UPGRADE_ANNOYANCE_CRITICAL);
-  return ash::UpdateSeverity::kCritical;
 }
 
 const chromeos::NetworkState* GetNetworkState(const std::string& network_id) {
@@ -105,6 +114,18 @@ bool IsArcVpn(const std::string& network_id) {
          network_state->GetVpnProviderType() == shill::kProviderArcVpn;
 }
 
+bool ShouldOpenCellularSetupPsimFlowOnClick(const std::string& network_id) {
+  // |kActivationStateNotActivated| is only set in physical SIM networks,
+  // checking a networks activation state is |kActivationStateNotActivated|
+  // ensures the current network is a phyical SIM network.
+
+  const chromeos::NetworkState* network_state = GetNetworkState(network_id);
+  return network_state && network_state->type() == shill::kTypeCellular &&
+         network_state->activation_state() ==
+             shill::kActivationStateNotActivated &&
+         chromeos::features::IsCellularActivationUiEnabled();
+}
+
 }  // namespace
 
 SystemTrayClient::SystemTrayClient()
@@ -112,11 +133,14 @@ SystemTrayClient::SystemTrayClient()
       update_notification_style_(ash::NotificationStyle::kDefault) {
   // If this observes clock setting changes before ash comes up the IPCs will
   // be queued on |system_tray_|.
-  g_browser_process->platform_part()->GetSystemClock()->AddObserver(this);
+  chromeos::system::SystemClock* clock =
+      g_browser_process->platform_part()->GetSystemClock();
+  clock->AddObserver(this);
+  system_tray_->SetUse24HourClock(clock->ShouldUse24HourClock());
 
   // If an upgrade is available at startup then tell ash about it.
   if (UpgradeDetector::GetInstance()->notify_upgrade())
-    HandleUpdateAvailable();
+    HandleUpdateAvailable(ash::UpdateType::kSystem);
 
   // If the device is enterprise managed then send ash the enterprise domain.
   policy::BrowserPolicyConnectorChromeOS* policy_connector =
@@ -125,7 +149,7 @@ SystemTrayClient::SystemTrayClient()
       policy_connector->GetDeviceCloudPolicyManager();
   if (policy_manager)
     policy_manager->core()->store()->AddObserver(this);
-  UpdateEnterpriseDisplayDomain();
+  UpdateEnterpriseDomainInfo();
 
   system_tray_->SetClient(this);
 
@@ -156,11 +180,6 @@ SystemTrayClient* SystemTrayClient::Get() {
   return g_system_tray_client_instance;
 }
 
-void SystemTrayClient::SetFlashUpdateAvailable() {
-  flash_update_available_ = true;
-  HandleUpdateAvailable();
-}
-
 void SystemTrayClient::SetUpdateNotificationState(
     ash::NotificationStyle style,
     const base::string16& notification_title,
@@ -168,7 +187,11 @@ void SystemTrayClient::SetUpdateNotificationState(
   update_notification_style_ = style;
   update_notification_title_ = notification_title;
   update_notification_body_ = notification_body;
-  HandleUpdateAvailable();
+  HandleUpdateAvailable(ash::UpdateType::kSystem);
+}
+
+void SystemTrayClient::SetLacrosUpdateAvailable() {
+  HandleUpdateAvailable(ash::UpdateType::kLacros);
 }
 
 void SystemTrayClient::SetPrimaryTrayEnabled(bool enabled) {
@@ -201,7 +224,8 @@ void SystemTrayClient::ShowSettings() {
 
 void SystemTrayClient::ShowBluetoothSettings() {
   base::RecordAction(base::UserMetricsAction("ShowBluetoothSettingsPage"));
-  ShowSettingsSubPageForActiveUser(chrome::kBluetoothSubPage);
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kBluetoothDevicesSubpagePath);
 }
 
 void SystemTrayClient::ShowBluetoothPairingDialog(
@@ -219,7 +243,8 @@ void SystemTrayClient::ShowBluetoothPairingDialog(
 void SystemTrayClient::ShowDateSettings() {
   base::RecordAction(base::UserMetricsAction("ShowDateOptions"));
   // Everybody can change the time zone (even though it is a device setting).
-  ShowSettingsSubPageForActiveUser(chrome::kDateTimeSubPage);
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kDateAndTimeSectionPath);
 }
 
 void SystemTrayClient::ShowSetTimeDialog() {
@@ -228,12 +253,14 @@ void SystemTrayClient::ShowSetTimeDialog() {
 
 void SystemTrayClient::ShowDisplaySettings() {
   base::RecordAction(base::UserMetricsAction("ShowDisplayOptions"));
-  ShowSettingsSubPageForActiveUser(chrome::kDisplaySubPage);
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kDisplaySubpagePath);
 }
 
 void SystemTrayClient::ShowPowerSettings() {
   base::RecordAction(base::UserMetricsAction("Tray_ShowPowerOptions"));
-  ShowSettingsSubPageForActiveUser(chrome::kPowerSubPage);
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kPowerSubpagePath);
 }
 
 void SystemTrayClient::ShowChromeSlow() {
@@ -244,18 +271,30 @@ void SystemTrayClient::ShowChromeSlow() {
 
 void SystemTrayClient::ShowIMESettings() {
   base::RecordAction(base::UserMetricsAction("OpenLanguageOptionsDialog"));
-  ShowSettingsSubPageForActiveUser(chrome::kOsLanguagesDetailsSubPage);
+  const std::string path =
+      base::FeatureList::IsEnabled(
+          ::chromeos::features::kLanguageSettingsUpdate)
+          ? chromeos::settings::mojom::kInputSubpagePath
+          : chromeos::settings::mojom::kLanguagesAndInputDetailsSubpagePath;
+  ShowSettingsSubPageForActiveUser(path);
 }
 
 void SystemTrayClient::ShowConnectedDevicesSettings() {
-  ShowSettingsSubPageForActiveUser(chrome::kConnectedDevicesSubPage);
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kMultiDeviceFeaturesSubpagePath);
+}
+
+void SystemTrayClient::ShowTetherNetworkSettings() {
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kMobileDataNetworksSubpagePath);
 }
 
 void SystemTrayClient::ShowAboutChromeOS() {
   // We always want to check for updates when showing the about page from the
   // Ash UI.
-  ShowSettingsSubPageForActiveUser(std::string(chrome::kHelpSubPage) +
-                                   "?checkForUpdate=true");
+  ShowSettingsSubPageForActiveUser(
+      std::string(chromeos::settings::mojom::kAboutChromeOsSectionPath) +
+      "?checkForUpdate=true");
 }
 
 void SystemTrayClient::ShowHelp() {
@@ -266,20 +305,27 @@ void SystemTrayClient::ShowHelp() {
 void SystemTrayClient::ShowAccessibilityHelp() {
   chrome::ScopedTabbedBrowserDisplayer displayer(
       ProfileManager::GetActiveUserProfile());
-  chromeos::AccessibilityManager::ShowAccessibilityHelp(displayer.browser());
+  AccessibilityManager::ShowAccessibilityHelp(displayer.browser());
 }
 
 void SystemTrayClient::ShowAccessibilitySettings() {
   base::RecordAction(base::UserMetricsAction("ShowAccessibilitySettings"));
-  ShowSettingsSubPageForActiveUser(chrome::kOsAccessibilitySubPage);
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kManageAccessibilitySubpagePath);
 }
 
 void SystemTrayClient::ShowGestureEducationHelp() {
-  chrome::ScopedTabbedBrowserDisplayer displayer(
-      ProfileManager::GetActiveUserProfile());
   base::RecordAction(base::UserMetricsAction("ShowGestureEducationHelp"));
-  ShowSingletonTab(displayer.browser(),
-                   GURL(chrome::kChromeOSGestureEducationHelpURL));
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  if (!profile)
+    return;
+
+  apps::AppServiceProxy* proxy =
+      apps::AppServiceProxyFactory::GetForProfileRedirectInIncognito(profile);
+  proxy->LaunchAppWithUrl(web_app::kHelpAppId, ui::EventFlags::EF_NONE,
+                          GURL(chrome::kChromeOSGestureEducationHelpURL),
+                          apps::mojom::LaunchSource::kFromOtherApp,
+                          display::kDefaultDisplayId);
 }
 
 void SystemTrayClient::ShowPaletteHelp() {
@@ -290,7 +336,8 @@ void SystemTrayClient::ShowPaletteHelp() {
 
 void SystemTrayClient::ShowPaletteSettings() {
   base::RecordAction(base::UserMetricsAction("ShowPaletteOptions"));
-  ShowSettingsSubPageForActiveUser(chrome::kStylusSubPage);
+  ShowSettingsSubPageForActiveUser(
+      chromeos::settings::mojom::kStylusSubpagePath);
 }
 
 void SystemTrayClient::ShowPublicAccountInfo() {
@@ -348,6 +395,14 @@ void SystemTrayClient::ShowNetworkCreate(const std::string& type) {
   chromeos::InternetConfigDialog::ShowDialogForNetworkType(type);
 }
 
+void SystemTrayClient::ShowSettingsCellularSetupPsimFlow() {
+  // TODO(crbug.com/1093185) Add metrics action recorder
+  std::string page = chromeos::settings::mojom::kCellularNetworksSubpagePath;
+  page += "&showCellularSetup=true";
+  page += "&showPsimFlow=true";
+  ShowSettingsSubPageForActiveUser(page);
+}
+
 void SystemTrayClient::ShowThirdPartyVpnCreate(
     const std::string& extension_id) {
   Profile* profile = ProfileManager::GetPrimaryUserProfile();
@@ -398,10 +453,21 @@ void SystemTrayClient::ShowNetworkSettingsHelper(const std::string& network_id,
     return;
   }
 
-  std::string page = chrome::kInternetSubPage;
+  if (ShouldOpenCellularSetupPsimFlowOnClick(network_id)) {
+    // Special case: Clicking on "click to activate" on a psim network item
+    // should open cellular setup dialogs' psim flow if the device has
+    // |kUpdatedCellularActivationUi| feature enabled and is a non-activated
+    // cellular network
+    ShowSettingsCellularSetupPsimFlow();
+    return;
+  }
+
+  std::string page = chromeos::settings::mojom::kNetworkSectionPath;
   const chromeos::NetworkState* network_state = GetNetworkState(network_id);
   if (!network_id.empty() && network_state) {
-    page = chrome::kNetworkDetailSubPage;
+    // TODO(khorimoto): Use a more general path name here. This path is named
+    // kWifi*, but it's actually a generic page.
+    page = chromeos::settings::mojom::kWifiDetailsSubpagePath;
     page += "?guid=";
     page += net::EscapeUrlEncodedData(network_id, true);
     page += "&name=";
@@ -410,6 +476,9 @@ void SystemTrayClient::ShowNetworkSettingsHelper(const std::string& network_id,
     page += net::EscapeUrlEncodedData(
         chromeos::network_util::TranslateShillTypeToONC(network_state->type()),
         true);
+    page += "&settingId=";
+    page += base::NumberToString(static_cast<int32_t>(
+        chromeos::settings::mojom::Setting::kDisconnectWifiNetwork));
     if (show_configure)
       page += "&showConfigure=true";
   }
@@ -422,12 +491,7 @@ void SystemTrayClient::ShowMultiDeviceSetup() {
 }
 
 void SystemTrayClient::RequestRestartForUpdate() {
-  // Flash updates on Chrome OS require device reboot.
-  const browser_shutdown::RebootPolicy reboot_policy =
-      flash_update_available_ ? browser_shutdown::RebootPolicy::kForceReboot
-                              : browser_shutdown::RebootPolicy::kOptionalReboot;
-
-  browser_shutdown::NotifyAndTerminate(true /* fast_path */, reboot_policy);
+  browser_shutdown::NotifyAndTerminate(/*fast_path=*/true);
 }
 
 void SystemTrayClient::SetLocaleAndExit(const std::string& locale_iso_code) {
@@ -436,31 +500,19 @@ void SystemTrayClient::SetLocaleAndExit(const std::string& locale_iso_code) {
   chrome::AttemptUserExit();
 }
 
-void SystemTrayClient::HandleUpdateAvailable() {
-  // Show an update icon for Chrome updates and Flash component updates.
+void SystemTrayClient::HandleUpdateAvailable(ash::UpdateType update_type) {
   UpgradeDetector* detector = UpgradeDetector::GetInstance();
-  bool update_available = detector->notify_upgrade() || flash_update_available_;
-  DCHECK(update_available);
-  if (!update_available)
+  if (update_type == ash::UpdateType::kSystem && !detector->notify_upgrade()) {
+    LOG(ERROR) << "Tried to show update notification when no update available";
     return;
+  }
 
-  // Get the Chrome update severity.
-  ash::UpdateSeverity severity = GetUpdateSeverity(detector);
-
-  // Flash updates are low severity unless the Chrome severity is higher.
-  if (flash_update_available_)
-    severity = std::max(severity, ash::UpdateSeverity::kLow);
-
-  // Show a string specific to updating flash player if there is no system
-  // update.
-  ash::UpdateType update_type = detector->notify_upgrade()
-                                    ? ash::UpdateType::kSystem
-                                    : ash::UpdateType::kFlash;
-
+  // Show the system tray icon.
+  ash::UpdateSeverity severity = GetUpdateSeverity(update_type, detector);
   system_tray_->ShowUpdateIcon(severity, detector->is_factory_reset_required(),
                                detector->is_rollback(), update_type);
 
-  // Only overwrite title and body for system updates, not for flash updates.
+  // Only overwrite title and body for system updates.
   if (update_type == ash::UpdateType::kSystem) {
     system_tray_->SetUpdateNotificationState(update_notification_style_,
                                              update_notification_title_,
@@ -489,32 +541,32 @@ void SystemTrayClient::OnUpdateOverCellularOneTimePermissionGranted() {
 }
 
 void SystemTrayClient::OnUpgradeRecommended() {
-  HandleUpdateAvailable();
+  HandleUpdateAvailable(ash::UpdateType::kSystem);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // policy::CloudPolicyStore::Observer
 void SystemTrayClient::OnStoreLoaded(policy::CloudPolicyStore* store) {
-  UpdateEnterpriseDisplayDomain();
+  UpdateEnterpriseDomainInfo();
 }
 
 void SystemTrayClient::OnStoreError(policy::CloudPolicyStore* store) {
-  UpdateEnterpriseDisplayDomain();
+  UpdateEnterpriseDomainInfo();
 }
 
-void SystemTrayClient::UpdateEnterpriseDisplayDomain() {
+void SystemTrayClient::UpdateEnterpriseDomainInfo() {
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
-  const std::string enterprise_display_domain =
-      connector->GetEnterpriseDisplayDomain();
+  const std::string enterprise_domain_manager =
+      connector->GetEnterpriseDomainManager();
   const bool active_directory_managed = connector->IsActiveDirectoryManaged();
-  if (enterprise_display_domain == last_enterprise_display_domain_ &&
+  if (enterprise_domain_manager == last_enterprise_domain_manager_ &&
       active_directory_managed == last_active_directory_managed_) {
     return;
   }
   // Send to ash, which will add an item to the system tray.
-  system_tray_->SetEnterpriseDisplayDomain(enterprise_display_domain,
-                                           active_directory_managed);
-  last_enterprise_display_domain_ = enterprise_display_domain;
+  system_tray_->SetEnterpriseDomainInfo(enterprise_domain_manager,
+                                        active_directory_managed);
+  last_enterprise_domain_manager_ = enterprise_domain_manager;
   last_active_directory_managed_ = active_directory_managed;
 }

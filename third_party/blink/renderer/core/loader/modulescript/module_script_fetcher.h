@@ -25,17 +25,18 @@ class ModuleScriptLoader;
 class CORE_EXPORT ModuleScriptFetcher : public ResourceClient {
  public:
   // ModuleScriptFetcher should only be called from ModuleScriptLoader.
-  explicit ModuleScriptFetcher(util::PassKey<ModuleScriptLoader>);
+  explicit ModuleScriptFetcher(base::PassKey<ModuleScriptLoader>);
 
   class CORE_EXPORT Client : public GarbageCollectedMixin {
    public:
-    virtual void NotifyFetchFinished(
-        const base::Optional<ModuleScriptCreationParams>&,
+    virtual void NotifyFetchFinishedError(
         const HeapVector<Member<ConsoleMessage>>& error_messages) = 0;
+    virtual void NotifyFetchFinishedSuccess(
+        const ModuleScriptCreationParams&) = 0;
 
     // These helpers are used only from WorkletModuleResponsesMap.
     // TODO(nhiroki): Move these helpers to WorkletModuleResponsesMap.
-    void OnFetched(const base::Optional<ModuleScriptCreationParams>&);
+    void OnFetched(const ModuleScriptCreationParams&);
     void OnFailed();
   };
 
@@ -49,13 +50,13 @@ class CORE_EXPORT ModuleScriptFetcher : public ResourceClient {
                      ModuleGraphLevel,
                      Client*) = 0;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  protected:
   static bool WasModuleLoadSuccessful(
-      Resource* resource,
+      ScriptResource* resource,
       HeapVector<Member<ConsoleMessage>>* error_messages,
-      ModuleScriptCreationParams::ModuleType* module_type);
+      ModuleType* module_type);
 };
 
 }  // namespace blink

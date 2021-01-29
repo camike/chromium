@@ -4,10 +4,11 @@
 
 #include "components/invalidation/impl/unacked_invalidation_set.h"
 
+#include "base/logging.h"
 #include "components/invalidation/public/ack_handle.h"
 #include "components/invalidation/public/topic_invalidation_map.h"
 
-namespace syncer {
+namespace invalidation {
 
 const size_t UnackedInvalidationSet::kMaxBufferedInvalidations = 5;
 
@@ -127,4 +128,4 @@ void UnackedInvalidationSet::Truncate(size_t max_size) {
   invalidations_.insert(unknown_version);
 }
 
-}  // namespace syncer
+}  // namespace invalidation

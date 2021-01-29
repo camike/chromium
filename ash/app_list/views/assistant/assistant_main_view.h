@@ -11,9 +11,8 @@
 #include "ash/assistant/model/assistant_ui_model_observer.h"
 #include "ash/public/cpp/assistant/controller/assistant_controller.h"
 #include "ash/public/cpp/assistant/controller/assistant_controller_observer.h"
-#include "ash/public/cpp/assistant/controller/assistant_ui_controller.h"
 #include "base/macros.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "ui/views/view.h"
 
 namespace ash {
@@ -55,14 +54,8 @@ class APP_LIST_EXPORT AssistantMainView : public views::View,
   AssistantDialogPlate* dialog_plate_;     // Owned by view hierarchy.
   AppListAssistantMainStage* main_stage_;  // Owned by view hierarchy.
 
-  ScopedObserver<AssistantController, AssistantControllerObserver>
-      assistant_controller_observer_{this};
-
-  ScopedObserver<AssistantUiController,
-                 AssistantUiModelObserver,
-                 &AssistantUiController::AddModelObserver,
-                 &AssistantUiController::RemoveModelObserver>
-      assistant_ui_model_observer_{this};
+  base::ScopedObservation<AssistantController, AssistantControllerObserver>
+      assistant_controller_observation_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AssistantMainView);
 };

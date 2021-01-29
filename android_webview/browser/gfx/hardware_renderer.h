@@ -10,13 +10,31 @@
 #include "android_webview/browser/gfx/child_frame.h"
 #include "android_webview/browser/gfx/output_surface_provider_webview.h"
 #include "base/macros.h"
+#include "ui/gfx/android/android_surface_control_compat.h"
 #include "ui/gfx/color_space.h"
 
 namespace android_webview {
 
 class RenderThreadManager;
 
+struct OverlaysParams {
+  enum class Mode {
+    Disabled,
+    Enabled,
+  };
+
+  typedef ASurfaceControl* (*GetSurfaceControlFn)();
+  typedef void (*MergeTransactionFn)(ASurfaceTransaction*);
+
+  Mode overlays_mode = Mode::Disabled;
+  GetSurfaceControlFn get_surface_control = nullptr;
+  MergeTransactionFn merge_transaction = nullptr;
+};
+
 struct HardwareRendererDrawParams {
+  bool operator==(const HardwareRendererDrawParams& other) const;
+  bool operator!=(const HardwareRendererDrawParams& other) const;
+
   int clip_left;
   int clip_top;
   int clip_right;
@@ -45,8 +63,11 @@ class HardwareRenderer {
 
   virtual ~HardwareRenderer();
 
-  void Draw(HardwareRendererDrawParams* params);
+  void Draw(const HardwareRendererDrawParams& params,
+            const OverlaysParams& overlays_params);
   void CommitFrame();
+  virtual void RemoveOverlays(
+      OverlaysParams::MergeTransactionFn merge_transaction) = 0;
 
  protected:
   explicit HardwareRenderer(RenderThreadManager* state);
@@ -57,7 +78,10 @@ class HardwareRenderer {
       const viz::FrameSinkId& frame_sink_id,
       uint32_t layer_tree_frame_sink_id);
 
-  virtual void DrawAndSwap(HardwareRendererDrawParams* params) = 0;
+  void ReportDrawMetric(const HardwareRendererDrawParams& params);
+
+  virtual void DrawAndSwap(const HardwareRendererDrawParams& params,
+                           const OverlaysParams& overlays_params) = 0;
 
   RenderThreadManager* const render_thread_manager_;
 
@@ -70,6 +94,10 @@ class HardwareRenderer {
   // last frame. The |frame| member is always null since frame has already
   // been submitted.
   std::unique_ptr<ChildFrame> child_frame_;
+  // Used in metrics. Indicates if we invalidated/submitted for the ChildFrame
+  // in |child_frame_|
+  bool did_invalidate_ = false;
+  bool did_submit_compositor_frame_ = false;
 
   // Information from UI on last commit.
   gfx::Vector2d scroll_offset_;
@@ -78,6 +106,9 @@ class HardwareRenderer {
   // of layer_tree_frame_sink_id, and resources for old output surfaces are
   // dropped.
   uint32_t last_committed_layer_tree_frame_sink_id_ = 0u;
+
+  // Draw params that was used in previous draw. Used in reporting draw metric.
+  HardwareRendererDrawParams last_draw_params_ = {};
 
   DISALLOW_COPY_AND_ASSIGN(HardwareRenderer);
 };

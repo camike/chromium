@@ -1,0 +1,57 @@
+<style>
+  .emoji-picker {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 20px);
+    margin: 10px;
+    margin-top: 0;
+    width: calc(100vw - 20px);
+  }
+
+  #search {
+    display: none;
+  }
+
+  .emoji-tabs {
+    display: flex;
+    flex-shrink: 0;
+    overflow-x: scroll;
+    width: 100%;
+  }
+
+  .emoji-groups {
+    flex-grow: 1;
+    overflow-y: scroll;
+    scroll-behavior: smooth;
+  }
+</style>
+
+<div class="emoji-picker">
+
+  <input
+    id="search" class="w-100"
+    type="text" value="{{search::input}}"
+  ></input>
+
+  <div class="emoji-tabs">
+    <template is="dom-repeat" items="[[groups]]">
+      <emoji-group-button group="[[item.group]]" active="[[item.active]]"
+        icon="[[item.icon]]"></emoji-group-button>
+    </template>
+  </div>
+
+  <div class="emoji-groups w-100">
+    <!--
+      group-history is the "frequently used" group and is populated in code,
+      whereas the other groups are created from the emoji metadata.
+    -->
+    <div id="group-history">
+      <emoji-group data="[[history]]"></emoji-group>
+    </div>
+    <template is="dom-repeat" items="[[emojiData]]">
+      <div id="group-[[index]]">
+        <emoji-group data="[[item]]"></emoji-group>
+      </div>
+    </template>
+  </div>
+</div>

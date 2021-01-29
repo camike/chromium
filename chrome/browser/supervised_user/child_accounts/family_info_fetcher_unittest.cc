@@ -17,12 +17,12 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/signin/public/identity_manager/consent_level.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_status_code.h"
-#include "net/url_request/url_request_test_util.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
@@ -144,7 +144,7 @@ class FamilyInfoFetcherTest
   }
 
   CoreAccountInfo SetPrimaryAccount() {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     return identity_test_env_.SetUnconsentedPrimaryAccount(kAccountId);
 #elif defined(OS_ANDROID)
     // TODO(https://crbug.com/1046746): Change to SetUnconsentedPrimaryAccount()
@@ -157,7 +157,7 @@ class FamilyInfoFetcherTest
   }
 
   void IssueRefreshToken() {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     identity_test_env_.MakeUnconsentedPrimaryAccountAvailable(kAccountId);
 #elif defined(OS_ANDROID)
     identity_test_env_.MakePrimaryAccountAvailable(kAccountId);
@@ -319,7 +319,7 @@ TEST_F(FamilyInfoFetcherTest, GetTokenFailure) {
   StartGetFamilyProfile();
 
   // On failure to get an access token we expect a token error.
-  EXPECT_CALL(*this, OnFailure(FamilyInfoFetcher::TOKEN_ERROR));
+  EXPECT_CALL(*this, OnFailure(FamilyInfoFetcher::ErrorCode::kTokenError));
   identity_test_env_.WaitForAccessTokenRequestIfNecessaryAndRespondWithError(
       identity_test_env_.identity_manager()->GetPrimaryAccountId(
           signin::ConsentLevel::kNotRequired),
@@ -334,7 +334,7 @@ TEST_F(FamilyInfoFetcherTest, InvalidResponse) {
   WaitForAccessTokenRequestAndIssueToken();
 
   // Invalid response data should result in a service error.
-  EXPECT_CALL(*this, OnFailure(FamilyInfoFetcher::SERVICE_ERROR));
+  EXPECT_CALL(*this, OnFailure(FamilyInfoFetcher::ErrorCode::kServiceError));
   SendInvalidGetFamilyProfileResponse();
 }
 
@@ -346,6 +346,6 @@ TEST_F(FamilyInfoFetcherTest, FailedResponse) {
   WaitForAccessTokenRequestAndIssueToken();
 
   // Failed API call should result in a network error.
-  EXPECT_CALL(*this, OnFailure(FamilyInfoFetcher::NETWORK_ERROR));
+  EXPECT_CALL(*this, OnFailure(FamilyInfoFetcher::ErrorCode::kNetworkError));
   SendFailedResponse();
 }

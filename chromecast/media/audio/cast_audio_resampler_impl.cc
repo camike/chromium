@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "chromecast/media/api/cast_audio_resampler.h"
 #include "media/base/audio_bus.h"
 #include "media/base/multi_channel_resampler.h"
@@ -63,7 +63,9 @@ class CastAudioResamplerImpl : public CastAudioResampler {
     int dest_offset = buffered_frames_;
     buffered_frames_ = 0;
 
-    CopyCurrentInputTo(frames_left, audio_bus, dest_offset);
+    if (frames_left) {
+      CopyCurrentInputTo(frames_left, audio_bus, dest_offset);
+    }
   }
 
   void CopyCurrentInputTo(int frames_to_copy,

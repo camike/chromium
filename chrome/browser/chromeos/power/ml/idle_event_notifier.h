@@ -47,12 +47,12 @@ class IdleEventNotifier : public PowerManagerClient::Observer,
       base::TimeDelta::FromSeconds(30);
 
   // Count number of key, mouse and touch events in the past hour.
-  static constexpr base::TimeDelta kUserInputEventsDuration =
-      base::TimeDelta::FromMinutes(60);
+  static constexpr auto kUserInputEventsDuration =
+      base::TimeDelta::FromHours(1);
 
   // Granularity of input events is per minute.
   static constexpr int kNumUserInputEventsBuckets =
-      kUserInputEventsDuration / base::TimeDelta::FromMinutes(1);
+      kUserInputEventsDuration.InMinutes();
 
   struct ActivityData {
     ActivityData();
@@ -99,9 +99,9 @@ class IdleEventNotifier : public PowerManagerClient::Observer,
 
   // chromeos::PowerManagerClient::Observer overrides:
   void LidEventReceived(chromeos::PowerManagerClient::LidState state,
-                        const base::TimeTicks& timestamp) override;
+                        base::TimeTicks timestamp) override;
   void PowerChanged(const power_manager::PowerSupplyProperties& proto) override;
-  void SuspendDone(const base::TimeDelta& sleep_duration) override;
+  void SuspendDone(base::TimeDelta sleep_duration) override;
 
   // ui::UserActivityObserver overrides:
   void OnUserActivity(const ui::Event* event) override;

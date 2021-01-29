@@ -17,7 +17,8 @@ class WPTServe(server_base.ServerBase):
     def __init__(self, port_obj, output_dir):
         super(WPTServe, self).__init__(port_obj, output_dir)
         # These ports must match wpt_support/wpt.config.json
-        http_port, http_alt_port, https_port = (8001, 8081, 8444)
+        http_port, http_alt_port, https_port, https_alt_port = (8001, 8081,
+                                                                8444, 8445)
         ws_port, wss_port = (9001, 9444)
         self._name = 'wptserve'
         self._log_prefixes = ('wptserve_stderr', )
@@ -29,6 +30,10 @@ class WPTServe(server_base.ServerBase):
             'scheme': 'http'
         }, {
             'port': https_port,
+            'scheme': 'https',
+            'sslcert': True
+        }, {
+            'port': https_alt_port,
             'scheme': 'https',
             'sslcert': True
         }, {
@@ -48,8 +53,8 @@ class WPTServe(server_base.ServerBase):
         finder = PathFinder(fs)
         path_to_pywebsocket = finder.path_from_chromium_base(
             'third_party', 'pywebsocket3', 'src')
-        self.path_to_wpt_support = finder.path_from_blink_tools(
-            'blinkpy', 'third_party', 'wpt')
+        self.path_to_wpt_support = finder.path_from_chromium_base(
+            'third_party', 'wpt_tools')
         path_to_wpt_root = fs.join(self.path_to_wpt_support, 'wpt')
         path_to_wpt_tests = fs.abspath(
             fs.join(self._port_obj.web_tests_dir(), 'external', 'wpt'))
@@ -57,8 +62,15 @@ class WPTServe(server_base.ServerBase):
                                       'handlers')
         wpt_script = fs.join(path_to_wpt_root, 'wpt')
         start_cmd = [
-            self._port_obj.host.executable, '-u', wpt_script, 'serve',
-            '--config', self._config_file, '--doc_root', path_to_wpt_tests
+            self._port_obj.python3_command(),
+            '-u',
+            wpt_script,
+            'serve',
+            '--config',
+            self._config_file,
+            '--doc_root',
+            path_to_wpt_tests,
+            '--no-h2',
         ]
 
         # Some users (e.g. run_webdriver_tests.py) do not need WebSocket

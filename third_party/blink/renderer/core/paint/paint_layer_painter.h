@@ -17,7 +17,6 @@ namespace blink {
 class CullRect;
 class ClipRect;
 class ComputedStyle;
-class DisplayItemClient;
 class GraphicsContext;
 struct PhysicalOffset;
 
@@ -56,6 +55,8 @@ class CORE_EXPORT PaintLayerPainter {
   // Returns true if the painted output of this PaintLayer and its children is
   // invisible and therefore can't impact painted output.
   static bool PaintedOutputInvisible(const ComputedStyle&);
+
+  bool ShouldUseInfiniteCullRect(GlobalPaintFlags);
 
  private:
   friend class PaintLayerPainterTest;
@@ -100,10 +101,6 @@ class CORE_EXPORT PaintLayerPainter {
                              GraphicsContext&,
                              const PaintLayerPaintingInfo&,
                              PaintLayerFlags);
-
-  void FillMaskingFragment(GraphicsContext&,
-                           const ClipRect&,
-                           const DisplayItemClient&);
 
   void AdjustForPaintProperties(const GraphicsContext&,
                                 PaintLayerPaintingInfo&,

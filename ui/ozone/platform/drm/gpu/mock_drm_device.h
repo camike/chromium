@@ -71,6 +71,8 @@ class MockDrmDevice : public DrmDevice {
   }
   int get_page_flip_call_count() const { return page_flip_call_count_; }
   int get_overlay_clear_call_count() const { return overlay_clear_call_count_; }
+  int get_test_modeset_count() const { return test_modeset_count_; }
+  int get_commit_modeset_count() const { return commit_modeset_count_; }
   int get_commit_count() const { return commit_count_; }
   int get_set_object_property_count() const {
     return set_object_property_count_;
@@ -175,10 +177,6 @@ class MockDrmDevice : public DrmDevice {
   bool MapDumbBuffer(uint32_t handle, size_t size, void** pixels) override;
   bool UnmapDumbBuffer(void* pixels, size_t size) override;
   bool CloseBufferHandle(uint32_t handle) override;
-  bool CommitProperties(drmModeAtomicReq* request,
-                        uint32_t flags,
-                        uint32_t crtc_count,
-                        scoped_refptr<PageFlipRequest> callback) override;
   bool SetGammaRamp(
       uint32_t crtc_id,
       const std::vector<display::GammaRampRGBEntry>& lut) override;
@@ -187,6 +185,12 @@ class MockDrmDevice : public DrmDevice {
 
  private:
   ~MockDrmDevice() override;
+
+  bool CommitPropertiesInternal(
+      drmModeAtomicReq* request,
+      uint32_t flags,
+      uint32_t crtc_count,
+      scoped_refptr<PageFlipRequest> callback) override;
 
   bool UpdateProperty(uint32_t id,
                       uint64_t value,
@@ -203,6 +207,8 @@ class MockDrmDevice : public DrmDevice {
   int page_flip_call_count_;
   int overlay_clear_call_count_;
   int allocate_buffer_count_;
+  int test_modeset_count_ = 0;
+  int commit_modeset_count_ = 0;
   int commit_count_ = 0;
   int set_object_property_count_ = 0;
   int set_gamma_ramp_count_ = 0;

@@ -4,8 +4,11 @@
 
 #include "chrome/browser/ui/webui/settings/accessibility_main_handler.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/values.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/accessibility/accessibility_state_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_context_menu/accessibility_labels_bubble_model.h"
@@ -15,9 +18,6 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
-#if !defined(OS_CHROMEOS)
-#include "content/public/browser/browser_accessibility_state.h"
-#endif  // !defined(OS_CHROMEOS)
 
 namespace settings {
 
@@ -27,8 +27,8 @@ AccessibilityMainHandler::~AccessibilityMainHandler() = default;
 
 void AccessibilityMainHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
-      "getScreenReaderState",
-      base::BindRepeating(&AccessibilityMainHandler::HandleGetScreenReaderState,
+      "a11yPageReady",
+      base::BindRepeating(&AccessibilityMainHandler::HandleA11yPageReady,
                           base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "confirmA11yImageLabels",
@@ -38,22 +38,21 @@ void AccessibilityMainHandler::RegisterMessages() {
 }
 
 void AccessibilityMainHandler::OnJavascriptAllowed() {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   accessibility_subscription_ =
-      chromeos::AccessibilityManager::Get()->RegisterCallback(
-          base::BindRepeating(
-              &AccessibilityMainHandler::OnAccessibilityStatusChanged,
-              base::Unretained(this)));
-#endif  // defined(OS_CHROMEOS)
+      AccessibilityManager::Get()->RegisterCallback(base::BindRepeating(
+          &AccessibilityMainHandler::OnAccessibilityStatusChanged,
+          base::Unretained(this)));
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
 void AccessibilityMainHandler::OnJavascriptDisallowed() {
-#if defined(OS_CHROMEOS)
-  accessibility_subscription_.reset();
-#endif  // defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  accessibility_subscription_ = {};
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
-void AccessibilityMainHandler::HandleGetScreenReaderState(
+void AccessibilityMainHandler::HandleA11yPageReady(
     const base::ListValue* args) {
   AllowJavascript();
   SendScreenReaderStateChanged();
@@ -79,14 +78,14 @@ void AccessibilityMainHandler::SendScreenReaderStateChanged() {
   FireWebUIListener("screen-reader-state-changed", result);
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 void AccessibilityMainHandler::OnAccessibilityStatusChanged(
-    const chromeos::AccessibilityStatusEventDetails& details) {
+    const AccessibilityStatusEventDetails& details) {
   if (details.notification_type ==
-      chromeos::ACCESSIBILITY_TOGGLE_SPOKEN_FEEDBACK) {
+      AccessibilityNotificationType::kToggleSpokenFeedback) {
     SendScreenReaderStateChanged();
   }
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace settings

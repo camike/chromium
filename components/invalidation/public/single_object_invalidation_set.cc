@@ -7,14 +7,17 @@
 #include "base/values.h"
 #include "components/invalidation/public/invalidation_util.h"
 
-namespace syncer {
+namespace invalidation {
 
-SingleObjectInvalidationSet::SingleObjectInvalidationSet() {}
+SingleObjectInvalidationSet::SingleObjectInvalidationSet() = default;
 
 SingleObjectInvalidationSet::SingleObjectInvalidationSet(
     const SingleObjectInvalidationSet& other) = default;
 
-SingleObjectInvalidationSet::~SingleObjectInvalidationSet() {}
+SingleObjectInvalidationSet& SingleObjectInvalidationSet::operator=(
+    const SingleObjectInvalidationSet& other) = default;
+
+SingleObjectInvalidationSet::~SingleObjectInvalidationSet() = default;
 
 void SingleObjectInvalidationSet::Insert(const Invalidation& invalidation) {
   invalidations_.insert(invalidation);
@@ -90,10 +93,10 @@ const Invalidation& SingleObjectInvalidationSet::back() const {
 
 std::unique_ptr<base::ListValue> SingleObjectInvalidationSet::ToValue() const {
   std::unique_ptr<base::ListValue> value(new base::ListValue);
-  for (auto it = invalidations_.begin(); it != invalidations_.end(); ++it) {
-    value->Append(it->ToValue());
+  for (const Invalidation& invalidation : invalidations_) {
+    value->Append(invalidation.ToValue());
   }
   return value;
 }
 
-}  // namespace syncer
+}  // namespace invalidation

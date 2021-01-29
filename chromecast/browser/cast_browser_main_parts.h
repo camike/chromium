@@ -37,11 +37,13 @@ class ViewsDelegate;
 namespace chromecast {
 class CastSystemMemoryPressureEvaluatorAdjuster;
 class ServiceConnector;
+class ServiceManagerContext;
 class WaylandServerController;
 
 #if defined(USE_AURA)
 class CastWindowManagerAura;
 class CastScreen;
+class RoundedWindowCornersManager;
 namespace shell {
 class CastUIDevTools;
 }  // namespace shell
@@ -92,6 +94,7 @@ class CastBrowserMainParts : public content::BrowserMainParts {
   const content::MainFunctionParams parameters_;  // For running browser tests.
   // Caches a pointer of the CastContentBrowserClient.
   CastContentBrowserClient* const cast_content_browser_client_ = nullptr;
+  std::unique_ptr<ServiceManagerContext> service_manager_context_;
   std::unique_ptr<media::VideoPlaneController> video_plane_controller_;
   std::unique_ptr<media::MediaCapsImpl> media_caps_;
   std::unique_ptr<ServiceConnector> service_connector_;
@@ -100,6 +103,7 @@ class CastBrowserMainParts : public content::BrowserMainParts {
   std::unique_ptr<views::ViewsDelegate> views_delegate_;
   std::unique_ptr<CastScreen> cast_screen_;
   std::unique_ptr<CastWindowManagerAura> window_manager_;
+  std::unique_ptr<RoundedWindowCornersManager> rounded_window_corners_manager_;
 #else
   std::unique_ptr<CastWindowManager> window_manager_;
 #endif  //  defined(USE_AURA)
@@ -129,7 +133,7 @@ class CastBrowserMainParts : public content::BrowserMainParts {
   std::unique_ptr<PrefService> user_pref_service_;
 #endif
 
-#if defined(OS_LINUX) && defined(USE_OZONE)
+#if (defined(OS_LINUX) || defined(OS_CHROMEOS)) && defined(USE_OZONE)
   std::unique_ptr<WaylandServerController> wayland_server_controller_;
 #endif
 

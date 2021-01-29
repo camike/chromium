@@ -1,0 +1,81 @@
+<!-- Copyright 2020 The Chromium Authors. All rights reserved.
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file. -->
+<style include="cr-shared-style">
+
+#tutorial {
+  background: #FFF;
+  bottom: 0;
+  left: 0;
+  margin-bottom: 80px;
+  margin-top: 80px;
+  position: fixed;
+  right: 0;
+  top: 0;
+}
+
+#lessonContainer {
+  margin: auto;
+  text-align: start;
+  width: 800px;
+}
+
+</style>
+
+<div id="tutorial">
+
+<main-menu
+    header_="tutorial_main_menu_header"
+    header-description_="tutorial_main_menu_header_description"
+    button-data_="[[ mainMenuButtonData_ ]]"
+    active-screen="[[ activeScreen ]]"
+    on-button-clicked="onMainMenuButtonClicked_">
+</main-menu>
+
+<lesson-menu
+    curriculum="[[ curriculum ]]"
+    num-lessons="[[ numLessons ]]"
+    header-description_="tutorial_lesson_menu_header_description"
+    button-data_="[[ computeLessonMenuButtonData_() ]]"
+    active-screen="[[ activeScreen ]]"
+    on-button-clicked="onLessonMenuButtonClicked_">
+</lesson-menu>
+
+<div id="lessonContainer"
+    hidden$="[[ shouldHideLessonContainer(activeScreen) ]]">
+
+  <!-- Use lessonData object to create all lessons -->
+  <template id="lessonTemplate" is="dom-repeat" items="[[ lessonData ]]"
+      as="lesson" index-as="index">
+    <tutorial-lesson
+    lesson-id="[[ index ]]"
+    title="[[ lesson.title ]]"
+    content="[[ lesson.content ]]"
+    medium="[[ lesson.medium ]]"
+    curriculums="[[ lesson.curriculums ]]"
+    practice-title="[[ lesson.practiceTitle ]]"
+    practice-instructions="[[ lesson.practiceInstructions ]]"
+    practice-file="[[ lesson.practiceFile ]]"
+    practice-state="[[ lesson.practiceState ]]"
+    events="[[ lesson.events ]]"
+    actions="[[ lesson.actions ]]"
+    auto-interactive="[[ lesson.autoInteractive ]]"
+    active-lesson-id="[[ activeLessonId ]]">
+    </tutorial-lesson>
+  </template>
+</div>
+
+<navigation-buttons
+    active-screen="[[ activeScreen ]]"
+    active-lesson-index="[[ activeLessonIndex ]]"
+    curriculum="[[ curriculum ]]"
+    num-lessons="[[ numLessons ]]"
+    on-next-lesson-button-clicked="showNextLesson"
+    on-previous-lesson-button-clicked="showPreviousLesson"
+    on-restart-quick-orientation-button-clicked="showFirstLesson"
+    on-lesson-menu-button-clicked="showLessonMenu"
+    on-main-menu-button-clicked="showMainMenu"
+    on-exit-button-clicked="exit">
+</navigation-buttons>
+
+</div>

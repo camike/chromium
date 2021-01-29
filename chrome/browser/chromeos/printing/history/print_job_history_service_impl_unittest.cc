@@ -29,14 +29,13 @@ const int kPagesNumber = 3;
 
 class PrintJobHistoryServiceImplTest : public ::testing::Test {
  public:
-  PrintJobHistoryServiceImplTest() {}
+  PrintJobHistoryServiceImplTest() = default;
 
   void SetUp() override {
     test_prefs_.SetInitializationCompleted();
     PrintJobHistoryService::RegisterProfilePrefs(test_prefs_.registry());
 
-    std::unique_ptr<PrintJobDatabase> print_job_database =
-        std::make_unique<TestPrintJobDatabase>();
+    auto print_job_database = std::make_unique<TestPrintJobDatabase>();
     print_job_manager_ = std::make_unique<TestCupsPrintJobManager>(&profile_);
     print_job_history_service_ = std::make_unique<PrintJobHistoryServiceImpl>(
         std::move(print_job_database), print_job_manager_.get(), &test_prefs_);
@@ -102,11 +101,28 @@ TEST_F(PrintJobHistoryServiceImplTest, SaveObservedCupsPrintJob) {
 
   std::vector<printing::proto::PrintJobInfo> entries = GetPrintJobs();
 
-  EXPECT_EQ(1u, entries.size());
+  ASSERT_EQ(1u, entries.size());
   EXPECT_EQ(kTitle, entries[0].title());
   EXPECT_EQ(kPagesNumber, entries[0].number_of_pages());
   EXPECT_EQ(printing::proto::PrintJobInfo_PrintJobStatus_CANCELED,
             entries[0].status());
+}
+
+TEST_F(PrintJobHistoryServiceImplTest, DoesNotSaveIncognitoPrintJobs) {
+  // Expect no initial print jobs saved.
+  std::vector<printing::proto::PrintJobInfo> entries = GetPrintJobs();
+  EXPECT_EQ(0u, entries.size());
+
+  auto print_job = std::make_unique<CupsPrintJob>(
+      chromeos::Printer(), /*job_id=*/0, kTitle, kPagesNumber,
+      ::printing::PrintJob::Source::PRINT_PREVIEW_INCOGNITO,
+      /*source_id=*/"", printing::proto::PrintSettings());
+  print_job_manager_->CreatePrintJob(print_job.get());
+  print_job_manager_->CancelPrintJob(print_job.get());
+
+  // Expect no print jobs saved from incognito source.
+  entries = GetPrintJobs();
+  EXPECT_EQ(0u, entries.size());
 }
 
 TEST_F(PrintJobHistoryServiceImplTest, ObserverTest) {

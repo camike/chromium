@@ -7,17 +7,22 @@ package org.chromium.base;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ResolveInfo;
 import android.os.BadParcelableException;
 import android.os.Binder;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.os.TransactionTooLargeException;
+import android.text.TextUtils;
 
 import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 import androidx.core.app.BundleCompat;
+
+import org.chromium.base.compat.ApiHelperForM;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -33,6 +38,29 @@ public class IntentUtils {
      */
     public static final String ANDROID_APP_REFERRER_SCHEME = "android-app";
 
+    // Instant Apps system resolver activity on N-MR1+.
+    @VisibleForTesting
+    public static final String EPHEMERAL_INSTALLER_CLASS =
+            "com.google.android.gms.instantapps.routing.EphemeralInstallerActivity";
+
+    // TODO(mthiesse): Move to ApiHelperForS when it exist.
+    private static final int FLAG_MUTABLE = 1 << 25;
+
+    /**
+     * Whether the given ResolveInfo object refers to Instant Apps as a launcher.
+     * @param info The resolve info.
+     */
+    public static boolean isInstantAppResolveInfo(ResolveInfo info) {
+        if (info == null) return false;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return info.isInstantAppAvailable;
+        } else if (info.activityInfo != null) {
+            return EPHEMERAL_INSTALLER_CLASS.equals(info.activityInfo.name);
+        }
+
+        return false;
+    }
     /**
      * Just like {@link Intent#hasExtra(String)} but doesn't throw exceptions.
      */
@@ -343,7 +371,6 @@ public class IntentUtils {
      * Creates a temporary copy of the extra Bundle, which is required as
      * Intent#getBinderExtra() doesn't exist, but Bundle.getBinder() does.
      */
-    @VisibleForTesting
     public static IBinder safeGetBinderExtra(Intent intent, String name) {
         if (!intent.hasExtra(name)) return null;
         Bundle extras = intent.getExtras();
@@ -359,7 +386,6 @@ public class IntentUtils {
      * @param name Key.
      * @param binder Binder object.
      */
-    @VisibleForTesting
     public static void safePutBinderExtra(Intent intent, String name, IBinder binder) {
         if (intent == null) return;
         Bundle bundle = new Bundle();
@@ -396,8 +422,7 @@ public class IntentUtils {
 
     /** Returns whether the intent starts an activity in a new task or a new document. */
     public static boolean isIntentForNewTaskOrNewDocument(Intent intent) {
-        int testFlags =
-                Intent.FLAG_ACTIVITY_NEW_TASK | ApiCompatibilityUtils.getActivityNewDocumentFlag();
+        int testFlags = Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NEW_DOCUMENT;
         return (intent.getFlags() & testFlags) != 0;
     }
 
@@ -453,5 +478,31 @@ public class IntentUtils {
             }
             throw e;
         }
+    }
+
+    /**
+     * @return True if the intent is a MAIN intent a launcher would send.
+     */
+    public static boolean isMainIntentFromLauncher(Intent intent) {
+        return intent != null && TextUtils.equals(intent.getAction(), Intent.ACTION_MAIN)
+                && intent.hasCategory(Intent.CATEGORY_LAUNCHER)
+                && 0 == (intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY);
+    }
+
+    /**
+     * Gets the PendingIntent flag for the specified mutability.
+     * PendingIntent.FLAG_IMMUTABLE was added in API level 23 (M), and FLAG_MUTABLE was added in
+     * Android S.
+     *
+     * Unless mutability is required, PendingIntents should always be marked as Immutable as this
+     * is the more secure default.
+     */
+    public static int getPendingIntentMutabilityFlag(boolean mutable) {
+        if (!mutable && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return ApiHelperForM.getPendingIntentImmutableFlag();
+        } else if (mutable && Build.VERSION.SDK_INT > Build.VERSION_CODES.R) {
+            return FLAG_MUTABLE;
+        }
+        return 0;
     }
 }

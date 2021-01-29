@@ -15,7 +15,7 @@
 namespace web {
 
 class WebState;
-class TestWebState;
+class FakeWebState;
 
 // Decides the navigation policy for a web state.
 class WebStatePolicyDecider {
@@ -76,20 +76,28 @@ class WebStatePolicyDecider {
     NSError* error = nil;
   };
 
+  // Callback used to provide asynchronous policy decisions.
+  typedef base::OnceCallback<void(PolicyDecision)> PolicyDecisionCallback;
+
   // Data Transfer Object for the additional information about navigation
   // request passed to WebStatePolicyDecider::ShouldAllowRequest().
   struct RequestInfo {
     RequestInfo(ui::PageTransition transition_type,
                 bool target_frame_is_main,
+                bool target_frame_is_cross_origin,
                 bool has_user_gesture)
         : transition_type(transition_type),
           target_frame_is_main(target_frame_is_main),
+          target_frame_is_cross_origin(target_frame_is_cross_origin),
           has_user_gesture(has_user_gesture) {}
     // The navigation page transition type.
     ui::PageTransition transition_type =
         ui::PageTransition::PAGE_TRANSITION_FIRST;
     // Indicates whether the navigation target frame is the main frame.
     bool target_frame_is_main = false;
+    // Indicates whether the navigation target frame is cross-origin with
+    // respect to the the navigation source frame.
+    bool target_frame_is_cross_origin = false;
     // Indicates if there was a recent user interaction with the request frame.
     bool has_user_gesture = false;
   };
@@ -120,10 +128,9 @@ class WebStatePolicyDecider {
   //  - same-document navigations (unless ititiated via LoadURLWithParams)
   //  - going back after form submission navigation
   //  - user-initiated POST navigation on iOS 10
-  virtual void ShouldAllowResponse(
-      NSURLResponse* response,
-      bool for_main_frame,
-      base::OnceCallback<void(PolicyDecision)> callback);
+  virtual void ShouldAllowResponse(NSURLResponse* response,
+                                   bool for_main_frame,
+                                   PolicyDecisionCallback callback);
 
   // Notifies the policy decider that the web state is being destroyed.
   // Gives subclasses a chance to cleanup.
@@ -139,7 +146,7 @@ class WebStatePolicyDecider {
 
  private:
   friend class WebStateImpl;
-  friend class TestWebState;
+  friend class FakeWebState;
 
   // Resets the current web state.
   void ResetWebState();

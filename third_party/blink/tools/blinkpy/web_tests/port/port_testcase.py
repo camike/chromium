@@ -31,6 +31,7 @@ import collections
 import optparse
 
 from blinkpy.common import exit_codes
+from blinkpy.common.system.executive import ScriptError
 from blinkpy.common.system.executive_mock import MockExecutive
 from blinkpy.common.system.log_testing import LoggingTestCase
 from blinkpy.common.system.system_host import SystemHost
@@ -128,16 +129,38 @@ class PortTestCase(LoggingTestCase):
         self.assertEqual(port.default_max_locked_shards(), 1)
 
     def test_default_timeout_ms(self):
+        self.assertEqual(self.make_port().timeout_ms(), 6000)
+
+    def test_timeout_ms_release(self):
         self.assertEqual(
-            self.make_port(
-                options=optparse.Values({
-                    'configuration': 'Release'
-                })).default_timeout_ms(), 6000)
+            self.make_port(options=optparse.Values(
+                {'configuration': 'Release'})).timeout_ms(),
+            self.make_port().timeout_ms())
+
+    def test_timeout_ms_debug(self):
         self.assertEqual(
-            self.make_port(
-                options=optparse.Values({
-                    'configuration': 'Debug'
-                })).default_timeout_ms(), 18000)
+            self.make_port(options=optparse.Values({'configuration': 'Debug'
+                                                    })).timeout_ms(),
+            5 * self.make_port().timeout_ms())
+
+    def make_dcheck_port(self, options):
+        host = MockSystemHost(os_name=self.os_name, os_version=self.os_version)
+        host.filesystem.write_text_file(
+            self.make_port(host)._build_path('args.gn'),
+            'is_debug=false\ndcheck_always_on = true # comment\n')
+        port = self.make_port(host, options=options)
+        return port
+
+    def test_timeout_ms_with_dcheck(self):
+        default_timeout_ms = self.make_port().timeout_ms()
+        self.assertEqual(
+            self.make_dcheck_port(options=optparse.Values(
+                {'configuration': 'Release'})).timeout_ms(),
+            2 * default_timeout_ms)
+        self.assertEqual(
+            self.make_dcheck_port(options=optparse.Values(
+                {'configuration': 'Debug'})).timeout_ms(),
+            5 * default_timeout_ms)
 
     def test_driver_cmd_line(self):
         port = self.make_port()
@@ -179,7 +202,7 @@ class PortTestCase(LoggingTestCase):
 
         def mock_run_command(args):
             port.host.filesystem.write_binary_file(args[4], mock_image_diff)
-            return 1
+            raise ScriptError(exit_code=1)
 
         # Images are different.
         port._executive = MockExecutive(run_command_fn=mock_run_command)  # pylint: disable=protected-access
@@ -201,7 +224,7 @@ class PortTestCase(LoggingTestCase):
 
     def test_diff_image_crashed(self):
         port = self.make_port()
-        port._executive = MockExecutive(exit_code=2)  # pylint: disable=protected-access
+        port._executive = MockExecutive(should_throw=True, exit_code=2)  # pylint: disable=protected-access
         self.assertEqual(
             port.diff_image('EXPECTED', 'ACTUAL'),
             (None,

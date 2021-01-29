@@ -88,7 +88,10 @@ BlinkGCPluginConsumer::BlinkGCPluginConsumer(
   options_.checked_namespaces.insert("blink");
 
   // Ignore GC implementation files.
-  options_.ignored_directories.push_back("/heap/");
+  options_.ignored_directories.push_back(
+      "third_party/blink/renderer/platform/heap/");
+  options_.allowed_directories.push_back(
+      "third_party/blink/renderer/platform/heap/test/");
 }
 
 void BlinkGCPluginConsumer::HandleTranslationUnit(ASTContext& context) {
@@ -103,6 +106,7 @@ void BlinkGCPluginConsumer::HandleTranslationUnit(ASTContext& context) {
 
   if (options_.dump_graph) {
     std::error_code err;
+#if !defined(LLVM_FORCE_HEAD_REVISION)
     // TODO: Make createDefaultOutputFile or a shorter createOutputFile work.
     json_ = JsonWriter::from(instance_.createOutputFile(
         "",                                      // OutputPath
@@ -115,6 +119,16 @@ void BlinkGCPluginConsumer::HandleTranslationUnit(ASTContext& context) {
         false,                                   // CreateMissingDirectories
         0,                                       // ResultPathName
         0));                                     // TempPathName
+#else
+    SmallString<128> OutputFile(instance_.getFrontendOpts().OutputFile);
+    llvm::sys::path::replace_extension(OutputFile, "graph.json");
+    json_ = JsonWriter::from(instance_.createOutputFile(
+        OutputFile,                              // OutputPath
+        true,                                    // Binary
+        true,                                    // RemoveFileOnSignal
+        false,                                   // UseTemporary
+        false));                                 // CreateMissingDirectories
+#endif
     if (!err && json_) {
       json_->OpenList();
     } else {
@@ -633,9 +647,14 @@ bool BlinkGCPluginConsumer::InIgnoredDirectory(RecordInfo* info) {
 #if defined(_WIN32)
   std::replace(filename.begin(), filename.end(), '\\', '/');
 #endif
-  for (const auto& dir : options_.ignored_directories)
-    if (filename.find(dir) != std::string::npos)
+  for (const auto& ignored_dir : options_.ignored_directories)
+    if (filename.find(ignored_dir) != std::string::npos) {
+      for (const auto& allowed_dir : options_.allowed_directories) {
+        if (filename.find(allowed_dir) != std::string::npos)
+          return false;
+      }
       return true;
+    }
   return false;
 }
 

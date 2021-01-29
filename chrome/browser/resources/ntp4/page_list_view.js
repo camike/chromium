@@ -33,6 +33,7 @@
  *            launch_container: number,
  *            launch_type: number,
  *            mayChangeLaunchType: boolean,
+ *            mayShowRunOnOsLoginMode: boolean,
  *            mayCreateShortcuts: boolean,
  *            mayDisable: boolean,
  *            name: string,
@@ -40,6 +41,7 @@
  *            optionsUrl: string,
  *            packagedApp: boolean,
  *            page_index: number,
+ *            runOnOsLoginMode: string,
  *            title: string,
  *            url: string,
  *            version: string}}
@@ -60,7 +62,7 @@ cr.define('ntp', function() {
   PageListView.prototype = {
     /**
      * The CardSlider object to use for changing app pages.
-     * @type {cr.ui.CardSlider|undefined}
+     * @type {ntp.CardSlider|undefined}
      */
     cardSlider: undefined,
 
@@ -182,7 +184,7 @@ cr.define('ntp', function() {
 
       // Initialize the cardSlider without any cards at the moment.
       this.sliderFrame = cardSliderFrame;
-      this.cardSlider = new cr.ui.CardSlider(
+      this.cardSlider = new ntp.CardSlider(
           this.sliderFrame, this.pageList, this.sliderFrame.offsetWidth);
 
       // Prevent touch events from triggering any sort of native scrolling if
@@ -321,8 +323,6 @@ cr.define('ntp', function() {
      *     An object with all the data on available applications.
      */
     getAppsCallback(data) {
-      const startTime = Date.now();
-
       // Remember this to select the correct card when done rebuilding.
       const prevCurrentCard = this.cardSlider.currentCard;
 
@@ -408,8 +408,6 @@ cr.define('ntp', function() {
       if (highlightApp) {
         this.appAdded(highlightApp, true);
       }
-
-      logEvent('apps.layout: ' + (Date.now() - startTime));
 
       // Tell the slider about the pages and mark the current page.
       this.updateSliderCards();

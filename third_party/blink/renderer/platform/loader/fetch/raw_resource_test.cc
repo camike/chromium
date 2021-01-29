@@ -61,14 +61,15 @@ class RawResourceTest : public testing::Test {
   class NoopResponseBodyLoaderClient
       : public GarbageCollected<NoopResponseBodyLoaderClient>,
         public ResponseBodyLoaderClient {
-    USING_GARBAGE_COLLECTED_MIXIN(NoopResponseBodyLoaderClient);
-
    public:
     ~NoopResponseBodyLoaderClient() override {}
     void DidReceiveData(base::span<const char>) override {}
     void DidFinishLoadingBody() override {}
     void DidFailLoadingBody() override {}
     void DidCancelLoadingBody() override {}
+    void EvictFromBackForwardCache(mojom::RendererEvictionReason) override {}
+    void DidBufferLoadWhileInBackForwardCache(size_t num_bytes) override {}
+    bool CanContinueBufferingWhileInBackForwardCache() override { return true; }
   };
 
   ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>
@@ -92,14 +93,13 @@ TEST_F(RawResourceTest, DontIgnoreAcceptForCacheReuse) {
   ResourceRequest png_request;
   png_request.SetHTTPAccept("image/png");
   png_request.SetRequestorOrigin(source_origin);
-  EXPECT_NE(jpeg_resource->CanReuse(FetchParameters(std::move(png_request))),
+  EXPECT_NE(jpeg_resource->CanReuse(
+                FetchParameters::CreateForTest(std::move(png_request))),
             Resource::MatchStatus::kOk);
 }
 
 class DummyClient final : public GarbageCollected<DummyClient>,
                           public RawResourceClient {
-  USING_GARBAGE_COLLECTED_MIXIN(DummyClient);
-
  public:
   DummyClient() : called_(false), number_of_redirects_received_(0) {}
   ~DummyClient() override = default;
@@ -124,7 +124,9 @@ class DummyClient final : public GarbageCollected<DummyClient>,
     return number_of_redirects_received_;
   }
   const Vector<char>& Data() { return data_; }
-  void Trace(Visitor* visitor) override { RawResourceClient::Trace(visitor); }
+  void Trace(Visitor* visitor) const override {
+    RawResourceClient::Trace(visitor);
+  }
 
  private:
   bool called_;
@@ -135,8 +137,6 @@ class DummyClient final : public GarbageCollected<DummyClient>,
 // This client adds another client when notified.
 class AddingClient final : public GarbageCollected<AddingClient>,
                            public RawResourceClient {
-  USING_GARBAGE_COLLECTED_MIXIN(AddingClient);
-
  public:
   AddingClient(DummyClient* client, Resource* resource)
       : dummy_client_(client), resource_(resource) {}
@@ -160,7 +160,7 @@ class AddingClient final : public GarbageCollected<AddingClient>,
 
   void RemoveClient() { resource_->RemoveClient(dummy_client_); }
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(dummy_client_);
     visitor->Trace(resource_);
     RawResourceClient::Trace(visitor);
@@ -192,8 +192,6 @@ TEST_F(RawResourceTest, AddClientDuringCallback) {
 // This client removes another client when notified.
 class RemovingClient : public GarbageCollected<RemovingClient>,
                        public RawResourceClient {
-  USING_GARBAGE_COLLECTED_MIXIN(RemovingClient);
-
  public:
   explicit RemovingClient(DummyClient* client) : dummy_client_(client) {}
 
@@ -205,7 +203,7 @@ class RemovingClient : public GarbageCollected<RemovingClient>,
     resource->RemoveClient(this);
   }
   String DebugName() const override { return "RemovingClient"; }
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(dummy_client_);
     RawResourceClient::Trace(visitor);
   }
@@ -253,7 +251,7 @@ TEST_F(RawResourceTest, PreloadWithAsynchronousAddClient) {
   // Set the response first to make ResourceClient addition asynchronous.
   raw->SetResponse(ResourceResponse(KURL("http://600.613/")));
 
-  FetchParameters params(std::move(request));
+  FetchParameters params = FetchParameters::CreateForTest(std::move(request));
   params.MutableResourceRequest().SetUseStreamOnResponse(false);
   raw->MatchPreload(params);
   EXPECT_FALSE(raw->IsUnusedPreload());

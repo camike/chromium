@@ -4,6 +4,10 @@
 
 #include "cc/test/animation_test_common.h"
 
+#include <algorithm>
+#include <memory>
+#include <utility>
+
 #include "base/memory/ptr_util.h"
 #include "cc/animation/animation.h"
 #include "cc/animation/animation_host.h"
@@ -15,7 +19,6 @@
 #include "cc/animation/scroll_offset_animation_curve_factory.h"
 #include "cc/animation/timing_function.h"
 #include "cc/animation/transform_operations.h"
-#include "cc/base/time_util.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_impl.h"
 
@@ -51,7 +54,7 @@ int AddOpacityTransition(Animation* target,
 
   std::unique_ptr<KeyframeModel> keyframe_model(KeyframeModel::Create(
       std::move(curve), id, AnimationIdProvider::NextGroupId(),
-      TargetProperty::OPACITY));
+      KeyframeModel::TargetPropertyId(TargetProperty::OPACITY)));
   keyframe_model->set_needs_synchronized_start_time(true);
 
   target->AddKeyframeModel(std::move(keyframe_model));
@@ -77,7 +80,7 @@ int AddAnimatedTransform(Animation* target,
 
   std::unique_ptr<KeyframeModel> keyframe_model(KeyframeModel::Create(
       std::move(curve), id, AnimationIdProvider::NextGroupId(),
-      TargetProperty::TRANSFORM));
+      KeyframeModel::TargetPropertyId(TargetProperty::TRANSFORM)));
   keyframe_model->set_needs_synchronized_start_time(true);
 
   target->AddKeyframeModel(std::move(keyframe_model));
@@ -122,7 +125,7 @@ int AddAnimatedFilter(Animation* target,
 
   std::unique_ptr<KeyframeModel> keyframe_model(KeyframeModel::Create(
       std::move(curve), id, AnimationIdProvider::NextGroupId(),
-      TargetProperty::FILTER));
+      KeyframeModel::TargetPropertyId(TargetProperty::FILTER)));
   keyframe_model->set_needs_synchronized_start_time(true);
 
   target->AddKeyframeModel(std::move(keyframe_model));
@@ -152,7 +155,7 @@ int AddAnimatedBackdropFilter(Animation* target,
 
   std::unique_ptr<KeyframeModel> keyframe_model(KeyframeModel::Create(
       std::move(curve), id, AnimationIdProvider::NextGroupId(),
-      TargetProperty::BACKDROP_FILTER));
+      KeyframeModel::TargetPropertyId(TargetProperty::BACKDROP_FILTER)));
   keyframe_model->set_needs_synchronized_start_time(true);
 
   target->AddKeyframeModel(std::move(keyframe_model));
@@ -196,20 +199,11 @@ TransformOperations FakeTransformTransition::GetValue(
   return TransformOperations();
 }
 
-bool FakeTransformTransition::IsTranslation() const { return true; }
-
 bool FakeTransformTransition::PreservesAxisAlignment() const {
   return true;
 }
 
-bool FakeTransformTransition::AnimationStartScale(bool forward_direction,
-                                                  float* start_scale) const {
-  *start_scale = 1.f;
-  return true;
-}
-
-bool FakeTransformTransition::MaximumTargetScale(bool forward_direction,
-                                                 float* max_scale) const {
+bool FakeTransformTransition::MaximumScale(float* max_scale) const {
   *max_scale = 1.f;
   return true;
 }
@@ -229,9 +223,7 @@ base::TimeDelta FakeFloatTransition::Duration() const {
 }
 
 float FakeFloatTransition::GetValue(base::TimeDelta time) const {
-  double progress = TimeUtil::Divide(time, duration_);
-  if (progress >= 1.0)
-    progress = 1.0;
+  const double progress = std::min(time / duration_, 1.0);
   return (1.0 - progress) * from_ + progress * to_;
 }
 
@@ -251,7 +243,7 @@ int AddScrollOffsetAnimationToAnimation(Animation* animation,
 
   std::unique_ptr<KeyframeModel> keyframe_model(KeyframeModel::Create(
       std::move(curve), id, AnimationIdProvider::NextGroupId(),
-      TargetProperty::SCROLL_OFFSET));
+      KeyframeModel::TargetPropertyId(TargetProperty::SCROLL_OFFSET)));
   keyframe_model->SetIsImplOnly();
 
   animation->AddKeyframeModel(std::move(keyframe_model));
@@ -319,7 +311,7 @@ int AddOpacityStepsToAnimation(Animation* animation,
 
   std::unique_ptr<KeyframeModel> keyframe_model(KeyframeModel::Create(
       std::move(curve), id, AnimationIdProvider::NextGroupId(),
-      TargetProperty::OPACITY));
+      KeyframeModel::TargetPropertyId(TargetProperty::OPACITY)));
   keyframe_model->set_needs_synchronized_start_time(true);
 
   animation->AddKeyframeModel(std::move(keyframe_model));

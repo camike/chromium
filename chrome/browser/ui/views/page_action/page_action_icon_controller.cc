@@ -10,12 +10,12 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/autofill/payments/local_card_migration_icon_view.h"
 #include "chrome/browser/ui/views/autofill/payments/save_payment_icon_view.h"
+#include "chrome/browser/ui/views/file_system_access/file_system_access_icon_view.h"
 #include "chrome/browser/ui/views/location_bar/cookie_controls_icon_view.h"
 #include "chrome/browser/ui/views/location_bar/find_bar_icon.h"
 #include "chrome/browser/ui/views/location_bar/intent_picker_view.h"
 #include "chrome/browser/ui/views/location_bar/star_view.h"
 #include "chrome/browser/ui/views/location_bar/zoom_bubble_view.h"
-#include "chrome/browser/ui/views/native_file_system/native_file_system_access_icon_view.h"
 #include "chrome/browser/ui/views/page_action/page_action_icon_container.h"
 #include "chrome/browser/ui/views/page_action/page_action_icon_params.h"
 #include "chrome/browser/ui/views/page_action/pwa_install_view.h"
@@ -26,10 +26,11 @@
 #include "chrome/browser/ui/views/send_tab_to_self/send_tab_to_self_icon_view.h"
 #include "chrome/browser/ui/views/sharing/sharing_dialog_view.h"
 #include "chrome/browser/ui/views/sharing/sharing_icon_view.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_icon_container_view.h"
 #include "chrome/browser/ui/views/translate/translate_icon_view.h"
 #include "ui/views/layout/box_layout.h"
 
-PageActionIconController::PageActionIconController() : zoom_observer_(this) {}
+PageActionIconController::PageActionIconController() = default;
 PageActionIconController::~PageActionIconController() = default;
 
 void PageActionIconController::Init(const PageActionIconParams& params,
@@ -92,11 +93,11 @@ void PageActionIconController::Init(const PageActionIconParams& params,
             params.page_action_icon_delegate);
         page_action_icons_.push_back(manage_passwords_icon_);
         break;
-      case PageActionIconType::kNativeFileSystemAccess:
-        native_file_system_access_icon_ = new NativeFileSystemAccessIconView(
-            params.icon_label_bubble_delegate,
-            params.page_action_icon_delegate);
-        page_action_icons_.push_back(native_file_system_access_icon_);
+      case PageActionIconType::kFileSystemAccess:
+        file_system_access_icon_ =
+            new FileSystemAccessIconView(params.icon_label_bubble_delegate,
+                                         params.page_action_icon_delegate);
+        page_action_icons_.push_back(file_system_access_icon_);
         break;
       case PageActionIconType::kPwaInstall:
         DCHECK(params.command_updater);
@@ -160,21 +161,19 @@ void PageActionIconController::Init(const PageActionIconParams& params,
 
   for (PageActionIconView* icon : page_action_icons_) {
     icon->SetVisible(false);
-    icon->set_ink_drop_visible_opacity(
+    icon->SetInkDropVisibleOpacity(
         params.page_action_icon_delegate->GetPageActionInkDropVisibleOpacity());
     if (params.icon_color)
       icon->SetIconColor(*params.icon_color);
     if (params.font_list)
       icon->SetFontList(*params.font_list);
     if (params.button_observer)
-      icon->AddButtonObserver(params.button_observer);
-    if (params.view_observer)
-      icon->views::View::AddObserver(params.view_observer);
+      params.button_observer->ObserveButton(icon);
     icon_container_->AddPageActionIcon(icon);
   }
 
   if (params.browser) {
-    zoom_observer_.Add(zoom::ZoomEventManager::GetForBrowserContext(
+    zoom_observation_.Observe(zoom::ZoomEventManager::GetForBrowserContext(
         params.browser->profile()));
   }
 }
@@ -196,8 +195,8 @@ PageActionIconView* PageActionIconController::GetIconView(
       return local_card_migration_icon_;
     case PageActionIconType::kManagePasswords:
       return manage_passwords_icon_;
-    case PageActionIconType::kNativeFileSystemAccess:
-      return native_file_system_access_icon_;
+    case PageActionIconType::kFileSystemAccess:
+      return file_system_access_icon_;
     case PageActionIconType::kPwaInstall:
       return pwa_install_icon_;
     case PageActionIconType::kQRCodeGenerator:

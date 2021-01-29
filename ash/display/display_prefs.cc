@@ -10,7 +10,7 @@
 #include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
-#include "base/stl_util.h"
+#include "base/containers/contains.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -178,17 +178,21 @@ display::DisplayManager* GetDisplayManager() {
   return Shell::Get()->display_manager();
 }
 
-// Returns true id the current user can write display preferences to
+// Returns true if the current user can write display preferences to
 // Local State.
 bool UserCanSaveDisplayPreference() {
   SessionControllerImpl* controller = Shell::Get()->session_controller();
   auto user_type = controller->GetUserType();
   if (!user_type)
     return false;
+
   return *user_type == user_manager::USER_TYPE_REGULAR ||
          *user_type == user_manager::USER_TYPE_CHILD ||
-         *user_type == user_manager::USER_TYPE_SUPERVISED ||
-         *user_type == user_manager::USER_TYPE_KIOSK_APP;
+         *user_type == user_manager::USER_TYPE_SUPERVISED_DEPRECATED ||
+         *user_type == user_manager::USER_TYPE_KIOSK_APP ||
+         (*user_type == user_manager::USER_TYPE_PUBLIC_ACCOUNT &&
+          Shell::Get()->local_state()->GetBoolean(
+              prefs::kAllowMGSToStoreDisplayProperties));
 }
 
 void LoadDisplayLayouts(PrefService* local_state) {
@@ -760,6 +764,8 @@ void DisplayPrefs::RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
   registry->RegisterDictionaryPref(prefs::kDisplayTouchPortAssociations);
   registry->RegisterListPref(prefs::kExternalDisplayMirrorInfo);
   registry->RegisterDictionaryPref(prefs::kDisplayMixedMirrorModeParams);
+  registry->RegisterBooleanPref(prefs::kAllowMGSToStoreDisplayProperties,
+                                false);
 }
 
 DisplayPrefs::DisplayPrefs(PrefService* local_state)

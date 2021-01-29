@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/macros.h"
 #include "base/values.h"
@@ -19,6 +19,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/payments/legal_message_line.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace autofill {
@@ -78,8 +79,6 @@ class SaveCardBubbleControllerImplTest : public DialogBrowserTest {
       bubble_type = BubbleType::LOCAL_SAVE;
     if (name.find("Server") != std::string::npos)
       bubble_type = BubbleType::UPLOAD_SAVE;
-    if (name.find("Promo") != std::string::npos)
-      bubble_type = BubbleType::SIGN_IN_PROMO;
     if (name.find("Manage") != std::string::npos)
       bubble_type = BubbleType::MANAGE_CARDS;
     if (name.find("Failure") != std::string::npos)
@@ -96,9 +95,6 @@ class SaveCardBubbleControllerImplTest : public DialogBrowserTest {
         controller_->OfferUploadSave(test::GetMaskedServerCard(),
                                      GetTestLegalMessage(), options,
                                      base::DoNothing());
-        break;
-      case BubbleType::SIGN_IN_PROMO:
-        controller_->MaybeShowBubbleForSignInPromo();
         break;
       case BubbleType::MANAGE_CARDS:
         controller_->ShowBubbleForManageCardsForTesting(test::GetCreditCard());

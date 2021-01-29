@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/callback_forward.h"
+#include "build/chromeos_buildflags.h"
 #include "google_apis/gaia/core_account_id.h"
 
 // An interface to be implemented per-platform that represents an
@@ -42,7 +43,7 @@ class DeviceOAuth2TokenStore {
   // The param, |trusted_account_present| indicates whether the store was able
   // successfully prepare a trusted Account ID.
   using TrustedAccountIdCallback =
-      base::Callback<void(bool /* trusted_account_present */)>;
+      base::RepeatingCallback<void(bool /* trusted_account_present */)>;
 
   virtual ~DeviceOAuth2TokenStore() {}
 
@@ -73,7 +74,7 @@ class DeviceOAuth2TokenStore {
   // Invokes |callback| when the operation completes.
   virtual void PrepareTrustedAccountId(TrustedAccountIdCallback callback) = 0;
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
   // Requests that this store persist the current service account's associated
   // email.
   // On ChromeOS, the account email comes from CrosSettings so this should never

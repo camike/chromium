@@ -22,8 +22,8 @@ import org.chromium.base.CollectionUtil;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.components.page_info.VrHandler;
 import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.ui.display.DisplayAndroidManager;
@@ -160,13 +160,13 @@ public abstract class VrDelegate implements VrHandler {
         }
     }
 
-    /* package */ void setSystemUiVisibilityForVr(Activity activity) {
+    public void setSystemUiVisibilityForVr(Activity activity) {
         activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         int flags = activity.getWindow().getDecorView().getSystemUiVisibility();
         activity.getWindow().getDecorView().setSystemUiVisibility(flags | VR_SYSTEM_UI_FLAGS);
     }
 
-    /* package */ void addBlackOverlayViewForActivity(ChromeActivity activity) {
+    public void addBlackOverlayViewForActivity(ChromeActivity activity) {
         View overlay = activity.getWindow().findViewById(R.id.vr_overlay_view);
         if (overlay != null) return;
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
@@ -178,7 +178,7 @@ public abstract class VrDelegate implements VrHandler {
         decor.addView(v, params);
     }
 
-    /* package */ void removeBlackOverlayView(Activity activity, boolean animate) {
+    public void removeBlackOverlayView(Activity activity, boolean animate) {
         View overlay = activity.getWindow().findViewById(R.id.vr_overlay_view);
         if (overlay == null) return;
         FrameLayout decor = (FrameLayout) activity.getWindow().getDecorView();
@@ -207,7 +207,7 @@ public abstract class VrDelegate implements VrHandler {
         }
     }
 
-    /* package */ boolean activitySupportsVrBrowsing(Activity activity) {
+    public boolean activitySupportsVrBrowsing(Activity activity) {
         if (activity instanceof ChromeTabbedActivity) return true;
         return false;
     }
@@ -254,7 +254,7 @@ public abstract class VrDelegate implements VrHandler {
 
         // Only Samsung devices change resolution in VR.
         if (!model.startsWith(SAMSUNG_GALAXY_PREFIX)) return false;
-        CharSequence modelNumber = model.subSequence(3, 7);
+        String modelNumber = model.substring(3, 7);
         // Only S8(+) and Note 8 models change resolution in VR.
         if (!SAMSUNG_GALAXY_8_MODELS.contains(modelNumber)) return false;
         return true;

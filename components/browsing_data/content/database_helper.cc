@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
@@ -69,9 +70,8 @@ void DatabaseHelper::DeleteDatabase(const url::Origin& origin) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   tracker_->task_runner()->PostTask(
       FROM_HERE,
-      base::BindOnce(
-          base::IgnoreResult(&storage::DatabaseTracker::DeleteDataForOrigin),
-          tracker_, origin, net::CompletionOnceCallback()));
+      base::BindOnce(&storage::DatabaseTracker::DeleteDataForOrigin, tracker_,
+                     origin, base::DoNothing::Once<int>()));
 }
 
 CannedDatabaseHelper::CannedDatabaseHelper(
@@ -113,8 +113,8 @@ void CannedDatabaseHelper::StartFetching(FetchCallback callback) {
     result.emplace_back(origin, 0, base::Time());
   }
 
-  base::PostTask(FROM_HERE, {BrowserThread::UI},
-                 base::BindOnce(std::move(callback), result));
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), result));
 }
 
 void CannedDatabaseHelper::DeleteDatabase(const url::Origin& origin) {

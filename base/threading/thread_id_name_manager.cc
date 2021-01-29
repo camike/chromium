@@ -8,12 +8,13 @@
 #include <string.h>
 
 #include "base/check.h"
+#include "base/containers/contains.h"
 #include "base/memory/singleton.h"
 #include "base/no_destructor.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_local.h"
-#include "base/trace_event/heap_profiler_allocation_context_tracker.h"
+#include "base/trace_event/heap_profiler_allocation_context_tracker.h"  // no-presubmit-check
 
 namespace base {
 namespace {

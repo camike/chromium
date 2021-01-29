@@ -13,28 +13,31 @@
 #include "ash/shell_observer.h"
 #include "ash/wm/overview/overview_controller.h"
 #include "ash/wm/overview/overview_observer.h"
+#include "ash/wm/splitview/split_view_controller.h"
+#include "ash/wm/splitview/split_view_observer.h"
 #include "base/memory/weak_ptr.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "base/timer/timer.h"
 #include "ui/compositor/layer_animator.h"
-#include "ui/views/view.h"
+#include "ui/views/controls/button/button.h"
 #include "ui/views/view_targeter_delegate.h"
 
 namespace ash {
 
-class ASH_EXPORT DragHandle : public views::View,
+class ASH_EXPORT DragHandle : public views::Button,
                               public views::ViewTargeterDelegate,
+                              public AccessibilityObserver,
                               public OverviewObserver,
                               public ShellObserver,
-                              public ui::ImplicitAnimationObserver {
+                              public ui::ImplicitAnimationObserver,
+                              public SplitViewObserver,
+                              public ShelfObserver {
  public:
   DragHandle(int drag_handle_corner_radius, Shelf* shelf);
   DragHandle(const DragHandle&) = delete;
   ~DragHandle() override;
 
   DragHandle& operator=(const DragHandle&) = delete;
-
-  void SetColorAndOpacity(SkColor color, float opacity);
 
   // views::ViewTargeterDelegate:
   bool DoesIntersectRect(const views::View* target,
@@ -55,21 +58,35 @@ class ASH_EXPORT DragHandle : public views::View,
 
   // Immediately begins the animation to return the drag handle back to its
   // original position and hide the tooltip.
-  void HideDragHandleNudge(contextual_tooltip::DismissNudgeReason context);
+  void HideDragHandleNudge(contextual_tooltip::DismissNudgeReason reason);
 
   // Called when the window drag from shelf starts or ends. The drag handle
   // contextual nudge will remain visible while the gesture is in progress.
   void SetWindowDragFromShelfInProgress(bool gesture_in_progress);
 
+  void UpdateColor();
+
   // views::View:
   void OnGestureEvent(ui::GestureEvent* event) override;
   gfx::Rect GetAnchorBoundsInScreen() const override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
+  void OnThemeChanged() override;
 
   // OverviewObserver:
   void OnOverviewModeStarting() override;
 
   // ShellObserver:
   void OnShellDestroying() override;
+
+  // SplitViewObserver:
+  void OnSplitViewStateChanged(SplitViewController::State previous_state,
+                               SplitViewController::State state) override;
+
+  // ShelfObserver:
+  void OnHotseatStateChanged(HotseatState old_state,
+                             HotseatState new_state) override;
+
+  ContextualNudge* drag_handle_nudge() { return drag_handle_nudge_; }
 
   bool gesture_nudge_target_visibility() const {
     return gesture_nudge_target_visibility_;
@@ -95,11 +112,14 @@ class ASH_EXPORT DragHandle : public views::View,
     hide_drag_handle_nudge_timer_.FireNow();
   }
 
-  ContextualNudge* drag_handle_nudge_for_testing() {
-    return drag_handle_nudge_;
-  }
-
  private:
+  // AccessibilityObserver:
+  void OnAccessibilityStatusChanged() override;
+
+  // Show/hide hotseat in tablet mode. This is only available when spoken
+  // feedback is enabled.
+  void ButtonPressed();
+
   // ui::ImplicitAnimationObserver:
   void OnImplicitAnimationsCompleted() override;
 
@@ -156,13 +176,19 @@ class ASH_EXPORT DragHandle : public views::View,
 
   std::unique_ptr<Shelf::ScopedAutoHideLock> auto_hide_lock_;
 
-  ScopedObserver<OverviewController, OverviewObserver> overview_observer_{this};
+  base::ScopedClosureRunner force_show_hotseat_resetter_;
 
-  ScopedObserver<Shell,
-                 ShellObserver,
-                 &Shell::AddShellObserver,
-                 &Shell::RemoveShellObserver>
-      shell_observer_{this};
+  base::ScopedObservation<SplitViewController, SplitViewObserver>
+      split_view_observation_{this};
+
+  base::ScopedObservation<OverviewController, OverviewObserver>
+      overview_observation_{this};
+
+  base::ScopedObservation<Shell,
+                          ShellObserver,
+                          &Shell::AddShellObserver,
+                          &Shell::RemoveShellObserver>
+      shell_observation_{this};
 
   base::WeakPtrFactory<DragHandle> weak_factory_{this};
 };

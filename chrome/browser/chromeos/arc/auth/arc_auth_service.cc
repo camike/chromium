@@ -13,13 +13,14 @@
 #include "base/optional.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "chrome/browser/chromeos/account_manager/account_manager_migrator.h"
-#include "chrome/browser/chromeos/account_manager/account_manager_util.h"
+#include "chrome/browser/ash/account_manager/account_manager_migrator.h"
+#include "chrome/browser/ash/account_manager/account_manager_util.h"
 #include "chrome/browser/chromeos/arc/arc_optin_uma.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/arc/auth/arc_background_auth_code_fetcher.h"
 #include "chrome/browser/chromeos/arc/auth/arc_robot_auth_code_fetcher.h"
 #include "chrome/browser/chromeos/arc/policy/arc_policy_util.h"
+#include "chrome/browser/chromeos/arc/session/arc_provisioning_result.h"
 #include "chrome/browser/chromeos/arc/session/arc_session_manager.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_session.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -29,8 +30,10 @@
 #include "chrome/browser/signin/signin_ui_util.h"
 #include "chrome/browser/ui/app_list/arc/arc_data_removal_dialog.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
-#include "chrome/browser/ui/webui/signin/inline_login_handler_dialog_chromeos.h"
+#include "chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.h"
+#include "chrome/browser/ui/webui/signin/inline_login_dialog_chromeos.h"
 #include "chrome/common/webui_url_constants.h"
+#include "components/account_manager_core/account_manager_facade.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
 #include "components/arc/arc_features.h"
 #include "components/arc/arc_prefs.h"
@@ -69,45 +72,6 @@ class ArcAuthServiceFactory
   ArcAuthServiceFactory() { DependsOn(IdentityManagerFactory::GetInstance()); }
   ~ArcAuthServiceFactory() override = default;
 };
-
-// Convers mojom::ArcSignInStatus into ProvisiningResult.
-ProvisioningResult ConvertArcSignInStatusToProvisioningResult(
-    mojom::ArcSignInStatus reason) {
-  using ArcSignInStatus = mojom::ArcSignInStatus;
-
-#define MAP_PROVISIONING_RESULT(name) \
-  case ArcSignInStatus::name:         \
-    return ProvisioningResult::name
-
-  switch (reason) {
-    MAP_PROVISIONING_RESULT(UNKNOWN_ERROR);
-    MAP_PROVISIONING_RESULT(MOJO_VERSION_MISMATCH);
-    MAP_PROVISIONING_RESULT(MOJO_CALL_TIMEOUT);
-    MAP_PROVISIONING_RESULT(DEVICE_CHECK_IN_FAILED);
-    MAP_PROVISIONING_RESULT(DEVICE_CHECK_IN_TIMEOUT);
-    MAP_PROVISIONING_RESULT(DEVICE_CHECK_IN_INTERNAL_ERROR);
-    MAP_PROVISIONING_RESULT(GMS_NETWORK_ERROR);
-    MAP_PROVISIONING_RESULT(GMS_SERVICE_UNAVAILABLE);
-    MAP_PROVISIONING_RESULT(GMS_BAD_AUTHENTICATION);
-    MAP_PROVISIONING_RESULT(GMS_SIGN_IN_FAILED);
-    MAP_PROVISIONING_RESULT(GMS_SIGN_IN_TIMEOUT);
-    MAP_PROVISIONING_RESULT(GMS_SIGN_IN_INTERNAL_ERROR);
-    MAP_PROVISIONING_RESULT(CLOUD_PROVISION_FLOW_FAILED);
-    MAP_PROVISIONING_RESULT(CLOUD_PROVISION_FLOW_TIMEOUT);
-    MAP_PROVISIONING_RESULT(CLOUD_PROVISION_FLOW_INTERNAL_ERROR);
-    MAP_PROVISIONING_RESULT(NO_NETWORK_CONNECTION);
-    MAP_PROVISIONING_RESULT(CHROME_SERVER_COMMUNICATION_ERROR);
-    MAP_PROVISIONING_RESULT(ARC_DISABLED);
-    MAP_PROVISIONING_RESULT(SUCCESS);
-    MAP_PROVISIONING_RESULT(SUCCESS_ALREADY_PROVISIONED);
-    MAP_PROVISIONING_RESULT(UNSUPPORTED_ACCOUNT_TYPE);
-    MAP_PROVISIONING_RESULT(CHROME_ACCOUNT_NOT_FOUND);
-  }
-#undef MAP_PROVISIONING_RESULT
-
-  NOTREACHED() << "unknown reason: " << static_cast<int>(reason);
-  return ProvisioningResult::UNKNOWN_ERROR;
-}
 
 mojom::ChromeAccountType GetAccountType(const Profile* profile) {
   if (profile->IsChild())
@@ -191,29 +155,29 @@ bool IsPrimaryOrDeviceLocalAccount(
 }
 
 void TriggerAccountManagerMigrationsIfRequired(Profile* profile) {
-  if (!chromeos::IsAccountManagerAvailable(profile))
+  if (!ash::IsAccountManagerAvailable(profile))
     return;
 
-  chromeos::AccountManagerMigrator* const migrator =
-      chromeos::AccountManagerMigratorFactory::GetForBrowserContext(profile);
+  ash::AccountManagerMigrator* const migrator =
+      ash::AccountManagerMigratorFactory::GetForBrowserContext(profile);
   if (!migrator) {
     // Migrator can be null for ephemeral and kiosk sessions. Ignore those cases
     // since there are no accounts to be migrated in that case.
     return;
   }
-  const base::Optional<chromeos::AccountMigrationRunner::MigrationResult>
+  const base::Optional<ash::AccountMigrationRunner::MigrationResult>
       last_migration_run_result = migrator->GetLastMigrationRunResult();
 
   if (!last_migration_run_result)
     return;
 
   if (last_migration_run_result->final_status !=
-      chromeos::AccountMigrationRunner::Status::kFailure) {
+      ash::AccountMigrationRunner::Status::kFailure) {
     return;
   }
 
   if (last_migration_run_result->failed_step_id !=
-      chromeos::AccountManagerMigrator::kArcAccountsMigrationId) {
+      ash::AccountManagerMigrator::kArcAccountsMigrationId) {
     // Migrations failed but not because of ARC. ARC should not try to re-run
     // migrations in this case.
     return;
@@ -250,7 +214,7 @@ std::string GetAccountName(Profile* profile) {
 void OnFetchPrimaryAccountInfoCompleted(
     ArcAuthService::RequestAccountInfoCallback callback,
     bool persistent_error,
-    mojom::ArcSignInStatus status,
+    mojom::ArcAuthCodeStatus status,
     mojom::AccountInfoPtr account_info) {
   std::move(callback).Run(std::move(status), std::move(account_info),
                           persistent_error);
@@ -347,15 +311,13 @@ void ArcAuthService::OnConnectionClosed() {
   pending_token_requests_.clear();
 }
 
-void ArcAuthService::OnAuthorizationComplete(
-    mojom::ArcSignInStatus status,
-    bool initial_signin,
-    const base::Optional<std::string>& account_name) {
-  if (initial_signin) {
-    DCHECK(!account_name.has_value());
+void ArcAuthService::OnAuthorizationResult(mojom::ArcSignInResultPtr result,
+                                           mojom::ArcSignInAccountPtr account) {
+  ArcProvisioningResult provisioning_result(std::move(result));
+
+  if (account->is_initial_signin()) {
     // UMA for initial signin is updated from ArcSessionManager.
-    ArcSessionManager::Get()->OnProvisioningFinished(
-        ConvertArcSignInStatusToProvisioningResult(status));
+    ArcSessionManager::Get()->OnProvisioningFinished(provisioning_result);
     return;
   }
 
@@ -365,61 +327,50 @@ void ArcAuthService::OnAuthorizationComplete(
     return;
   }
 
-  if (!account_name.has_value() ||
-      IsPrimaryOrDeviceLocalAccount(identity_manager_, account_name.value())) {
+  const ProvisioningStatus status = GetProvisioningStatus(provisioning_result);
+
+  if (!account->is_account_name() || !account->get_account_name() ||
+      account->get_account_name().value().empty() ||
+      IsPrimaryOrDeviceLocalAccount(identity_manager_,
+                                    account->get_account_name().value())) {
     // Reauthorization for the Primary Account.
     // The check for |!account_name.has_value()| is for backwards compatibility
     // with older ARC versions, for which Mojo will set |account_name| to
     // empty/null.
-    DCHECK_NE(mojom::ArcSignInStatus::SUCCESS_ALREADY_PROVISIONED, status);
-    UpdateReauthorizationResultUMA(
-        ConvertArcSignInStatusToProvisioningResult(status), profile_);
+    UpdateReauthorizationResultUMA(status, profile_);
   } else {
-    UpdateSecondarySigninResultUMA(
-        ConvertArcSignInStatusToProvisioningResult(status));
+    UpdateSecondarySigninResultUMA(status);
   }
-}
-
-void ArcAuthService::OnSignInCompleteDeprecated() {
-  OnAuthorizationComplete(mojom::ArcSignInStatus::SUCCESS /* status */,
-                          true /* initial_signin */,
-                          base::nullopt /* account_name */);
-}
-
-void ArcAuthService::OnSignInFailedDeprecated(mojom::ArcSignInStatus reason) {
-  DCHECK_NE(mojom::ArcSignInStatus::SUCCESS, reason);
-  OnAuthorizationComplete(reason /* status */, true /* initial_signin */,
-                          base::nullopt /* account_name */);
 }
 
 void ArcAuthService::ReportMetrics(mojom::MetricsType metrics_type,
                                    int32_t value) {
   switch (metrics_type) {
     case mojom::MetricsType::NETWORK_WAITING_TIME_MILLISECONDS:
-      UpdateAuthTiming("ArcAuth.NetworkWaitTime",
-                       base::TimeDelta::FromMilliseconds(value));
+      UpdateAuthTiming("Arc.Auth.NetworkWait.TimeDelta",
+                       base::TimeDelta::FromMilliseconds(value), profile_);
       break;
     case mojom::MetricsType::CHECKIN_ATTEMPTS:
-      UpdateAuthCheckinAttempts(value);
+      UpdateAuthCheckinAttempts(value, profile_);
       break;
     case mojom::MetricsType::CHECKIN_TIME_MILLISECONDS:
-      UpdateAuthTiming("ArcAuth.CheckinTime",
-                       base::TimeDelta::FromMilliseconds(value));
+      UpdateAuthTiming("Arc.Auth.Checkin.TimeDelta",
+                       base::TimeDelta::FromMilliseconds(value), profile_);
       break;
     case mojom::MetricsType::SIGNIN_TIME_MILLISECONDS:
-      UpdateAuthTiming("ArcAuth.SignInTime",
-                       base::TimeDelta::FromMilliseconds(value));
+      UpdateAuthTiming("Arc.Auth.SignIn.TimeDelta",
+                       base::TimeDelta::FromMilliseconds(value), profile_);
       break;
     case mojom::MetricsType::ACCOUNT_CHECK_MILLISECONDS:
-      UpdateAuthTiming("ArcAuth.AccountCheckTime",
-                       base::TimeDelta::FromMilliseconds(value));
+      UpdateAuthTiming("Arc.Auth.AccountCheck.TimeDelta",
+                       base::TimeDelta::FromMilliseconds(value), profile_);
       break;
   }
 }
 
 void ArcAuthService::ReportAccountCheckStatus(
     mojom::AccountCheckStatus status) {
-  UpdateAuthAccountCheckStatus(status);
+  UpdateAuthAccountCheckStatus(status, profile_);
 }
 
 void ArcAuthService::ReportSupervisionChangeStatus(
@@ -445,27 +396,6 @@ void ArcAuthService::ReportSupervisionChangeStatus(
     case mojom::SupervisionChangeStatus::INVALID_SUPERVISION_STATE:
       NOTREACHED() << "Invalid status of child transition: " << status;
   }
-}
-
-void ArcAuthService::OnAccountInfoReadyDeprecated(
-    mojom::ArcSignInStatus status,
-    mojom::AccountInfoPtr account_info) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  auto* instance = ARC_GET_INSTANCE_FOR_METHOD(arc_bridge_service_->auth(),
-                                               OnAccountInfoReadyDeprecated);
-  if (!instance)
-    return;
-
-  instance->OnAccountInfoReadyDeprecated(std::move(account_info), status);
-}
-
-void ArcAuthService::RequestAccountInfoDeprecated(bool initial_signin) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-
-  FetchPrimaryAccountInfo(
-      initial_signin,
-      base::BindOnce(&ArcAuthService::OnAccountInfoReadyDeprecated,
-                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void ArcAuthService::RequestPrimaryAccountInfo(
@@ -502,7 +432,7 @@ void ArcAuthService::FetchPrimaryAccountInfo(
 
   if (IsArcOptInVerificationDisabled()) {
     std::move(callback).Run(
-        mojom::ArcSignInStatus::SUCCESS,
+        mojom::ArcAuthCodeStatus::SUCCESS,
         CreateAccountInfo(false /* is_enforced */,
                           std::string() /* auth_info */,
                           std::string() /* auth_name */, account_type,
@@ -532,7 +462,7 @@ void ArcAuthService::FetchPrimaryAccountInfo(
   if (account_type == mojom::ChromeAccountType::OFFLINE_DEMO_ACCOUNT) {
     // Skip account auth code fetch for offline enrolled demo mode.
     std::move(callback).Run(
-        mojom::ArcSignInStatus::SUCCESS,
+        mojom::ArcAuthCodeStatus::SUCCESS,
         CreateAccountInfo(true /* is_enforced */, std::string() /* auth_info */,
                           std::string() /* auth_name */, account_type,
                           true /* is_managed */));
@@ -574,29 +504,29 @@ void ArcAuthService::FetchPrimaryAccountInfo(
 
 void ArcAuthService::IsAccountManagerAvailable(
     IsAccountManagerAvailableCallback callback) {
-  std::move(callback).Run(chromeos::IsAccountManagerAvailable(profile_));
+  std::move(callback).Run(ash::IsAccountManagerAvailable(profile_));
 }
 
 void ArcAuthService::HandleAddAccountRequest() {
-  DCHECK(chromeos::IsAccountManagerAvailable(profile_));
+  DCHECK(ash::IsAccountManagerAvailable(profile_));
 
-  chromeos::InlineLoginHandlerDialogChromeOS::Show(
-      std::string() /*email*/,
-      chromeos::InlineLoginHandlerDialogChromeOS::Source::kArc);
+  chromeos::InlineLoginDialogChromeOS::ShowDeprecated(
+      ::account_manager::AccountManagerFacade::AccountAdditionSource::kArc);
 }
 
 void ArcAuthService::HandleRemoveAccountRequest(const std::string& email) {
-  DCHECK(chromeos::IsAccountManagerAvailable(profile_));
+  DCHECK(ash::IsAccountManagerAvailable(profile_));
 
   chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
-      profile_, chrome::kAccountManagerSubPage);
+      profile_, chromeos::settings::mojom::kMyAccountsSubpagePath);
 }
 
 void ArcAuthService::HandleUpdateCredentialsRequest(const std::string& email) {
-  DCHECK(chromeos::IsAccountManagerAvailable(profile_));
+  DCHECK(ash::IsAccountManagerAvailable(profile_));
 
-  chromeos::InlineLoginHandlerDialogChromeOS::Show(
-      email, chromeos::InlineLoginHandlerDialogChromeOS::Source::kArc);
+  chromeos::InlineLoginDialogChromeOS::ShowDeprecated(
+      email,
+      ::account_manager::AccountManagerFacade::AccountAdditionSource::kArc);
 }
 
 void ArcAuthService::OnRefreshTokenUpdatedForAccount(
@@ -605,7 +535,7 @@ void ArcAuthService::OnRefreshTokenUpdatedForAccount(
   // proper Profile independent entity once we have that.
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  if (!chromeos::IsAccountManagerAvailable(profile_))
+  if (!ash::IsAccountManagerAvailable(profile_))
     return;
 
   // Ignore the update if ARC has not been provisioned yet.
@@ -613,9 +543,12 @@ void ArcAuthService::OnRefreshTokenUpdatedForAccount(
     return;
 
   // For child device accounts do not allow the propagation of secondary
-  // accounts from Chrome OS Account Manager to ARC.
-  if (profile_->IsChild() && !IsPrimaryGaiaAccount(account_info.gaia))
+  // accounts from Chrome OS Account Manager to ARC unless experimental feature
+  // is enabled.
+  if (!arc::IsSecondaryAccountForChildEnabled() && profile_->IsChild() &&
+      !IsPrimaryGaiaAccount(account_info.gaia)) {
     return;
+  }
 
   if (identity_manager_->HasAccountWithRefreshTokenInPersistentErrorState(
           account_info.account_id)) {
@@ -638,7 +571,7 @@ void ArcAuthService::OnExtendedAccountInfoRemoved(
     const AccountInfo& account_info) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  if (!chromeos::IsAccountManagerAvailable(profile_))
+  if (!ash::IsAccountManagerAvailable(profile_))
     return;
 
   DCHECK(!IsPrimaryGaiaAccount(account_info.gaia));
@@ -683,7 +616,7 @@ void ArcAuthService::OnActiveDirectoryEnrollmentTokenFetched(
 
       // Send enrollment token to ARC.
       std::move(callback).Run(
-          mojom::ArcSignInStatus::SUCCESS,
+          mojom::ArcAuthCodeStatus::SUCCESS,
           CreateAccountInfo(true /* is_enforced */, enrollment_token,
                             std::string() /* account_name */,
                             mojom::ChromeAccountType::ACTIVE_DIRECTORY_ACCOUNT,
@@ -693,12 +626,12 @@ void ArcAuthService::OnActiveDirectoryEnrollmentTokenFetched(
     case ArcActiveDirectoryEnrollmentTokenFetcher::Status::FAILURE: {
       // Send error to ARC.
       std::move(callback).Run(
-          mojom::ArcSignInStatus::CHROME_SERVER_COMMUNICATION_ERROR, nullptr);
+          mojom::ArcAuthCodeStatus::CHROME_SERVER_COMMUNICATION_ERROR, nullptr);
       break;
     }
     case ArcActiveDirectoryEnrollmentTokenFetcher::Status::ARC_DISABLED: {
       // Send error to ARC.
-      std::move(callback).Run(mojom::ArcSignInStatus::ARC_DISABLED, nullptr);
+      std::move(callback).Run(mojom::ArcAuthCodeStatus::ARC_DISABLED, nullptr);
       break;
     }
   }
@@ -716,7 +649,7 @@ void ArcAuthService::OnPrimaryAccountAuthCodeFetched(
   if (success) {
     const std::string& full_account_id = GetAccountName(profile_);
     std::move(callback).Run(
-        mojom::ArcSignInStatus::SUCCESS,
+        mojom::ArcAuthCodeStatus::SUCCESS,
         CreateAccountInfo(!IsArcOptInVerificationDisabled(), auth_code,
                           full_account_id, GetAccountType(profile_),
                           policy_util::IsAccountManaged(profile_)));
@@ -725,7 +658,7 @@ void ArcAuthService::OnPrimaryAccountAuthCodeFetched(
     // For demo sessions, if auth code fetch failed (e.g. because the device is
     // offline), fall back to accountless offline demo mode provisioning.
     std::move(callback).Run(
-        mojom::ArcSignInStatus::SUCCESS,
+        mojom::ArcAuthCodeStatus::SUCCESS,
         CreateAccountInfo(true /* is_enforced */, std::string() /* auth_info */,
                           std::string() /* auth_name */,
                           mojom::ChromeAccountType::OFFLINE_DEMO_ACCOUNT,
@@ -733,7 +666,7 @@ void ArcAuthService::OnPrimaryAccountAuthCodeFetched(
   } else {
     // Send error to ARC.
     std::move(callback).Run(
-        mojom::ArcSignInStatus::CHROME_SERVER_COMMUNICATION_ERROR, nullptr);
+        mojom::ArcAuthCodeStatus::CHROME_SERVER_COMMUNICATION_ERROR, nullptr);
   }
 }
 
@@ -747,7 +680,7 @@ void ArcAuthService::FetchSecondaryAccountInfo(
               account_name);
   if (!account_info.has_value()) {
     // Account is in ARC, but not in Chrome OS Account Manager.
-    std::move(callback).Run(mojom::ArcSignInStatus::CHROME_ACCOUNT_NOT_FOUND,
+    std::move(callback).Run(mojom::ArcAuthCodeStatus::CHROME_ACCOUNT_NOT_FOUND,
                             nullptr /* account_info */,
                             true /* persistent_error */);
     return;
@@ -759,7 +692,7 @@ void ArcAuthService::FetchSecondaryAccountInfo(
   if (identity_manager_->HasAccountWithRefreshTokenInPersistentErrorState(
           account_id)) {
     std::move(callback).Run(
-        mojom::ArcSignInStatus::CHROME_SERVER_COMMUNICATION_ERROR,
+        mojom::ArcAuthCodeStatus::CHROME_SERVER_COMMUNICATION_ERROR,
         nullptr /* account_info */, true /* persistent_error */);
     return;
   }
@@ -790,7 +723,7 @@ void ArcAuthService::OnSecondaryAccountAuthCodeFetched(
 
   if (success) {
     std::move(callback).Run(
-        mojom::ArcSignInStatus::SUCCESS,
+        mojom::ArcAuthCodeStatus::SUCCESS,
         CreateAccountInfo(true /* is_enforced */, auth_code, account_name,
                           mojom::ChromeAccountType::USER_ACCOUNT,
                           false /* is_managed */),
@@ -809,12 +742,12 @@ void ArcAuthService::OnSecondaryAccountAuthCodeFetched(
         identity_manager_->HasAccountWithRefreshTokenInPersistentErrorState(
             account_info->account_id);
     std::move(callback).Run(
-        mojom::ArcSignInStatus::CHROME_SERVER_COMMUNICATION_ERROR,
+        mojom::ArcAuthCodeStatus::CHROME_SERVER_COMMUNICATION_ERROR,
         nullptr /* account_info */, is_persistent_error);
     return;
   }
 
-  std::move(callback).Run(mojom::ArcSignInStatus::CHROME_ACCOUNT_NOT_FOUND,
+  std::move(callback).Run(mojom::ArcAuthCodeStatus::CHROME_ACCOUNT_NOT_FOUND,
                           nullptr /* account_info */, true);
 }
 
@@ -868,7 +801,7 @@ ArcAuthService::CreateArcBackgroundAuthCodeFetcher(
 }
 
 void ArcAuthService::TriggerAccountsPushToArc(bool filter_primary_account) {
-  if (!chromeos::IsAccountManagerAvailable(profile_))
+  if (!ash::IsAccountManagerAvailable(profile_))
     return;
 
   const std::vector<CoreAccountInfo> accounts =

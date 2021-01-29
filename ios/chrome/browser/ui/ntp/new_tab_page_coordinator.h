@@ -14,6 +14,7 @@ class WebState;
 }
 
 @protocol NewTabPageControllerDelegate;
+@class ViewRevealingVerticalPanHandler;
 
 // Coordinator handling the NTP.
 @interface NewTabPageCoordinator
@@ -37,6 +38,9 @@ class WebState;
 // Returns |YES| if the coordinator is started.
 @property(nonatomic, assign, getter=isStarted) BOOL started;
 
+// The pan gesture handler for the view controller.
+@property(nonatomic, weak) ViewRevealingVerticalPanHandler* panGestureHandler;
+
 // Dismisses all modals owned by the NTP.
 - (void)dismissModals;
 
@@ -57,11 +61,18 @@ class WebState;
 // Reloads the content of the NewTabPage.
 - (void)reload;
 
+// Calls when the visibility of the NTP changes.
+- (void)ntpDidChangeVisibility:(BOOL)visible;
+
 // The location bar has lost focus.
 - (void)locationBarDidResignFirstResponder;
 
 // Tell location bar has taken focus.
 - (void)locationBarDidBecomeFirstResponder;
+
+// Constrains the named layout guide for the Discover header menu button.
+- (void)constrainDiscoverHeaderMenuButtonNamedGuide;
+
 @end
 
 #endif  // IOS_CHROME_BROWSER_UI_NTP_NEW_TAB_PAGE_COORDINATOR_H_

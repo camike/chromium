@@ -17,13 +17,15 @@
 #include "ios/web/common/features.h"
 #include "ios/web/common/url_util.h"
 #import "ios/web/js_messaging/crw_js_injector.h"
+#import "ios/web/navigation/crw_error_page_helper.h"
 #import "ios/web/navigation/navigation_context_impl.h"
 #import "ios/web/navigation/navigation_item_impl.h"
+#import "ios/web/navigation/navigation_manager_impl.h"
 #import "ios/web/navigation/session_storage_builder.h"
-#import "ios/web/navigation/wk_based_navigation_manager_impl.h"
 #import "ios/web/navigation/wk_navigation_util.h"
 #include "ios/web/public/browser_state.h"
 #include "ios/web/public/favicon/favicon_url.h"
+#include "ios/web/public/js_messaging/web_frame.h"
 #import "ios/web/public/navigation/navigation_item.h"
 #import "ios/web/public/navigation/web_state_policy_decider.h"
 #import "ios/web/public/session/crw_navigation_item_storage.h"
@@ -63,12 +65,7 @@ web::WebState* ReturnWeakReference(base::WeakPtr<WebStateImpl> weak_web_state) {
 
 /* static */
 std::unique_ptr<WebState> WebState::Create(const CreateParams& params) {
-  std::unique_ptr<WebStateImpl> web_state(new WebStateImpl(params));
-
-  // Initialize the new session.
-  web_state->GetNavigationManagerImpl().InitializeSession();
-
-  return web_state;
+  return std::make_unique<WebStateImpl>(params);
 }
 
 /* static */
@@ -91,8 +88,11 @@ WebStateImpl::WebStateImpl(const CreateParams& params,
       web_frames_manager_(*this),
       interstitial_(nullptr),
       created_with_opener_(params.created_with_opener),
+      user_agent_type_(features::UseWebClientDefaultUserAgent()
+                           ? UserAgentType::AUTOMATIC
+                           : UserAgentType::MOBILE),
       weak_factory_(this) {
-  navigation_manager_ = std::make_unique<WKBasedNavigationManagerImpl>();
+  navigation_manager_ = std::make_unique<NavigationManagerImpl>();
 
   navigation_manager_->SetDelegate(this);
   navigation_manager_->SetBrowserState(params.browser_state);
@@ -100,7 +100,7 @@ WebStateImpl::WebStateImpl(const CreateParams& params,
   GlobalWebStateEventTracker::GetInstance()->OnWebStateCreated(this);
   web_controller_ = [[CRWWebController alloc] initWithWebState:this];
 
-  // Restore session history last because WKBasedNavigationManagerImpl relies on
+  // Restore session history last because NavigationManagerImpl relies on
   // CRWWebController to restore history into the web view.
   if (session_storage) {
     RestoreSessionStorage(session_storage);
@@ -310,6 +310,13 @@ WebStateImpl::GetSessionCertificatePolicyCacheImpl() {
 }
 
 void WebStateImpl::CreateWebUI(const GURL& url) {
+  if (HasWebUI()) {
+    if (web_ui_->GetController()->GetHost() == url.host()) {
+      // Don't recreate webUI for the same host.
+      return;
+    }
+    ClearWebUI();
+  }
   web_ui_ = CreateWebUIIOS(url);
 }
 
@@ -326,8 +333,7 @@ const base::string16& WebStateImpl::GetTitle() const {
   // match the WebContents implementation of this method.
   DCHECK(Configured());
   web::NavigationItem* item = navigation_manager_->GetLastCommittedItem();
-  // Display title for the visible item makes more sense. Only do this in
-  // WKBasedNavigationManager for now to limit impact.
+  // Display title for the visible item makes more sense.
   item = navigation_manager_->GetVisibleItem();
   return item ? item->GetTitleForDisplay() : empty_string16_;
 }
@@ -419,15 +425,31 @@ void WebStateImpl::CloseWebState() {
   }
 }
 
-void WebStateImpl::OnAuthRequired(
-    NSURLProtectionSpace* protection_space,
-    NSURLCredential* proposed_credential,
-    const WebStateDelegate::AuthCallback& callback) {
+UserAgentType WebStateImpl::GetUserAgentForNextNavigation(const GURL& url) {
+  if (user_agent_type_ == UserAgentType::AUTOMATIC) {
+    UIView* container =
+        GetWebViewContainer() ? GetWebViewContainer() : GetView();
+    return GetWebClient()->GetDefaultUserAgent(container, url);
+  }
+  return user_agent_type_;
+}
+
+UserAgentType WebStateImpl::GetUserAgentForSessionRestoration() const {
+  return user_agent_type_;
+}
+
+void WebStateImpl::SetUserAgent(UserAgentType user_agent) {
+  user_agent_type_ = user_agent;
+}
+
+void WebStateImpl::OnAuthRequired(NSURLProtectionSpace* protection_space,
+                                  NSURLCredential* proposed_credential,
+                                  WebStateDelegate::AuthCallback callback) {
   if (delegate_) {
     delegate_->OnAuthRequired(this, protection_space, proposed_credential,
-                              callback);
+                              std::move(callback));
   } else {
-    callback.Run(nil, nil);
+    std::move(callback).Run(nil, nil);
   }
 }
 
@@ -513,6 +535,13 @@ void WebStateImpl::CommitPreviewingViewController(
   }
 }
 
+UIView* WebStateImpl::GetWebViewContainer() {
+  if (delegate_) {
+    return delegate_->GetWebViewContainer(this);
+  }
+  return nil;
+}
+
 #pragma mark - RequestTracker management
 
 void WebStateImpl::DidChangeVisibleSecurityState() {
@@ -548,6 +577,16 @@ void WebStateImpl::SetWebUsageEnabled(bool enabled) {
 
 UIView* WebStateImpl::GetView() {
   return [web_controller_ view];
+}
+
+void WebStateImpl::DidCoverWebContent() {
+  [web_controller_ removeWebViewFromViewHierarchy];
+  WasHidden();
+}
+
+void WebStateImpl::DidRevealWebContent() {
+  [web_controller_ addWebViewToViewHierarchy];
+  WasShown();
 }
 
 void WebStateImpl::WasShown() {
@@ -657,7 +696,8 @@ void WebStateImpl::ExecuteJavaScript(const base::string16& javascript,
       executeJavaScript:base::SysUTF16ToNSString(javascript)
       completionHandler:^(id value, NSError* error) {
         if (error) {
-          DLOG(WARNING) << "Script execution has failed: "
+          DLOG(WARNING) << "Script execution of:" << javascript
+                        << "\nfailed with error: "
                         << base::SysNSStringToUTF16(
                                error.userInfo[NSLocalizedDescriptionKey]);
         }
@@ -722,8 +762,6 @@ GURL WebStateImpl::GetCurrentURL(URLVerificationTrustLevel* trust_level) const {
   } else {
     equalOrigins = result.GetOrigin() == lastCommittedURL.GetOrigin();
   }
-  DCHECK(equalOrigins) << "Origin mismatch. URL: " << result.spec()
-                       << " Last committed: " << lastCommittedURL.spec();
   UMA_HISTOGRAM_BOOLEAN("Web.CurrentOriginEqualsLastCommittedOrigin",
                         equalOrigins);
   if (!equalOrigins || (item && item->IsUntrusted())) {
@@ -732,9 +770,9 @@ GURL WebStateImpl::GetCurrentURL(URLVerificationTrustLevel* trust_level) const {
   return result;
 }
 
-std::unique_ptr<WebState::ScriptCommandSubscription>
-WebStateImpl::AddScriptCommandCallback(const ScriptCommandCallback& callback,
-                                       const std::string& command_prefix) {
+base::CallbackListSubscription WebStateImpl::AddScriptCommandCallback(
+    const ScriptCommandCallback& callback,
+    const std::string& command_prefix) {
   DCHECK(!command_prefix.empty());
   DCHECK(command_prefix.find_first_of('.') == std::string::npos);
   DCHECK(script_command_callbacks_.count(command_prefix) == 0 ||
@@ -772,11 +810,25 @@ void WebStateImpl::TakeSnapshot(const gfx::RectF& rect,
                              }];
 }
 
+void WebStateImpl::CreateFullPagePdf(
+    base::OnceCallback<void(NSData*)> callback) {
+  // Move the callback to a __block pointer, which will be in scope as long
+  // as the callback is retained.
+  __block base::OnceCallback<void(NSData*)> callback_for_block =
+      std::move(callback);
+  [web_controller_
+      createFullPagePDFWithCompletion:^(NSData* pdf_document_data) {
+        std::move(callback_for_block).Run(pdf_document_data);
+      }];
+}
+
 void WebStateImpl::OnNavigationStarted(web::NavigationContextImpl* context) {
   // Navigation manager loads internal URLs to restore session history and
   // create back-forward entries for WebUI. Do not trigger external callbacks.
   if ((!base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) &&
        context->IsPlaceholderNavigation()) ||
+      (base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) &&
+       [CRWErrorPageHelper isErrorPageFileURL:context->GetUrl()]) ||
       wk_navigation_util::IsRestoreSessionUrl(context->GetUrl())) {
     return;
   }
@@ -785,11 +837,18 @@ void WebStateImpl::OnNavigationStarted(web::NavigationContextImpl* context) {
     observer.DidStartNavigation(this, context);
 }
 
+void WebStateImpl::OnNavigationRedirected(web::NavigationContextImpl* context) {
+  for (auto& observer : observers_)
+    observer.DidRedirectNavigation(this, context);
+}
+
 void WebStateImpl::OnNavigationFinished(web::NavigationContextImpl* context) {
   // Navigation manager loads internal URLs to restore session history and
   // create back-forward entries for WebUI. Do not trigger external callbacks.
   if ((!base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) &&
        context->IsPlaceholderNavigation()) ||
+      (base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) &&
+       [CRWErrorPageHelper isErrorPageFileURL:context->GetUrl()]) ||
       wk_navigation_util::IsRestoreSessionUrl(context->GetUrl())) {
     return;
   }
@@ -880,6 +939,10 @@ WebState* WebStateImpl::GetWebState() {
   return this;
 }
 
+void WebStateImpl::SetWebStateUserAgent(UserAgentType user_agent_type) {
+  SetUserAgent(user_agent_type);
+}
+
 id<CRWWebViewNavigationProxy> WebStateImpl::GetWebViewNavigationProxy() const {
   return [web_controller_ webViewNavigationProxy];
 }
@@ -903,13 +966,12 @@ NavigationItemImpl* WebStateImpl::GetPendingItem() {
 }
 
 void WebStateImpl::RestoreSessionStorage(CRWSessionStorage* session_storage) {
-  // Session storage restore is asynchronous with WKBasedNavigationManager
-  // because it involves a page load in WKWebView. Temporarily cache the
-  // restored session so it can be returned if BuildSessionStorage() or
-  // GetTitle() is called before the actual restoration completes. This can
-  // happen to inactive tabs when a navigation in the current tab triggers the
-  // serialization of all tabs and when user clicks on tab switcher without
-  // switching to a tab.
+  // Session storage restore is asynchronous because it involves a page load in
+  // WKWebView. Temporarily cache the restored session so it can be returned if
+  // BuildSessionStorage() or GetTitle() is called before the actual restoration
+  // completes. This can happen to inactive tabs when a navigation in the
+  // current tab triggers the serialization of all tabs and when user clicks on
+  // tab switcher without switching to a tab.
   restored_session_storage_ = session_storage;
   SessionStorageBuilder session_storage_builder;
   session_storage_builder.ExtractSessionState(this, session_storage);

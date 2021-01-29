@@ -17,15 +17,16 @@ import android.webkit.WebSettings;
 
 import androidx.annotation.IntDef;
 
+import org.chromium.android_webview.common.AwFeatures;
 import org.chromium.android_webview.safe_browsing.AwSafeBrowsingConfigHelper;
 import org.chromium.android_webview.settings.ForceDarkBehavior;
 import org.chromium.android_webview.settings.ForceDarkMode;
-import org.chromium.base.BuildInfo;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.content_public.browser.WebContents;
 
 import java.lang.annotation.Retention;
@@ -292,7 +293,9 @@ public class AwSettings {
             mDoNotUpdateSelectionOnMutatingSelectionRange =
                     doNotUpdateSelectionOnMutatingSelectionRange;
 
-            mAllowFileUrlAccess = !BuildInfo.targetsAtLeastR();
+            mAllowFileUrlAccess =
+                    ContextUtils.getApplicationContext().getApplicationInfo().targetSdkVersion
+                    < Build.VERSION_CODES.R;
         }
         // Defer initializing the native side until a native WebContents instance is set.
     }
@@ -655,6 +658,11 @@ public class AwSettings {
                 mUserAgent = ua;
             }
             if (!oldUserAgent.equals(mUserAgent)) {
+                if (ua != null && ua.length() > 0
+                        && AwContents.BAD_HEADER_CHAR.matcher(ua).find()) {
+                    throw new IllegalArgumentException(
+                            AwContents.BAD_HEADER_MSG + "Invalid User-Agent '" + ua + "'");
+                }
                 mEventHandler.runOnUiThreadBlockingAndLocked(() -> {
                     if (mNativeAwSettings != 0) {
                         AwSettingsJni.get().updateUserAgentLocked(
@@ -1689,6 +1697,9 @@ public class AwSettings {
     }
 
     public void setMixedContentMode(int mode) {
+        // Using explicit max count for the histogram since enum is defined in Android code. The
+        // values can be trusted to remain stable since they are defined in the Android API.
+        RecordHistogram.recordEnumeratedHistogram("Android.WebView.MixedContent.Mode", mode, 3);
         synchronized (mAwSettingsLock) {
             if (mMixedContentMode != mode) {
                 mMixedContentMode = mode;
@@ -1723,6 +1734,13 @@ public class AwSettings {
                 mForceDarkMode = forceDarkMode;
                 mEventHandler.updateWebkitPreferencesLocked();
             }
+        }
+    }
+
+    public boolean isDarkMode() {
+        synchronized (mAwSettingsLock) {
+            assert mNativeAwSettings != 0;
+            return AwSettingsJni.get().isDarkMode(mNativeAwSettings, AwSettings.this);
         }
     }
 
@@ -1763,14 +1781,17 @@ public class AwSettings {
 
     @CalledByNative
     private boolean getAllowMixedContentAutoupgradesLocked() {
-        assert Thread.holdsLock(mAwSettingsLock);
-        // We only allow mixed content autoupgrades (upgrading HTTP subresources to HTTPS in HTTPS
-        // sites) when the mixed content mode is set to MIXED_CONTENT_COMPATIBILITY, which keeps it
-        // in line with the behavior in Chrome. With MIXED_CONTENT_ALWAYS_ALLOW, we disable
-        // autoupgrades since the developer is explicitly allowing mixed content, whereas with
-        // MIXED_CONTENT_NEVER_ALLOW, there is no need to autoupgrade since the content will be
-        // blocked.
-        return mMixedContentMode == WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE;
+        if (AwFeatureList.isEnabled(AwFeatures.WEBVIEW_MIXED_CONTENT_AUTOUPGRADES)) {
+            // We only allow mixed content autoupgrades (upgrading HTTP subresources to HTTPS in
+            // HTTPS sites) when the mixed content mode is set to MIXED_CONTENT_COMPATIBILITY, which
+            // keeps it in line with the behavior in Chrome. With MIXED_CONTENT_ALWAYS_ALLOW, we
+            // disable autoupgrades since the developer is explicitly allowing mixed content,
+            // whereas with MIXED_CONTENT_NEVER_ALLOW, there is no need to autoupgrade since the
+            // content will be blocked.
+            assert Thread.holdsLock(mAwSettingsLock);
+            return mMixedContentMode == WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE;
+        }
+        return false;
     }
 
     public boolean getOffscreenPreRaster() {
@@ -1929,5 +1950,6 @@ public class AwSettings {
         void updateWillSuppressErrorStateLocked(long nativeAwSettings, AwSettings caller);
         void updateCookiePolicyLocked(long nativeAwSettings, AwSettings caller);
         void updateAllowFileAccessLocked(long nativeAwSettings, AwSettings caller);
+        boolean isDarkMode(long nativeAwSettings, AwSettings caller);
     }
 }

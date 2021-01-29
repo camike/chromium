@@ -9,7 +9,9 @@
 #include <utility>
 
 #include "ash/public/cpp/assistant/assistant_state_base.h"
+#include "chromeos/services/assistant/platform/audio_input_host_impl.h"
 #include "chromeos/services/assistant/platform_api_impl.h"
+#include "chromeos/services/assistant/proxy/assistant_proxy.h"
 #include "chromeos/services/assistant/service_context.h"
 #include "libassistant/shared/internal_api/assistant_manager_internal.h"
 #include "libassistant/shared/public/assistant_manager.h"
@@ -20,11 +22,19 @@ namespace assistant {
 AssistantManagerServiceDelegateImpl::AssistantManagerServiceDelegateImpl(
     mojo::PendingRemote<device::mojom::BatteryMonitor> battery_monitor,
     ServiceContext* context)
-    : battery_monitor_(std::move(battery_monitor)),
-      context_(context) {}
+    : battery_monitor_(std::move(battery_monitor)), context_(context) {}
 
 AssistantManagerServiceDelegateImpl::~AssistantManagerServiceDelegateImpl() =
     default;
+
+std::unique_ptr<AudioInputHost>
+AssistantManagerServiceDelegateImpl::CreateAudioInputHost(
+    AudioInputBindings bindings) {
+  return std::make_unique<AudioInputHostImpl>(
+      std::move(bindings), context_->cras_audio_handler(),
+      context_->power_manager_client(),
+      context_->assistant_state()->locale().value());
+}
 
 std::unique_ptr<CrosPlatformApi>
 AssistantManagerServiceDelegateImpl::CreatePlatformApi(
@@ -32,9 +42,8 @@ AssistantManagerServiceDelegateImpl::CreatePlatformApi(
     scoped_refptr<base::SingleThreadTaskRunner> background_thread_task_runner) {
   return std::make_unique<PlatformApiImpl>(
       media_session, context_->power_manager_client(),
-      context_->cras_audio_handler(), std::move(battery_monitor_),
-      context_->main_task_runner(), background_thread_task_runner,
-      context_->assistant_state()->locale().value());
+      std::move(battery_monitor_), context_->main_task_runner(),
+      background_thread_task_runner);
 }
 
 std::unique_ptr<assistant_client::AssistantManager>

@@ -80,17 +80,6 @@ void StubAuthenticator::AuthenticateToLogin(content::BrowserContext* context,
                                 AuthFailure::FromNetworkAuthFailure(error)));
 }
 
-void StubAuthenticator::AuthenticateToUnlock(const UserContext& user_context) {
-  AuthenticateToLogin(NULL /* not used */, user_context);
-}
-
-void StubAuthenticator::LoginAsSupervisedUser(const UserContext& user_context) {
-  UserContext new_user_context = user_context;
-  new_user_context.SetUserIDHash(user_context.GetAccountId().GetUserEmail() +
-                                 kUserIdHashSuffix);
-  consumer_->OnAuthSuccess(new_user_context);
-}
-
 void StubAuthenticator::LoginOffTheRecord() {
   consumer_->OnOffTheRecordAuthSuccess();
 }
@@ -193,7 +182,7 @@ UserContext StubAuthenticator::ExpectedUserContextWithTransformedKey() const {
 }
 
 void StubAuthenticator::OnPasswordChangeDetected() {
-  consumer_->OnPasswordChangeDetected();
+  consumer_->OnPasswordChangeDetected(expected_user_context_);
 }
 
 void StubAuthenticator::OnOldEncryptionDetected() {

@@ -6,11 +6,9 @@
 
 #include <memory>
 
-#include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/password_form.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/browser/statistics_table.h"
-
-using autofill::PasswordForm;
 
 namespace password_manager {
 
@@ -39,6 +37,11 @@ const std::vector<InteractionsStats>& FakeFormFetcher::GetInteractionsStats()
   return stats_;
 }
 
+base::span<const CompromisedCredentials>
+FakeFormFetcher::GetCompromisedCredentials() const {
+  return base::make_span(compromised_);
+}
+
 std::vector<const PasswordForm*> FakeFormFetcher::GetNonFederatedMatches()
     const {
   return non_federated_;
@@ -48,8 +51,8 @@ std::vector<const PasswordForm*> FakeFormFetcher::GetFederatedMatches() const {
   return federated_;
 }
 
-bool FakeFormFetcher::IsBlacklisted() const {
-  return is_blacklisted_;
+bool FakeFormFetcher::IsBlocklisted() const {
+  return is_blocklisted_;
 }
 
 bool FakeFormFetcher::IsMovingBlocked(const autofill::GaiaIdHash& destination,
@@ -90,6 +93,10 @@ const PasswordForm* FakeFormFetcher::GetPreferredMatch() const {
   return preferred_match_;
 }
 
+std::unique_ptr<FormFetcher> FakeFormFetcher::Clone() {
+  return std::make_unique<FakeFormFetcher>();
+}
+
 void FakeFormFetcher::SetNonFederated(
     const std::vector<const PasswordForm*>& non_federated) {
   non_federated_ = non_federated;
@@ -98,8 +105,8 @@ void FakeFormFetcher::SetNonFederated(
                                          &best_matches_, &preferred_match_);
 }
 
-void FakeFormFetcher::SetBlacklisted(bool is_blacklisted) {
-  is_blacklisted_ = is_blacklisted;
+void FakeFormFetcher::SetBlocklisted(bool is_blocklisted) {
+  is_blocklisted_ = is_blocklisted;
 }
 
 void FakeFormFetcher::NotifyFetchCompleted() {
@@ -107,9 +114,4 @@ void FakeFormFetcher::NotifyFetchCompleted() {
   for (Consumer& consumer : consumers_)
     consumer.OnFetchCompleted();
 }
-
-std::unique_ptr<FormFetcher> FakeFormFetcher::Clone() {
-  return std::make_unique<FakeFormFetcher>();
-}
-
 }  // namespace password_manager

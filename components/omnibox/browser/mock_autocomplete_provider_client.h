@@ -29,9 +29,14 @@ class MockAutocompleteProviderClient
  public:
   MockAutocompleteProviderClient();
   ~MockAutocompleteProviderClient();
+  MockAutocompleteProviderClient(const MockAutocompleteProviderClient&) =
+      delete;
+  MockAutocompleteProviderClient& operator=(
+      const MockAutocompleteProviderClient&) = delete;
 
   // AutocompleteProviderClient:
   MOCK_METHOD0(GetPrefs, PrefService*());
+  MOCK_METHOD0(GetLocalState, PrefService*());
   MOCK_CONST_METHOD0(GetSchemeClassifier,
                      const AutocompleteSchemeClassifier&());
   MOCK_METHOD0(GetAutocompleteClassifier, AutocompleteClassifier*());
@@ -76,6 +81,13 @@ class MockAutocompleteProviderClient
       KeywordProvider* keyword_provider) override {
     return nullptr;
   }
+  query_tiles::TileService* GetQueryTileService() const override {
+    return nullptr;
+  }
+  OmniboxTriggeredFeatureService* GetOmniboxTriggeredFeatureService()
+      const override {
+    return nullptr;
+  }
 
   component_updater::ComponentUpdateService* GetComponentUpdateService()
       override {
@@ -117,14 +129,6 @@ class MockAutocompleteProviderClient
     return &test_url_loader_factory_;
   }
 
-  bool IsBrowserUpdateAvailable() const override {
-    return browser_update_available_;
-  }
-
-  void set_browser_update_available(bool browser_update_available) {
-    browser_update_available_ = browser_update_available;
-  }
-
  private:
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> shared_factory_;
@@ -133,9 +137,6 @@ class MockAutocompleteProviderClient
   std::unique_ptr<DocumentSuggestionsService> document_suggestions_service_;
   std::unique_ptr<OmniboxPedalProvider> pedal_provider_;
   std::unique_ptr<TemplateURLService> template_url_service_;
-  bool browser_update_available_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockAutocompleteProviderClient);
 };
 
 #endif  // COMPONENTS_OMNIBOX_BROWSER_MOCK_AUTOCOMPLETE_PROVIDER_CLIENT_H_

@@ -4,12 +4,15 @@
 
 #include "components/ui_devtools/views/view_element.h"
 
+#include <algorithm>
+
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/ui_devtools/Protocol.h"
 #include "components/ui_devtools/ui_element_delegate.h"
 #include "components/ui_devtools/views/element_utility.h"
 #include "ui/gfx/color_utils.h"
+#include "ui/views/metadata/metadata_types.h"
 #include "ui/views/widget/widget.h"
 
 namespace ui_devtools {
@@ -93,36 +96,22 @@ ViewElement::GetCustomPropertiesForMatchedStyle() const {
   std::vector<UIElement::UIProperty> class_properties;
   views::metadata::ClassMetaData* metadata = view_->GetClassMetaData();
   for (auto member = metadata->begin(); member != metadata->end(); member++) {
-    if (member.GetCurrentCollectionName() == "View" &&
-        class_properties.empty()) {
-      gfx::Rect bounds = view_->bounds();
-      class_properties.emplace_back("x", base::NumberToString(bounds.x()));
-      class_properties.emplace_back("y", base::NumberToString(bounds.y()));
-      class_properties.emplace_back("width",
-                                    base::NumberToString(bounds.width()));
-      class_properties.emplace_back("height",
-                                    base::NumberToString(bounds.height()));
-      class_properties.emplace_back("is-drawn",
-                                    view_->IsDrawn() ? "true" : "false");
-      base::string16 description = view_->GetTooltipText(gfx::Point());
-      if (!description.empty())
-        class_properties.emplace_back("tooltip",
-                                      base::UTF16ToUTF8(description));
-    }
-
     // Check if type is SkColor and add "--" to property name so that DevTools
     // frontend will interpret this field as a color. Also convert SkColor value
     // to rgba string.
+    auto flags = (*member)->GetPropertyFlags();
     if ((*member)->member_type() == "SkColor") {
       SkColor color;
       if (base::StringToUint(
               base::UTF16ToUTF8((*member)->GetValueAsString(view_)), &color))
         class_properties.emplace_back("--" + (*member)->member_name(),
                                       color_utils::SkColorToRgbaString(color));
-    } else
+    } else if (!!(flags & views::metadata::PropertyFlags::kSerializable) ||
+               !!(flags & views::metadata::PropertyFlags::kReadOnly)) {
       class_properties.emplace_back(
           (*member)->member_name(),
           base::UTF16ToUTF8((*member)->GetValueAsString(view_)));
+    }
 
     if (member.IsLastMember()) {
       ret.emplace_back(member.GetCurrentCollectionName(), class_properties);
@@ -179,14 +168,19 @@ bool ViewElement::SetPropertiesFromString(const std::string& text) {
     }
 
     // Since DevTools frontend doesn't check the value, we do a sanity check
-    // based on its type here.
-    if (member->member_type() == "bool") {
-      if (property_value != "true" && property_value != "false") {
-        // Ignore the value.
-        continue;
-      }
+    // based on the allowed values specified in the metadata.
+    auto valid_values = member->GetValidValues();
+    if (!valid_values.empty() &&
+        std::find(valid_values.begin(), valid_values.end(),
+                  base::UTF8ToUTF16(property_value)) == valid_values.end()) {
+      // Ignore the value.
+      continue;
     }
 
+    auto property_flags = member->GetPropertyFlags();
+    if (!!(property_flags & views::metadata::PropertyFlags::kReadOnly))
+      continue;
+    DCHECK(!!(property_flags & views::metadata::PropertyFlags::kSerializable));
     member->SetValueAsString(view_, base::UTF8ToUTF16(property_value));
     property_set = true;
   }

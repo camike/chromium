@@ -4,12 +4,14 @@
 
 #import "ios/web/web_state/ui/crw_wk_ui_handler.h"
 
+#include "base/logging.h"
 #include "base/strings/sys_string_conversions.h"
 #import "ios/web/navigation/wk_navigation_action_util.h"
 #import "ios/web/navigation/wk_navigation_util.h"
+#import "ios/web/public/ui/context_menu_params.h"
 #import "ios/web/public/ui/java_script_dialog_type.h"
 #import "ios/web/public/web_client.h"
-#import "ios/web/web_state/ui/crw_context_menu_controller.h"
+#import "ios/web/web_state/ui/crw_legacy_context_menu_controller.h"
 #import "ios/web/web_state/ui/crw_wk_ui_handler_delegate.h"
 #import "ios/web/web_state/user_interaction_state.h"
 #import "ios/web/web_state/web_state_impl.h"
@@ -166,6 +168,9 @@
                        }];
 }
 
+#if !defined(__IPHONE_13_0) || __IPHONE_OS_VERSION_MIN_REQUIRED < __IPHONE_13_0
+
+// TODO(crbug.com/1131852): Preview depracted is iOS13+
 - (BOOL)webView:(WKWebView*)webView
     shouldPreviewElement:(WKPreviewElementInfo*)elementInfo {
   return self.webStateImpl->ShouldPreviewLink(
@@ -198,13 +203,18 @@
                              completionHandler API_AVAILABLE(ios(13.0)) {
   web::WebStateDelegate* delegate = self.webStateImpl->GetDelegate();
   if (!delegate) {
+    completionHandler(nil);
     return;
   }
 
-  delegate->ContextMenuConfiguration(self.webStateImpl,
-                                     net::GURLWithNSURL(elementInfo.linkURL),
-                                     completionHandler);
+  web::ContextMenuParams params;
+  params.link_url = net::GURLWithNSURL(elementInfo.linkURL);
+
+  delegate->ContextMenuConfiguration(
+      self.webStateImpl, params, /*preview_provider=*/nil, completionHandler);
 }
+
+#endif  // End of >iOS13 deprecated block.
 
 - (void)webView:(WKWebView*)webView
     contextMenuDidEndForElement:(WKContextMenuElementInfo*)elementInfo
@@ -259,6 +269,18 @@
   // the requesting page's URL.
   GURL requestURL = net::GURLWithNSURL(frame.request.URL);
   if (!requestURL.is_valid()) {
+    completionHandler(NO, nil);
+    return;
+  }
+
+  if (self.webStateImpl->GetVisibleURL().GetOrigin() !=
+          requestURL.GetOrigin() &&
+      frame.mainFrame) {
+    // Dialog was requested by web page's main frame, but visible URL has
+    // different origin. This could happen if the user has started a new
+    // browser initiated navigation. There is no value in showing dialogs
+    // requested by page, which this WebState is about to leave. But presenting
+    // the dialog can lead to phishing and other abusive behaviors.
     completionHandler(NO, nil);
     return;
   }

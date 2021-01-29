@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "build/build_config.h"
 #include "cc/paint/paint_flags.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/accessibility/ax_enums.mojom.h"
@@ -21,6 +22,7 @@
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/submenu_view.h"
 #include "ui/views/layout/flex_layout.h"
+#include "ui/views/metadata/metadata_impl_macros.h"
 #include "ui/views/round_rect_painter.h"
 #include "ui/views/view.h"
 #include "ui/views/view_class_properties.h"
@@ -252,7 +254,16 @@ void MenuScrollViewContainer::OnPaintBackground(gfx::Canvas* canvas) {
 void MenuScrollViewContainer::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   // Get the name from the submenu view.
   content_view_->GetAccessibleNodeData(node_data);
+
+  // On macOS, NSMenus are not supposed to have anything wrapped around them. To
+  // allow VoiceOver to recognize this as a menu and to read aloud the total
+  // number of items inside it, we ignore the MenuScrollViewContainer (which
+  // holds the menu itself: the SubmenuView).
+#if defined(OS_MAC)
+  node_data->role = ax::mojom::Role::kIgnored;
+#else
   node_data->role = ax::mojom::Role::kMenuBar;
+#endif
 }
 
 void MenuScrollViewContainer::OnBoundsChanged(
@@ -282,7 +293,7 @@ void MenuScrollViewContainer::CreateDefaultBorder() {
   const ui::NativeTheme* native_theme = GetNativeTheme();
   bool use_outer_border =
       menu_config.use_outer_border ||
-      (native_theme && native_theme->UsesHighContrastColors());
+      (native_theme && native_theme->UserHasContrastPreference());
   corner_radius_ = menu_config.CornerRadiusForMenu(
       content_view_->GetMenuItem()->GetMenuController());
   int padding = use_outer_border && corner_radius_ > 0
@@ -316,7 +327,8 @@ void MenuScrollViewContainer::CreateDefaultBorder() {
 void MenuScrollViewContainer::CreateBubbleBorder() {
   const SkColor color = GetNativeTheme()->GetSystemColor(
       ui::NativeTheme::kColorId_MenuBackgroundColor);
-  bubble_border_ = new BubbleBorder(arrow_, BubbleBorder::SMALL_SHADOW, color);
+  bubble_border_ =
+      new BubbleBorder(arrow_, BubbleBorder::STANDARD_SHADOW, color);
   if (content_view_->GetMenuItem()
           ->GetMenuController()
           ->use_touchable_layout()) {
@@ -340,6 +352,7 @@ BubbleBorder::Arrow MenuScrollViewContainer::BubbleBorderTypeFromAnchor(
     MenuAnchorPosition anchor) {
   switch (anchor) {
     case MenuAnchorPosition::kBubbleAbove:
+    case MenuAnchorPosition::kBubbleBelow:
     case MenuAnchorPosition::kBubbleLeft:
     case MenuAnchorPosition::kBubbleRight:
       return BubbleBorder::FLOAT;
@@ -348,8 +361,7 @@ BubbleBorder::Arrow MenuScrollViewContainer::BubbleBorderTypeFromAnchor(
   }
 }
 
-BEGIN_METADATA(MenuScrollViewContainer)
-METADATA_PARENT_CLASS(View)
-END_METADATA()
+BEGIN_METADATA(MenuScrollViewContainer, View)
+END_METADATA
 
 }  // namespace views

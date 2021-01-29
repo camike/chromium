@@ -6,8 +6,9 @@
  * @fileoverview Test suite for the bookmarks page.
  */
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
+
 GEN('#include "chrome/browser/ui/webui/bookmarks/bookmarks_browsertest.h"');
-GEN('#include "services/network/public/cpp/features.h"');
+GEN('#include "content/public/test/browser_test.h"');
 
 const BookmarksBrowserTest = class extends PolymerTest {
   /** @override */
@@ -16,21 +17,8 @@ const BookmarksBrowserTest = class extends PolymerTest {
   }
 
   /** @override */
-  get extraLibraries() {
-    return [
-      '//third_party/mocha/mocha.js',
-      '//chrome/test/data/webui/mocha_adapter.js',
-    ];
-  }
-
-  /** @override */
   get typedefCppFixture() {
     return 'BookmarksBrowserTest';
-  }
-
-  /** @override */
-  get featureList() {
-    return {enabled: ['network::features::kOutOfBlinkCors']};
   }
 };
 

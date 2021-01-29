@@ -12,8 +12,8 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/app_icon_loader.h"
-#include "chrome/services/app_service/public/cpp/app_registry_cache.h"
-#include "chrome/services/app_service/public/cpp/app_update.h"
+#include "components/services/app_service/public/cpp/app_registry_cache.h"
+#include "components/services/app_service/public/cpp/app_update.h"
 #include "ui/gfx/image/image_skia.h"
 
 class Profile;
@@ -22,6 +22,8 @@ class Profile;
 class AppServiceAppIconLoader : public AppIconLoader,
                                 private apps::AppRegistryCache::Observer {
  public:
+  static bool CanLoadImage(Profile* profile, const std::string& id);
+
   AppServiceAppIconLoader(Profile* profile,
                           int resource_size_in_dip,
                           AppIconLoaderDelegate* delegate);

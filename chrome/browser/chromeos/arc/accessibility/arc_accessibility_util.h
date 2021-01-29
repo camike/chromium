@@ -7,34 +7,42 @@
 
 #include <stdint.h>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "base/containers/flat_map.h"
 #include "base/optional.h"
+#include "base/stl_util.h"
 #include "components/arc/mojom/accessibility_helper.mojom-forward.h"
 #include "ui/accessibility/ax_enum_util.h"
 
 namespace arc {
+
 class AccessibilityInfoDataWrapper;
 
-ax::mojom::Event ToAXEvent(mojom::AccessibilityEventType arc_event_type,
-                           AccessibilityInfoDataWrapper* source_node,
-                           AccessibilityInfoDataWrapper* focused_node);
+// This function is only called when EventType is WINDOW_STATE_CHANGED or
+// WINDOW_CONTENT_CHANGED.
+base::Optional<ax::mojom::Event> FromContentChangeTypesToAXEvent(
+    const std::vector<int>& arc_content_change_types);
+
+ax::mojom::Event ToAXEvent(
+    mojom::AccessibilityEventType arc_event_type,
+    const base::Optional<std::vector<int>>& arc_content_change_types,
+    AccessibilityInfoDataWrapper* source_node,
+    AccessibilityInfoDataWrapper* focused_node);
 
 base::Optional<mojom::AccessibilityActionType> ConvertToAndroidAction(
     ax::mojom::Action action);
 
+AccessibilityInfoDataWrapper* GetSelectedNodeInfoFromAdapterViewEvent(
+    const mojom::AccessibilityEventData& event_data,
+    AccessibilityInfoDataWrapper* source_node);
+
 std::string ToLiveStatusString(mojom::AccessibilityLiveRegionType type);
-
-bool IsImportantInAndroid(mojom::AccessibilityNodeInfoData* node);
-
-bool HasImportantProperty(mojom::AccessibilityNodeInfoData* node);
-
-bool HasStandardAction(mojom::AccessibilityNodeInfoData* node,
-                       mojom::AccessibilityActionType action);
 
 template <class DataType, class PropType>
 bool GetBooleanProperty(DataType* node, PropType prop) {
-  if (!node->boolean_properties)
+  if (!node || !node->boolean_properties)
     return false;
 
   auto it = node->boolean_properties->find(prop);
@@ -45,7 +53,7 @@ bool GetBooleanProperty(DataType* node, PropType prop) {
 }
 
 template <class PropMTypeMap, class PropType>
-bool HasProperty(PropMTypeMap properties, PropType prop) {
+bool HasProperty(const PropMTypeMap& properties, const PropType prop) {
   if (!properties)
     return false;
 
@@ -53,7 +61,9 @@ bool HasProperty(PropMTypeMap properties, PropType prop) {
 }
 
 template <class PropMTypeMap, class PropType, class OutType>
-bool GetProperty(PropMTypeMap properties, PropType prop, OutType* out_value) {
+bool GetProperty(const PropMTypeMap& properties,
+                 const PropType prop,
+                 OutType* out_value) {
   if (!properties)
     return false;
 
@@ -63,6 +73,16 @@ bool GetProperty(PropMTypeMap properties, PropType prop, OutType* out_value) {
 
   *out_value = it->second;
   return true;
+}
+
+template <class PropType, class OutType>
+base::Optional<OutType> GetPropertyOrNull(
+    const base::Optional<base::flat_map<PropType, OutType>>& properties,
+    const PropType prop) {
+  OutType out_value;
+  if (GetProperty(properties, prop, &out_value))
+    return out_value;
+  return base::nullopt;
 }
 
 template <class InfoDataType, class PropType>

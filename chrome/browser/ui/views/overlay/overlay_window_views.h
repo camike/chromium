@@ -8,11 +8,11 @@
 #include "content/public/browser/overlay_window.h"
 
 #include "base/timer/timer.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/gfx/geometry/size.h"
-#include "ui/views/controls/button/button.h"
 #include "ui/views/widget/widget.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "ash/public/cpp/rounded_corner_decorator.h"
 #endif
 
@@ -28,10 +28,9 @@ class TrackImageButton;
 // The Chrome desktop implementation of OverlayWindow. This will only be
 // implemented in views, which will support all desktop platforms.
 class OverlayWindowViews : public content::OverlayWindow,
-                           public views::ButtonListener,
                            public views::Widget {
  public:
-  static std::unique_ptr<content::OverlayWindow> Create(
+  static std::unique_ptr<OverlayWindowViews> Create(
       content::PictureInPictureWindowController* controller);
 
   ~OverlayWindowViews() override;
@@ -48,7 +47,7 @@ class OverlayWindowViews : public content::OverlayWindow,
   gfx::Rect GetBounds() override;
   void UpdateVideoSize(const gfx::Size& natural_size) override;
   void SetPlaybackState(PlaybackState playback_state) override;
-  void SetAlwaysHidePlayPauseButton(bool is_visible) override;
+  void SetPlayPauseButtonVisibility(bool is_visible) override;
   void SetSkipAdButtonVisibility(bool is_visible) override;
   void SetNextTrackButtonVisibility(bool is_visible) override;
   void SetPreviousTrackButtonVisibility(bool is_visible) override;
@@ -68,9 +67,6 @@ class OverlayWindowViews : public content::OverlayWindow,
   void OnMouseEvent(ui::MouseEvent* event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
 
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
   // Gets the bounds of the controls.
   gfx::Rect GetBackToTabControlsBounds();
   gfx::Rect GetSkipAdControlsBounds();
@@ -88,22 +84,24 @@ class OverlayWindowViews : public content::OverlayWindow,
   // visible.
   bool AreControlsVisible() const;
 
+  // Determines whether a layout of the window controls has been scheduled but
+  // is not done yet.
+  bool IsLayoutPendingForTesting() const;
+
   views::PlaybackImageButton* play_pause_controls_view_for_testing() const;
   views::TrackImageButton* next_track_controls_view_for_testing() const;
   views::TrackImageButton* previous_track_controls_view_for_testing() const;
   views::SkipAdLabelButton* skip_ad_controls_view_for_testing() const;
-  gfx::Point back_to_tab_image_position_for_testing() const;
+  views::View* back_to_tab_controls_for_testing() const;
   gfx::Point close_image_position_for_testing() const;
   gfx::Point resize_handle_position_for_testing() const;
   OverlayWindowViews::PlaybackState playback_state_for_testing() const;
   ui::Layer* video_layer_for_testing() const;
   cc::Layer* GetLayerForTesting() override;
 
-  // Update the max size of the widget based on |work_area| and |window_size|.
-  // The return value is the new size of the window if it was resized and is
-  // only used for testing.
-  gfx::Size UpdateMaxSize(const gfx::Rect& work_area,
-                          const gfx::Size& window_size);
+  void set_minimum_size_for_testing(const gfx::Size& min_size) {
+    min_size_ = min_size;
+  }
 
  private:
   explicit OverlayWindowViews(
@@ -114,8 +112,7 @@ class OverlayWindowViews : public content::OverlayWindow,
 
   // Determine the intended bounds of |this|. This should be called when there
   // is reason for the bounds to change, such as switching primary displays or
-  // playing a new video (i.e. different aspect ratio). This also updates
-  // |min_size_| and |max_size_|.
+  // playing a new video (i.e. different aspect ratio).
   gfx::Rect CalculateAndUpdateWindowBounds();
 
   // Set up the views::Views that will be shown on the window.
@@ -123,6 +120,9 @@ class OverlayWindowViews : public content::OverlayWindow,
 
   // Finish initialization by performing the steps that require the root View.
   void OnRootViewReady();
+
+  // Update the max size of the widget based on |work_area| and window size.
+  void UpdateMaxSize(const gfx::Rect& work_area);
 
   // Update the bounds of the layers on the window. This may introduce
   // letterboxing.
@@ -183,9 +183,8 @@ class OverlayWindowViews : public content::OverlayWindow,
   // components has been initialized.
   bool has_been_shown_ = false;
 
-  // Whether or not the play/pause button will always be hidden. This is the
-  // case for media streams video that user is not allowed to play/pause.
-  bool always_hide_play_pause_button_ = false;
+  // Whether or not the play/pause button will be shown.
+  bool show_play_pause_button_ = false;
 
   // The upper and lower bounds of |current_size_|. These are determined by the
   // size of the primary display work area when Picture-in-Picture is initiated.
@@ -220,7 +219,7 @@ class OverlayWindowViews : public content::OverlayWindow,
   views::TrackImageButton* next_track_controls_view_ = nullptr;
   views::SkipAdLabelButton* skip_ad_controls_view_ = nullptr;
   views::ResizeHandleButton* resize_handle_view_ = nullptr;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   std::unique_ptr<ash::RoundedCornerDecorator> decorator_;
 #endif
 

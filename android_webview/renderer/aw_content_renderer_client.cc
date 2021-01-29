@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "android_webview/common/aw_switches.h"
-#include "android_webview/common/render_view_messages.h"
+#include "android_webview/common/mojom/frame.mojom.h"
 #include "android_webview/common/url_constants.h"
 #include "android_webview/renderer/aw_content_settings_client.h"
 #include "android_webview/renderer/aw_key_systems.h"
@@ -19,12 +19,12 @@
 #include "android_webview/renderer/aw_url_loader_throttle_provider.h"
 #include "android_webview/renderer/aw_websocket_handshake_throttle_provider.h"
 #include "android_webview/renderer/browser_exposed_renderer_interfaces.h"
-#include "android_webview/renderer/js_java_interaction/js_java_configurator.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "components/android_system_error_page/error_page_populator.h"
+#include "components/js_injection/renderer/js_communication.h"
 #include "components/page_load_metrics/renderer/metrics_render_frame_observer.h"
 #include "components/printing/renderer/print_render_frame_helper.h"
 #include "components/visitedlink/renderer/visitedlink_reader.h"
@@ -34,7 +34,9 @@
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
+#include "ipc/ipc_sync_channel.h"
 #include "mojo/public/cpp/bindings/binder_map.h"
+#include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
@@ -137,10 +139,12 @@ bool AwContentRendererClient::HandleNavigation(
   base::string16 url = request.Url().GetString().Utf16();
   bool has_user_gesture = request.HasUserGesture();
 
-  int render_frame_id = render_frame->GetRoutingID();
-  RenderThread::Get()->Send(new AwViewHostMsg_ShouldOverrideUrlLoading(
-      render_frame_id, url, has_user_gesture, is_redirect, is_main_frame,
-      &ignore_navigation));
+  mojo::AssociatedRemote<mojom::FrameHost> frame_host_remote;
+  render_frame->GetRemoteAssociatedInterfaces()->GetInterface(
+      &frame_host_remote);
+  frame_host_remote->ShouldOverrideUrlLoading(
+      url, has_user_gesture, is_redirect, is_main_frame, &ignore_navigation);
+
   return ignore_navigation;
 }
 
@@ -150,7 +154,7 @@ void AwContentRendererClient::RenderFrameCreated(
   new printing::PrintRenderFrameHelper(
       render_frame, std::make_unique<AwPrintRenderFrameHelperDelegate>());
   new AwRenderFrameExt(render_frame);
-  new JsJavaConfigurator(render_frame);
+  new js_injection::JsCommunication(render_frame);
   new AwSafeBrowsingErrorPageControllerDelegateImpl(render_frame);
 
   // TODO(jam): when the frame tree moves into content and parent() works at
@@ -160,8 +164,8 @@ void AwContentRendererClient::RenderFrameCreated(
   if (parent_frame && parent_frame != render_frame) {
     // Avoid any race conditions from having the browser's UI thread tell the IO
     // thread that a subframe was created.
-    RenderThread::Get()->Send(new AwViewHostMsg_SubFrameCreated(
-        parent_frame->GetRoutingID(), render_frame->GetRoutingID()));
+    GetRenderMessageFilter()->SubFrameCreated(parent_frame->GetRoutingID(),
+                                              render_frame->GetRoutingID());
   }
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
@@ -175,23 +179,6 @@ void AwContentRendererClient::RenderFrameCreated(
 void AwContentRendererClient::RenderViewCreated(
     content::RenderView* render_view) {
   AwRenderViewExt::RenderViewCreated(render_view);
-}
-
-bool AwContentRendererClient::HasErrorPage(int http_status_code) {
-  return http_status_code >= 400;
-}
-
-bool AwContentRendererClient::ShouldSuppressErrorPage(
-    content::RenderFrame* render_frame,
-    const GURL& url) {
-  DCHECK(render_frame != nullptr);
-
-  AwRenderFrameExt* render_frame_ext =
-      AwRenderFrameExt::FromRenderFrame(render_frame);
-  if (render_frame_ext == nullptr)
-    return false;
-
-  return render_frame_ext->GetWillSuppressErrorPage();
 }
 
 void AwContentRendererClient::PrepareErrorPage(
@@ -216,16 +203,9 @@ bool AwContentRendererClient::IsLinkVisited(uint64_t link_hash) {
 
 void AwContentRendererClient::RunScriptsAtDocumentStart(
     content::RenderFrame* render_frame) {
-  JsJavaConfigurator* configurator = JsJavaConfigurator::Get(render_frame);
-  // We will get RunScriptsAtDocumentStart() event even before we received
-  // RenderFrameCreated() for that |render_frame|. This is because Blink code
-  // does initialization work on the main frame, which is not related to any
-  // real navigation. If the configurator is nullptr, it means we haven't
-  // received RenderFrameCreated() yet, we simply ignore this event for
-  // JsJavaConfigurator since that is not the right time to run the script and
-  // the script may not reach renderer from browser yet.
-  if (configurator)
-    configurator->RunScriptsAtDocumentStart();
+  js_injection::JsCommunication* communication =
+      js_injection::JsCommunication::Get(render_frame);
+  communication->RunScriptsAtDocumentStart();
 }
 
 void AwContentRendererClient::AddSupportedKeySystems(
@@ -254,6 +234,14 @@ void AwContentRendererClient::GetInterface(
   // and SafeBrowsing, instead of |content_browser|.
   RenderThread::Get()->BindHostReceiver(
       mojo::GenericPendingReceiver(interface_name, std::move(interface_pipe)));
+}
+
+mojom::RenderMessageFilter* AwContentRendererClient::GetRenderMessageFilter() {
+  if (!render_message_filter_) {
+    RenderThread::Get()->GetChannel()->GetRemoteAssociatedInterface(
+        &render_message_filter_);
+  }
+  return render_message_filter_.get();
 }
 
 }  // namespace android_webview

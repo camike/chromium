@@ -37,6 +37,10 @@ class WebTestResult(object):
         self._test_name = test_name
         self._result_dict = result_dict
 
+    def __repr__(self):
+        return "WebTestResult(test_name=%s, result_dict=%s)" % \
+            (repr(self._test_name), repr(self._result_dict))
+
     def suffixes_for_test_result(self):
         suffixes = set()
         artifact_names = self._result_dict.get('artifacts', {}).keys()
@@ -113,7 +117,7 @@ class WebTestResult(object):
 # This doesn't belong in common.net, but we don't have a better place for it yet.
 class WebTestResults(object):
     @classmethod
-    def results_from_string(cls, string):
+    def results_from_string(cls, string, step_name=None):
         """Creates a WebTestResults object from a test result JSON string.
 
         Args:
@@ -128,11 +132,15 @@ class WebTestResults(object):
         if not json_dict:
             return None
 
-        return cls(json_dict)
+        return cls(json_dict, step_name=step_name)
 
-    def __init__(self, parsed_json, chromium_revision=None):
+    def __init__(self, parsed_json, chromium_revision=None, step_name=None):
         self._results = parsed_json
         self._chromium_revision = chromium_revision
+        self._step_name = step_name
+
+    def step_name(self):
+        return self._step_name
 
     def run_was_interrupted(self):
         return self._results['interrupted']

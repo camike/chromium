@@ -6,6 +6,7 @@
 
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "components/translate/core/common/translate_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -94,82 +95,86 @@ TEST_F(LanguageDetectionUtilTest, WellKnownWrongConfiguration) {
 // Tests that the language meta tag providing wrong information is ignored by
 // LanguageDetectionUtil due to disagreement between meta tag and CLD.
 TEST_F(LanguageDetectionUtilTest, CLDDisagreeWithWrongLanguageCode) {
+  base::HistogramTester histogram_tester;
   base::string16 contents = base::ASCIIToUTF16(
       "<html><head><meta http-equiv='Content-Language' content='ja'></head>"
       "<body>This is a page apparently written in English. Even though "
       "content-language is provided, the value will be ignored if the value "
       "is suspicious.</body></html>");
-  std::string cld_language;
-  bool is_cld_reliable;
-  std::string language = translate::DeterminePageLanguage(std::string("ja"),
-                                                          std::string(),
-                                                          contents,
-                                                          &cld_language,
-                                                          &is_cld_reliable);
+  std::string model_detected_language;
+  bool is_model_reliable;
+  std::string language = translate::DeterminePageLanguage(
+      std::string("ja"), std::string(), contents, &model_detected_language,
+      &is_model_reliable);
   EXPECT_EQ(translate::kUnknownLanguageCode, language);
-  EXPECT_EQ("en", cld_language);
-  EXPECT_TRUE(is_cld_reliable);
+  EXPECT_EQ("en", model_detected_language);
+  EXPECT_TRUE(is_model_reliable);
+  histogram_tester.ExpectTotalCount(
+      "Translate.CLD3.TopLanguageEvaluationDuration", 1);
 }
 
 // Tests that the language meta tag providing "en-US" style information is
 // agreed by CLD.
 TEST_F(LanguageDetectionUtilTest, CLDAgreeWithLanguageCodeHavingCountryCode) {
+  base::HistogramTester histogram_tester;
   base::string16 contents = base::ASCIIToUTF16(
       "<html><head><meta http-equiv='Content-Language' content='en-US'></head>"
       "<body>This is a page apparently written in English. Even though "
       "content-language is provided, the value will be ignored if the value "
       "is suspicious.</body></html>");
-  std::string cld_language;
-  bool is_cld_reliable;
-  std::string language = translate::DeterminePageLanguage(std::string("en-US"),
-                                                          std::string(),
-                                                          contents,
-                                                          &cld_language,
-                                                          &is_cld_reliable);
+  std::string model_detected_language;
+  bool is_model_reliable;
+  std::string language = translate::DeterminePageLanguage(
+      std::string("en-US"), std::string(), contents, &model_detected_language,
+      &is_model_reliable);
   EXPECT_EQ("en", language);
-  EXPECT_EQ("en", cld_language);
-  EXPECT_TRUE(is_cld_reliable);
+  EXPECT_EQ("en", model_detected_language);
+  EXPECT_TRUE(is_model_reliable);
+  histogram_tester.ExpectTotalCount(
+      "Translate.CLD3.TopLanguageEvaluationDuration", 1);
 }
 
 // Tests that the language meta tag providing wrong information is ignored and
 // CLD's language will be adopted by LanguageDetectionUtil due to an invalid
 // meta tag.
 TEST_F(LanguageDetectionUtilTest, InvalidLanguageMetaTagProviding) {
+  base::HistogramTester histogram_tester;
   base::string16 contents = base::ASCIIToUTF16(
       "<html><head><meta http-equiv='Content-Language' content='utf-8'></head>"
       "<body>This is a page apparently written in English. Even though "
       "content-language is provided, the value will be ignored and CLD's"
       " language will be adopted if the value is invalid.</body></html>");
-  std::string cld_language;
-  bool is_cld_reliable;
-  std::string language = translate::DeterminePageLanguage(std::string("utf-8"),
-                                                          std::string(),
-                                                          contents,
-                                                          &cld_language,
-                                                          &is_cld_reliable);
+  std::string model_detected_language;
+  bool is_model_reliable;
+  std::string language = translate::DeterminePageLanguage(
+      std::string("utf-8"), std::string(), contents, &model_detected_language,
+      &is_model_reliable);
   EXPECT_EQ("en", language);
-  EXPECT_EQ("en", cld_language);
-  EXPECT_TRUE(is_cld_reliable);
+  EXPECT_EQ("en", model_detected_language);
+  EXPECT_TRUE(is_model_reliable);
+  histogram_tester.ExpectTotalCount(
+      "Translate.CLD3.TopLanguageEvaluationDuration", 1);
 }
 
 // Tests that the language meta tag providing wrong information is ignored
 // because of valid html lang attribute.
 TEST_F(LanguageDetectionUtilTest, AdoptHtmlLang) {
+  base::HistogramTester histogram_tester;
   base::string16 contents = base::ASCIIToUTF16(
       "<html lang='en'><head><meta http-equiv='Content-Language' content='ja'>"
       "</head><body>This is a page apparently written in English. Even though "
       "content-language is provided, the value will be ignored if the value "
       "is suspicious.</body></html>");
-  std::string cld_language;
-  bool is_cld_reliable;
-  std::string language = translate::DeterminePageLanguage(std::string("ja"),
-                                                          std::string("en"),
-                                                          contents,
-                                                          &cld_language,
-                                                          &is_cld_reliable);
+  std::string model_detected_language;
+  bool is_model_reliable;
+  std::string language = translate::DeterminePageLanguage(
+      std::string("ja"), std::string("en"), contents, &model_detected_language,
+      &is_model_reliable);
   EXPECT_EQ("en", language);
-  EXPECT_EQ("en", cld_language);
-  EXPECT_TRUE(is_cld_reliable);
+  EXPECT_EQ("en", model_detected_language);
+  EXPECT_TRUE(is_model_reliable);
+  histogram_tester.ExpectTotalCount(
+      "Translate.CLD3.TopLanguageEvaluationDuration", 1);
 }
 
 // Tests that languages that often have the wrong server configuration are

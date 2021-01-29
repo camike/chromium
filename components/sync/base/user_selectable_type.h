@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/optional.h"
+#include "build/chromeos_buildflags.h"
 #include "components/sync/base/enum_set.h"
 #include "components/sync/base/model_type.h"
 
@@ -26,7 +27,8 @@ enum class UserSelectableType {
   kApps,
   kReadingList,
   kTabs,
-  kLastType = kTabs
+  kWifiConfigurations,
+  kLastType = kWifiConfigurations
 };
 
 using UserSelectableTypeSet = EnumSet<UserSelectableType,
@@ -41,13 +43,8 @@ std::string UserSelectableTypeSetToString(UserSelectableTypeSet types);
 ModelTypeSet UserSelectableTypeToAllModelTypes(UserSelectableType type);
 
 ModelType UserSelectableTypeToCanonicalModelType(UserSelectableType type);
-int UserSelectableTypeToHistogramInt(UserSelectableType type);
 
-constexpr int UserSelectableTypeHistogramNumEntries() {
-  return static_cast<int>(ModelType::NUM_ENTRIES);
-}
-
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 // Chrome OS provides a separate UI with sync controls for OS data types. Note
 // that wallpaper is a special case due to its reliance on apps, so while it
 // appears in the UI, it is not included in this enum.
@@ -57,8 +54,8 @@ enum class UserSelectableOsType {
   kFirstType = kOsApps,
 
   kOsPreferences,
-  kWifiConfigurations,
-  kLastType = kWifiConfigurations
+  kOsWifiConfigurations,
+  kLastType = kOsWifiConfigurations
 };
 
 using UserSelectableOsTypeSet = EnumSet<UserSelectableOsType,
@@ -72,7 +69,7 @@ ModelType UserSelectableOsTypeToCanonicalModelType(UserSelectableOsType type);
 // Returns the type if the string matches a known OS type.
 base::Optional<UserSelectableOsType> GetUserSelectableOsTypeFromString(
     const std::string& type);
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace syncer
 

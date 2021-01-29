@@ -12,7 +12,7 @@
 #include "base/values.h"
 #include "components/invalidation/impl/channels_states.h"
 
-namespace syncer {
+namespace invalidation {
 
 // FCMSyncNetworkChannel implements common tasks needed from the network by
 // client:
@@ -69,11 +69,6 @@ class FCMSyncNetworkChannel {
           callback) = 0;
 
  protected:
-  // Subclass should call NotifyNetworkStatusChange to notify about network
-  // changes. This triggers cacheinvalidation to try resending failed message
-  // ahead of schedule when client comes online or IP address changes.
-  void NotifyNetworkStatusChange(bool online);
-
   // Subclass should notify about connection state through
   // NotifyChannelStateChange. If communication doesn't work and it is possible
   // that invalidations from server will not reach this client then channel
@@ -101,6 +96,7 @@ class FCMSyncNetworkChannel {
 
   base::ObserverList<Observer>::Unchecked observers_;
 };
-}  // namespace syncer
+
+}  // namespace invalidation
 
 #endif  // COMPONENTS_INVALIDATION_IMPL_FCM_SYNC_NETWORK_CHANNEL_H_

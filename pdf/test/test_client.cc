@@ -4,7 +4,12 @@
 
 #include "pdf/test/test_client.h"
 
+#include <memory>
+
+#include "base/location.h"
+#include "base/time/time.h"
 #include "pdf/document_layout.h"
+#include "pdf/ppapi_migration/url_loader.h"
 
 namespace chrome_pdf {
 
@@ -33,8 +38,8 @@ std::string TestClient::GetURL() {
   return std::string();
 }
 
-pp::URLLoader TestClient::CreateURLLoader() {
-  return pp::URLLoader();
+std::unique_ptr<UrlLoader> TestClient::CreateUrlLoader() {
+  return nullptr;
 }
 
 std::vector<PDFEngine::Client::SearchStringResult> TestClient::SearchString(
@@ -59,5 +64,18 @@ uint32_t TestClient::GetBackgroundColor() {
 float TestClient::GetToolbarHeightInScreenCoords() {
   return 0;
 }
+
+void TestClient::SetSelectedText(const std::string& selected_text) {}
+
+void TestClient::SetLinkUnderCursor(const std::string& link_under_cursor) {}
+
+bool TestClient::IsValidLink(const std::string& url) {
+  return !url.empty();
+}
+
+void TestClient::ScheduleTaskOnMainThread(base::TimeDelta delay,
+                                          ResultCallback callback,
+                                          int32_t result,
+                                          const base::Location& from_here) {}
 
 }  // namespace chrome_pdf

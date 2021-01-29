@@ -9,12 +9,12 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/message_loop/message_pump_for_io.h"
 #include "base/no_destructor.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/current_thread.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_checker.h"
 #include "base/threading/thread_local.h"
@@ -34,9 +34,11 @@ ThreadLocalPointer<FileDescriptorWatcher>& GetTlsFdWatcher() {
 
 class FileDescriptorWatcher::Controller::Watcher
     : public MessagePumpForIO::FdWatcher,
-      public MessageLoopCurrent::DestructionObserver {
+      public CurrentThread::DestructionObserver {
  public:
   Watcher(WeakPtr<Controller> controller, MessagePumpForIO::Mode mode, int fd);
+  Watcher(const Watcher&) = delete;
+  Watcher& operator=(const Watcher&) = delete;
   ~Watcher() override;
 
   void StartWatching();
@@ -48,7 +50,7 @@ class FileDescriptorWatcher::Controller::Watcher
   void OnFileCanReadWithoutBlocking(int fd) override;
   void OnFileCanWriteWithoutBlocking(int fd) override;
 
-  // MessageLoopCurrent::DestructionObserver:
+  // CurrentThread::DestructionObserver:
   void WillDestroyCurrentMessageLoop() override;
 
   // The MessagePumpForIO's watch handle (stops the watch when destroyed).
@@ -78,8 +80,6 @@ class FileDescriptorWatcher::Controller::Watcher
   // Whether this Watcher was registered as a DestructionObserver on the
   // MessagePumpForIO thread.
   bool registered_as_destruction_observer_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(Watcher);
 };
 
 FileDescriptorWatcher::Controller::Watcher::Watcher(
@@ -96,20 +96,19 @@ FileDescriptorWatcher::Controller::Watcher::Watcher(
 
 FileDescriptorWatcher::Controller::Watcher::~Watcher() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  MessageLoopCurrentForIO::Get()->RemoveDestructionObserver(this);
+  CurrentIOThread::Get()->RemoveDestructionObserver(this);
 }
 
 void FileDescriptorWatcher::Controller::Watcher::StartWatching() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(MessageLoopCurrentForIO::IsSet());
+  DCHECK(CurrentIOThread::IsSet());
 
-  const bool watch_success =
-      MessageLoopCurrentForIO::Get()->WatchFileDescriptor(
-          fd_, false, mode_, &fd_watch_controller_, this);
+  const bool watch_success = CurrentIOThread::Get()->WatchFileDescriptor(
+      fd_, false, mode_, &fd_watch_controller_, this);
   DCHECK(watch_success) << "Failed to watch fd=" << fd_;
 
   if (!registered_as_destruction_observer_) {
-    MessageLoopCurrentForIO::Get()->AddDestructionObserver(this);
+    CurrentIOThread::Get()->AddDestructionObserver(this);
     registered_as_destruction_observer_ = true;
   }
 }
@@ -235,7 +234,11 @@ void FileDescriptorWatcher::Controller::RunCallback() {
 
   WeakPtr<Controller> weak_this = weak_factory_.GetWeakPtr();
 
-  callback_.Run();
+  // Run a copy of the callback in case this Controller is deleted by the
+  // callback. This would cause the callback itself to be deleted while it is
+  // being run.
+  RepeatingClosure callback_copy = callback_;
+  callback_copy.Run();
 
   // If |this| wasn't deleted, re-enable the watch.
   if (weak_this)

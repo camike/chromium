@@ -91,8 +91,10 @@ base::Optional<std::string> GetAppIdForTab(Profile* profile,
 
       base::Optional<web_app::AppId> app_id =
           provider->registrar().FindAppWithUrlInScope(tab->GetURL());
-      if (app_id)
+      if (app_id && provider->registrar().GetAppUserDisplayMode(*app_id) ==
+                        web_app::DisplayMode::kBrowser) {
         return app_id;
+      }
     }
   }
 
@@ -163,14 +165,12 @@ base::string16 LauncherControllerHelper::GetAppTitle(
 
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile);
-  if (proxy) {
-    std::string name;
-    proxy->AppRegistryCache().ForOneApp(
-        app_id,
-        [&name](const apps::AppUpdate& update) { name = update.Name(); });
-    if (!name.empty())
-      return base::UTF8ToUTF16(name);
-  }
+
+  std::string name;
+  proxy->AppRegistryCache().ForOneApp(
+      app_id, [&name](const apps::AppUpdate& update) { name = update.Name(); });
+  if (!name.empty())
+    return base::UTF8ToUTF16(name);
 
   // Get the title for the extension which is not managed by AppService.
   extensions::ExtensionRegistry* registry =
@@ -180,13 +180,38 @@ base::string16 LauncherControllerHelper::GetAppTitle(
 
   auto* extension = registry->GetExtensionById(
       app_id, extensions::ExtensionRegistry::EVERYTHING);
-  if (extension)
+  if (extension && extension->is_extension())
     return base::UTF8ToUTF16(extension->name());
+
+  if (crostini::IsUnmatchedCrostiniShelfAppId(app_id))
+    return crostini::GetCrostiniShelfTitle(app_id);
 
   return base::string16();
 }
 
+// static
+ash::AppStatus LauncherControllerHelper::GetAppStatus(
+    Profile* profile,
+    const std::string& app_id) {
+  ash::AppStatus status = ash::AppStatus::kReady;
+
+  if (!apps::AppServiceProxyFactory::IsAppServiceAvailableForProfile(profile))
+    return status;
+
+  apps::AppServiceProxyFactory::GetForProfile(profile)
+      ->AppRegistryCache()
+      .ForOneApp(app_id, [&status](const apps::AppUpdate& update) {
+        if (update.Readiness() == apps::mojom::Readiness::kDisabledByPolicy)
+          status = ash::AppStatus::kBlocked;
+        else if (update.Paused() == apps::mojom::OptionalBool::kTrue)
+          status = ash::AppStatus::kPaused;
+      });
+
+  return status;
+}
+
 std::string LauncherControllerHelper::GetAppID(content::WebContents* tab) {
+  DCHECK(tab);
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   if (profile_manager) {
     const std::vector<Profile*> profile_list =
@@ -227,7 +252,7 @@ void LauncherControllerHelper::LaunchApp(const ash::ShelfID& id,
   const std::string& app_id = id.app_id;
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile_);
-  DCHECK(proxy);
+
   // Launch apps with AppServiceProxy.Launch.
   if (proxy->AppRegistryCache().GetAppType(app_id) !=
       apps::mojom::AppType::kUnknown) {
@@ -271,7 +296,7 @@ void LauncherControllerHelper::LaunchApp(const ash::ShelfID& id,
   }
   params.launch_id = id.launch_id;
 
-  proxy->BrowserAppLauncher().LaunchAppWithParams(params);
+  proxy->BrowserAppLauncher()->LaunchAppWithParams(std::move(params));
 }
 
 ArcAppListPrefs* LauncherControllerHelper::GetArcAppListPrefs() const {
@@ -324,8 +349,6 @@ bool LauncherControllerHelper::IsValidIDFromAppService(
 
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile_);
-  if (!proxy)
-    return false;
 
   bool is_valid = false;
   proxy->AppRegistryCache().ForOneApp(

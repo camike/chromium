@@ -8,6 +8,8 @@
 #include <utility>
 
 #include "base/numerics/ranges.h"
+#include "base/numerics/safe_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "cc/paint/paint_record.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/layout_constants.h"
@@ -45,6 +47,8 @@ constexpr ShapeModifier kNoLowerRightArc = 0x02;
 class GM2TabStyle : public TabStyleViews {
  public:
   explicit GM2TabStyle(Tab* tab);
+  GM2TabStyle(const GM2TabStyle&) = delete;
+  GM2TabStyle& operator=(const GM2TabStyle&) = delete;
 
  protected:
   // TabStyle:
@@ -152,8 +156,6 @@ class GM2TabStyle : public TabStyleViews {
   std::unique_ptr<GlowHoverController> hover_controller_;
   gfx::FontList normal_font_;
   gfx::FontList heavy_font_;
-
-  DISALLOW_COPY_AND_ASSIGN(GM2TabStyle);
 };
 
 void DrawHighlight(gfx::Canvas* canvas,
@@ -266,7 +268,7 @@ SkPath GM2TabStyle::GetPath(PathType path_type,
     bottom_radius -= stroke_adjustment;
     if (ShouldExtendHitTest()) {
       extend_to_top = true;
-      if (tab_->controller()->IsFirstVisibleTab(tab_)) {
+      if (tab_->controller()->IsTabFirst(tab_)) {
         // The path is not mirrored in RTL and thus we must manually choose the
         // correct "leading" edge.
         if (base::i18n::IsRTL())
@@ -393,7 +395,7 @@ SkPath GM2TabStyle::GetPath(PathType path_type,
 
   // Possibly convert back to DIPs.
   if (render_units == RenderUnits::kDips && scale != 1.0f)
-    path.transform(SkMatrix::MakeScale(1.f / scale));
+    path.transform(SkMatrix::Scale(1.0f / scale, 1.0f / scale));
 
   return path;
 }
@@ -490,7 +492,7 @@ void GM2TabStyle::PaintTab(gfx::Canvas* canvas) const {
 
     const float throb_value = GetThrobValue();
     if (throb_value > 0) {
-      canvas->SaveLayerAlpha(gfx::ToRoundedInt(throb_value * 0xff),
+      canvas->SaveLayerAlpha(base::ClampRound<uint8_t>(throb_value * 0xff),
                              tab_->GetLocalBounds());
       PaintTabBackground(canvas, TabActive::kActive, active_tab_fill_id,
                          active_tab_y_inset);
@@ -944,6 +946,37 @@ gfx::RectF GM2TabStyle::ScaleAndAlignBounds(const gfx::Rect& bounds,
 
 }  // namespace
 
+// static
+base::string16 views::metadata::TypeConverter<TabStyle::TabColors>::ToString(
+    views::metadata::ArgType<TabStyle::TabColors> source_value) {
+  return base::ASCIIToUTF16(base::StringPrintf(
+      "{%s,%s}",
+      color_utils::SkColorToRgbaString(source_value.foreground_color).c_str(),
+      color_utils::SkColorToRgbaString(source_value.background_color).c_str()));
+}
+
+// static
+base::Optional<TabStyle::TabColors> views::metadata::TypeConverter<
+    TabStyle::TabColors>::FromString(const base::string16& source_value) {
+  base::string16 pruned_string;
+  base::RemoveChars(source_value, base::ASCIIToUTF16("()rgba"), &pruned_string);
+  const auto values =
+      base::SplitStringPiece(pruned_string, base::ASCIIToUTF16("{,}"),
+                             base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+  const auto foreground_color = RgbaPiecesToSkColor(values, 0);
+  const auto background_color = RgbaPiecesToSkColor(values, 4);
+  return (foreground_color.has_value() && background_color.has_value())
+             ? base::make_optional<TabStyle::TabColors>(
+                   foreground_color.value(), background_color.value())
+             : base::nullopt;
+}
+
+// static
+views::metadata::ValidStrings
+views::metadata::TypeConverter<TabStyle::TabColors>::GetValidStrings() {
+  return ValidStrings();
+}
+
 // TabStyle --------------------------------------------------------------------
 
 TabStyleViews::~TabStyleViews() = default;
@@ -955,11 +988,15 @@ std::unique_ptr<TabStyleViews> TabStyleViews::CreateForTab(Tab* tab) {
 
 // static
 int TabStyleViews::GetMinimumActiveWidth() {
-  return TabCloseButton::GetWidth() + GetContentsHorizontalInsetSize() * 2;
+  if (base::FeatureList::IsEnabled(features::kScrollableTabStrip))
+    return 72;
+  return TabCloseButton::GetGlyphSize() + GetContentsHorizontalInsetSize() * 2;
 }
 
 // static
 int TabStyleViews::GetMinimumInactiveWidth() {
+  if (base::FeatureList::IsEnabled(features::kScrollableTabStrip))
+    return 72;
   // Allow tabs to shrink until they appear to be 16 DIP wide excluding
   // outer corners.
   constexpr int kInteriorWidth = 16;

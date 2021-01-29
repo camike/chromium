@@ -15,8 +15,8 @@
 #include "base/strings/string16.h"
 #include "chrome/browser/ui/app_list/app_list_model_updater_observer.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
+#include "chrome/browser/ui/app_list/chrome_app_list_item.h"
 
-class ChromeAppListItem;
 class ChromeSearchResult;
 
 namespace ui {
@@ -59,18 +59,13 @@ class AppListModelUpdater {
   virtual void MoveItemToFolder(const std::string& id,
                                 const std::string& folder_id) {}
   virtual void SetStatus(ash::AppListModelStatus status) {}
-  virtual void SetState(ash::AppListState state) {}
-  virtual void HighlightItemInstalledFromUI(const std::string& id) {}
   // For SearchModel:
   virtual void SetSearchEngineIsGoogle(bool is_google) {}
-  virtual void SetSearchTabletAndClamshellAccessibleName(
-      const base::string16& tablet_accessible_name,
-      const base::string16& clamshell_accessible_name) {}
-  virtual void SetSearchHintText(const base::string16& hint_text) {}
   virtual void UpdateSearchBox(const base::string16& text,
                                bool initiated_by_user) {}
   virtual void PublishSearchResults(
       const std::vector<ChromeSearchResult*>& results) {}
+  virtual std::vector<ChromeSearchResult*> GetPublishedSearchResultsForTest();
 
   // Item field setters only used by ChromeAppListItem and its derived classes.
   virtual void SetItemIcon(const std::string& id, const gfx::ImageSkia& icon) {}
@@ -78,27 +73,22 @@ class AppListModelUpdater {
   virtual void SetItemNameAndShortName(const std::string& id,
                                        const std::string& name,
                                        const std::string& short_name) {}
+  virtual void SetAppStatus(const std::string& id, ash::AppStatus app_status) {}
   virtual void SetItemPosition(const std::string& id,
                                const syncer::StringOrdinal& new_position) {}
   virtual void SetItemIsPersistent(const std::string& id, bool is_persistent) {}
   virtual void SetItemFolderId(const std::string& id,
                                const std::string& folder_id) {}
-  virtual void SetItemIsInstalling(const std::string& id, bool is_installing) {}
-  virtual void SetItemPercentDownloaded(const std::string& id,
-                                        int32_t percent_downloaded) {}
+  virtual void SetNotificationBadgeColor(const std::string& id,
+                                         const SkColor color) {}
 
   virtual void SetSearchResultMetadata(
       const std::string& id,
       std::unique_ptr<ash::SearchResultMetadata> metadata) {}
-  virtual void SetSearchResultIsInstalling(const std::string& id,
-                                           bool is_installing) {}
-  virtual void SetSearchResultPercentDownloaded(const std::string& id,
-                                                int percent_downloaded) {}
   virtual void SetSearchResultIcon(const std::string& id,
                                    const gfx::ImageSkia& icon) {}
   virtual void SetSearchResultBadgeIcon(const std::string& id,
                                         const gfx::ImageSkia& badge_icon) {}
-  virtual void NotifySearchResultItemInstalled(const std::string& id) {}
   virtual void ActivateChromeItem(const std::string& id, int event_flags) {}
 
   // For AppListModel:
@@ -112,6 +102,8 @@ class AppListModelUpdater {
   virtual void GetIdToAppListIndexMap(GetIdToAppListIndexMapCallback callback) {
   }
   virtual syncer::StringOrdinal GetFirstAvailablePosition() const = 0;
+  // Returns a position which is before the first item in the item list.
+  virtual syncer::StringOrdinal GetPositionBeforeFirstItem() const = 0;
 
   // Methods for AppListSyncableService:
   virtual void AddItemToOemFolder(
@@ -128,6 +120,7 @@ class AppListModelUpdater {
       app_list::AppListSyncableService::SyncItem* sync_item,
       bool update_name,
       bool update_folder) {}
+  virtual void NotifyProcessSyncChangesFinished() {}
 
   using GetMenuModelCallback =
       base::OnceCallback<void(std::unique_ptr<ui::SimpleMenuModel>)>;
@@ -138,14 +131,11 @@ class AppListModelUpdater {
   virtual bool SearchEngineIsGoogle() = 0;
 
   // Methods for handle model updates in ash:
-  virtual void OnFolderCreated(
+  virtual void OnItemAdded(std::unique_ptr<ash::AppListItemMetadata> item) = 0;
+  virtual void OnItemUpdated(
       std::unique_ptr<ash::AppListItemMetadata> item) = 0;
   virtual void OnFolderDeleted(
       std::unique_ptr<ash::AppListItemMetadata> item) = 0;
-  virtual void OnItemUpdated(
-      std::unique_ptr<ash::AppListItemMetadata> item) = 0;
-  virtual void OnPageBreakItemAdded(const std::string& id,
-                                    const syncer::StringOrdinal& position) = 0;
   virtual void OnPageBreakItemDeleted(const std::string& id) = 0;
 
   virtual void AddObserver(AppListModelUpdaterObserver* observer) = 0;
@@ -158,6 +148,11 @@ class AppListModelUpdater {
   // items without parents. Note that all items in |top_level_items| should have
   // valid position.
   static syncer::StringOrdinal GetFirstAvailablePositionInternal(
+      const std::vector<ChromeAppListItem*>& top_level_items);
+
+  // Returns a position which is before the first item in the app list. If
+  // |top_level_items| is empty, creates an initial position instead.
+  static syncer::StringOrdinal GetPositionBeforeFirstItemInternal(
       const std::vector<ChromeAppListItem*>& top_level_items);
 
  private:

@@ -7,15 +7,32 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
+#include "base/command_line.h"
 #include "chrome/browser/hid/hid_chooser_context.h"
 #include "chrome/browser/hid/hid_chooser_context_factory.h"
+#include "chrome/browser/hid/web_hid_histograms.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/usb/usb_blocklist.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_contents.h"
+#include "services/device/public/cpp/hid/hid_blocklist.h"
+#include "services/device/public/cpp/hid/hid_switches.h"
 #include "ui/base/l10n/l10n_util.h"
+
+namespace {
+
+std::string PhysicalDeviceIdFromDeviceInfo(
+    const device::mojom::HidDeviceInfo& device) {
+  // A single physical device may expose multiple HID interfaces, each
+  // represented by a HidDeviceInfo object. When a device exposes multiple
+  // HID interfaces, the HidDeviceInfo objects will share a common
+  // |physical_device_id|. Group these devices so that a single chooser item
+  // is shown for each physical device. If a device's physical device ID is
+  // empty, use its GUID instead.
+  return device.physical_device_id.empty() ? device.guid
+                                           : device.physical_device_id;
+}
+
+}  // namespace
 
 HidChooserController::HidChooserController(
     content::RenderFrameHost* render_frame_host,
@@ -41,8 +58,6 @@ HidChooserController::HidChooserController(
 
   chooser_context_->GetHidManager()->GetDevices(base::BindOnce(
       &HidChooserController::OnGotDevices, weak_factory_.GetWeakPtr()));
-
-  // TODO(mattreynolds): Register to receive device added and removed events.
 }
 
 HidChooserController::~HidChooserController() {
@@ -62,38 +77,33 @@ base::string16 HidChooserController::GetOkButtonLabel() const {
   return l10n_util::GetStringUTF16(IDS_USB_DEVICE_CHOOSER_CONNECT_BUTTON_TEXT);
 }
 
+std::pair<base::string16, base::string16>
+HidChooserController::GetThrobberLabelAndTooltip() const {
+  return {l10n_util::GetStringUTF16(IDS_HID_CHOOSER_LOADING_LABEL),
+          l10n_util::GetStringUTF16(IDS_HID_CHOOSER_LOADING_LABEL_TOOLTIP)};
+}
+
 size_t HidChooserController::NumOptions() const {
-  return devices_.size();
+  return items_.size();
 }
 
 base::string16 HidChooserController::GetOption(size_t index) const {
-  DCHECK_LT(index, devices_.size());
-  auto it = devices_.begin();
-  std::advance(it, index);
-  DCHECK_GT(it->second.size(), 0u);
-  auto& device = *it->second[0];
-  if (device.product_name.empty()) {
-    return l10n_util::GetStringFUTF16(
-        IDS_HID_CHOOSER_ITEM_WITHOUT_NAME,
-        base::ASCIIToUTF16(base::StringPrintf("0x%04x", device.vendor_id)),
-        base::ASCIIToUTF16(base::StringPrintf("0x%04x", device.product_id)));
-  }
-  return l10n_util::GetStringFUTF16(
-      IDS_HID_CHOOSER_ITEM_WITH_NAME, base::UTF8ToUTF16(device.product_name),
-      base::ASCIIToUTF16(base::StringPrintf("0x%04x", device.vendor_id)),
-      base::ASCIIToUTF16(base::StringPrintf("0x%04x", device.product_id)));
+  DCHECK_LT(index, items_.size());
+  DCHECK(base::Contains(device_map_, items_[index]));
+  const auto& device = *device_map_.find(items_[index])->second.front();
+  return HidChooserContext::DisplayNameFromDeviceInfo(device);
 }
 
 bool HidChooserController::IsPaired(size_t index) const {
-  DCHECK_LE(index, devices_.size());
+  DCHECK_LT(index, items_.size());
 
   if (!chooser_context_)
     return false;
 
-  auto it = devices_.begin();
-  std::advance(it, index);
-  DCHECK_GT(it->second.size(), 0u);
-  for (auto& device : it->second) {
+  DCHECK(base::Contains(device_map_, items_[index]));
+  const auto& device_infos = device_map_.find(items_[index])->second;
+  DCHECK_GT(device_infos.size(), 0u);
+  for (const auto& device : device_infos) {
     if (!chooser_context_->HasDevicePermission(requesting_origin_,
                                                embedding_origin_, *device)) {
       return false;
@@ -104,83 +114,125 @@ bool HidChooserController::IsPaired(size_t index) const {
 }
 
 void HidChooserController::Select(const std::vector<size_t>& indices) {
-  // TODO(crbug.com/964041): Record metrics when an item is selected.
   DCHECK_EQ(1u, indices.size());
   size_t index = indices[0];
-  DCHECK_LT(index, devices_.size());
+  DCHECK_LT(index, items_.size());
 
   if (!chooser_context_) {
     std::move(callback_).Run({});
     return;
   }
 
-  auto it = devices_.begin();
-  std::advance(it, index);
-
-  DCHECK_GT(it->second.size(), 0u);
+  DCHECK(base::Contains(device_map_, items_[index]));
+  auto& device_infos = device_map_.find(items_[index])->second;
+  DCHECK_GT(device_infos.size(), 0u);
   std::vector<device::mojom::HidDeviceInfoPtr> devices;
-  devices.reserve(it->second.size());
-  for (auto& device : it->second) {
+  devices.reserve(device_infos.size());
+  bool any_persistent_permission_granted = false;
+  for (auto& device : device_infos) {
     chooser_context_->GrantDevicePermission(requesting_origin_,
                                             embedding_origin_, *device);
+    if (HidChooserContext::CanStorePersistentEntry(*device))
+      any_persistent_permission_granted = true;
     devices.push_back(device->Clone());
   }
+
+  RecordWebHidChooserClosure(
+      any_persistent_permission_granted
+          ? WebHidChooserClosed::kPermissionGranted
+          : WebHidChooserClosed::kEphemeralPermissionGranted);
+
   std::move(callback_).Run(std::move(devices));
 }
 
 void HidChooserController::Cancel() {
   // Called when the user presses the Cancel button in the chooser dialog.
-  // TODO(crbug.com/964041): Record metrics when the chooser dialog is canceled.
+  RecordWebHidChooserClosure(device_map_.empty()
+                                 ? WebHidChooserClosed::kCancelledNoDevices
+                                 : WebHidChooserClosed::kCancelled);
 }
 
 void HidChooserController::Close() {
   // Called when the user dismisses the chooser by clicking outside the chooser
   // dialog, or when the dialog closes without the user taking action.
-  // TODO(crbug.com/964041): Record metrics when the chooser dialog is closed.
+  RecordWebHidChooserClosure(WebHidChooserClosed::kLostFocus);
 }
 
 void HidChooserController::OpenHelpCenterUrl() const {
   NOTIMPLEMENTED();
 }
 
+void HidChooserController::OnDeviceAdded(
+    const device::mojom::HidDeviceInfo& device) {
+  if (!DisplayDevice(device))
+    return;
+
+  if (AddDeviceInfo(device) && view())
+    view()->OnOptionAdded(items_.size() - 1);
+  return;
+}
+
+void HidChooserController::OnDeviceRemoved(
+    const device::mojom::HidDeviceInfo& device) {
+  auto id = PhysicalDeviceIdFromDeviceInfo(device);
+  auto items_it = std::find(items_.begin(), items_.end(), id);
+  if (items_it == items_.end())
+    return;
+  size_t index = std::distance(items_.begin(), items_it);
+
+  if (RemoveDeviceInfo(device) && view())
+    view()->OnOptionRemoved(index);
+}
+
+void HidChooserController::OnHidManagerConnectionError() {
+  observer_.RemoveAll();
+}
+
+void HidChooserController::OnHidChooserContextShutdown() {
+  observer_.RemoveAll();
+}
+
 void HidChooserController::OnGotDevices(
     std::vector<device::mojom::HidDeviceInfoPtr> devices) {
   for (auto& device : devices) {
-    if (ShouldExcludeDevice(*device))
-      continue;
-
-    if (FilterMatchesAny(*device)) {
-      // A single physical device may expose multiple HID interfaces, each
-      // represented by a HidDeviceInfo object. When a device exposes multiple
-      // HID interfaces, the HidDeviceInfo objects will share a common
-      // |physical_device_id|. Group these devices so that a single chooser item
-      // is shown for each physical device. If a device's physical device ID is
-      // empty, use its GUID instead.
-      const std::string& key = device->physical_device_id.empty()
-                                   ? device->guid
-                                   : device->physical_device_id;
-      devices_[key].push_back(std::move(device));
-    }
+    if (DisplayDevice(*device))
+      AddDeviceInfo(*device);
   }
+
+  // Listen to HidChooserContext for OnDeviceAdded/Removed events after the
+  // enumeration.
+  if (chooser_context_)
+    observer_.Add(chooser_context_.get());
 
   if (view())
     view()->OnOptionsInitialized();
 }
 
-bool HidChooserController::ShouldExcludeDevice(
+bool HidChooserController::DisplayDevice(
     const device::mojom::HidDeviceInfo& device) const {
-  // Do not pass the device to the chooser if it is on the USB blocklist.
-  if (UsbBlocklist::Get().IsExcluded({device.vendor_id, device.product_id, 0}))
-    return true;
+  // Do not pass the device to the chooser if it is excluded by the blocklist.
+  if (device::HidBlocklist::IsDeviceExcluded(device))
+    return false;
 
-  // Do not pass the device to the chooser if it has a top-level collection with
-  // the FIDO usage page.
-  auto find_it =
-      std::find_if(device.collections.begin(), device.collections.end(),
-                   [](const device::mojom::HidCollectionInfoPtr& c) {
-                     return c->usage->usage_page == device::mojom::kPageFido;
-                   });
-  return find_it != device.collections.end();
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableHidBlocklist)) {
+    // Do not pass the device to the chooser if it has a top-level collection
+    // with the FIDO usage page.
+    //
+    // Note: The HID blocklist also blocks top-level collections with the FIDO
+    // usage page, but will not block the device if it has other (non-FIDO)
+    // collections. The check below will exclude the device from the chooser
+    // if it has any top-level FIDO collection.
+    auto find_it =
+        std::find_if(device.collections.begin(), device.collections.end(),
+                     [](const device::mojom::HidCollectionInfoPtr& c) {
+                       return c->usage->usage_page == device::mojom::kPageFido;
+                     });
+    if (find_it != device.collections.end())
+      return false;
+  }
+
+  return FilterMatchesAny(device);
 }
 
 bool HidChooserController::FilterMatchesAny(
@@ -230,4 +282,36 @@ bool HidChooserController::FilterMatchesAny(
   }
 
   return false;
+}
+
+bool HidChooserController::AddDeviceInfo(
+    const device::mojom::HidDeviceInfo& device) {
+  auto id = PhysicalDeviceIdFromDeviceInfo(device);
+  auto find_it = device_map_.find(id);
+  if (find_it != device_map_.end()) {
+    find_it->second.push_back(device.Clone());
+    return false;
+  }
+  // A new device was connected. Append it to the end of the chooser list.
+  device_map_[id].push_back(device.Clone());
+  items_.push_back(id);
+  return true;
+}
+
+bool HidChooserController::RemoveDeviceInfo(
+    const device::mojom::HidDeviceInfo& device) {
+  auto id = PhysicalDeviceIdFromDeviceInfo(device);
+  auto find_it = device_map_.find(id);
+  DCHECK(find_it != device_map_.end());
+  auto& device_infos = find_it->second;
+  base::EraseIf(device_infos,
+                [&device](const device::mojom::HidDeviceInfoPtr& d) {
+                  return d->guid == device.guid;
+                });
+  if (!device_infos.empty())
+    return false;
+  // A device was disconnected. Remove it from the chooser list.
+  device_map_.erase(find_it);
+  base::Erase(items_, id);
+  return true;
 }

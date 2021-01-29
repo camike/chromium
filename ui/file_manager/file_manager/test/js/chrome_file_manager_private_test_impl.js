@@ -9,7 +9,42 @@
  * running as a regular web page, we must provide test implementations.
  */
 
-const mockVolumeManager = new MockVolumeManager();
+/** @type {?MockVolumeManager} */
+let mockVolumeManager = null;
+
+if (window.test === undefined && window.isSWA) {
+  // eslint-disable-next-line
+  var test = test || {};
+
+  test.Event = class {
+    constructor() {
+      this.listeners_ = [];
+    }
+
+    /** @param {function()} callback */
+    addListener(callback) {
+      this.listeners_.push(callback);
+    }
+
+    /** @param {function()} callback */
+    removeListener(callback) {
+      this.listeners_ = this.listeners_.filter(l => l !== callback);
+    }
+
+    /** @param {...*} args */
+    dispatchEvent(...args) {
+      setTimeout(() => {
+        for (const listener of this.listeners_) {
+          listener(...args);
+        }
+      }, 0);
+    }
+  };
+} else {
+  mockVolumeManager = new MockVolumeManager();
+  window.webkitResolveLocalFileSystemURL =
+      MockVolumeManager.resolveLocalFileSystemURL.bind(null, mockVolumeManager);
+}
 
 /**
  * Suppress compiler warning for overwriting chrome.fileManagerPrivate.
@@ -22,17 +57,10 @@ chrome.fileManagerPrivate = {
     SHARE: 'share',
     UNSHARE: 'unshare',
   },
-  Verb: {
-    OPEN_WITH: 'open_with',
-    ADD_TO: 'add_to',
-    PACK_WITH: 'pack_with',
-    SHARE_WITH: 'share_with',
-  },
-  SearchType: {
-    ALL: 'ALL',
-    SHARED_WITH_ME: 'SHARED_WITH_ME',
-    EXCLUDE_DIRECTORIES: 'EXCLUDE_DIRECTORIES',
-    OFFLINE: 'OFFLINE',
+  FormatFileSystemType: {
+    VFAT: 'vfat',
+    EXFAT: 'exfat',
+    NTFS: 'ntfs',
   },
   DriveConnectionStateType: {
     ONLINE: 'ONLINE',
@@ -43,6 +71,24 @@ chrome.fileManagerPrivate = {
     NOT_READY: 'NOT_READY',
     NO_NETWORK: 'NO_NETWORK',
     NO_SERVICE: 'NO_SERVICE',
+  },
+  InspectionType: {
+    NORMAL: 'normal',
+    CONSOLE: 'console',
+    ELEMENT: 'element',
+    BACKGROUND: 'background',
+  },
+  SearchType: {
+    ALL: 'ALL',
+    SHARED_WITH_ME: 'SHARED_WITH_ME',
+    EXCLUDE_DIRECTORIES: 'EXCLUDE_DIRECTORIES',
+    OFFLINE: 'OFFLINE',
+  },
+  Verb: {
+    OPEN_WITH: 'open_with',
+    ADD_TO: 'add_to',
+    PACK_WITH: 'pack_with',
+    SHARE_WITH: 'share_with',
   },
   currentId_: 'test@example.com',
   displayedId_: 'test@example.com',
@@ -79,6 +125,12 @@ chrome.fileManagerPrivate = {
   executeTask: (taskId, entries, callback) => {
     // Returns opened|message_sent|failed|empty.
     setTimeout(callback, 0, 'failed');
+  },
+  getContentMetadata: (entry, mimeType, includeImages, callback) => {
+    setTimeout(callback, 0);
+  },
+  getContentMimeType: (entry, callback) => {
+    setTimeout(callback, 0, '');
   },
   getDriveConnectionState: (callback) => {
     setTimeout(callback, 0, mockVolumeManager.getDriveConnectionState());
@@ -172,10 +224,13 @@ chrome.fileManagerPrivate = {
   onDeviceChanged: new test.Event(),
   onDirectoryChanged: new test.Event(),
   onDriveConnectionStatusChanged: new test.Event(),
+  onDriveConfirmDialog: new test.Event(),
   onDriveSyncError: new test.Event(),
   onFileTransfersUpdated: new test.Event(),
+  onPinTransfersUpdated: new test.Event(),
   onMountCompleted: new test.Event(),
   onPreferencesChanged: new test.Event(),
+  onTabletModeChanged: new test.Event(),
   openInspector: (type) => {},
   openSettingsSubpage: (sub_page) => {},
   removeFileWatch: (entry, callback) => {
@@ -245,20 +300,8 @@ chrome.fileManagerPrivate = {
   validatePathNameLength: (parentEntry, name, callback) => {
     setTimeout(callback, 0, true);
   },
-};
-
-/**
- * Suppress compiler warning for overwriting chrome.mediaGalleries.
- * @suppress {checkTypes}
- */
-chrome.mediaGalleries = {
-  getMetadata: (mediaFile, options, callback) => {
-    // Returns metdata {mimeType: ..., ...}.
-    setTimeout(() => {
-      webkitResolveLocalFileSystemURL(mediaFile.name, entry => {
-        callback({mimeType: entry.metadata.contentMimeType});
-      }, 0);
-    });
+  isTabletModeEnabled: (callback) => {
+    setTimeout(callback, 0, false);
   },
 };
 
@@ -278,37 +321,4 @@ chrome.fileSystem = {
     }
     setTimeout(callback, 0, fs);
   },
-};
-
-/**
- * Override webkitResolveLocalFileSystemURL for testing.
- * @param {string} url URL to resolve.
- * @param {function(!MockEntry)} successCallback Success callback.
- * @param {function(!Error)} errorCallback Error callback.
- */
-// eslint-disable-next-line
-var webkitResolveLocalFileSystemURL = (url, successCallback, errorCallback) => {
-  const match = url.match(/^filesystem:(\w+)(\/.*)/);
-  if (match) {
-    const volumeType = /** @type {VolumeManagerCommon.VolumeType} */ (match[1]);
-    let path = match[2];
-    const volume = mockVolumeManager.getCurrentProfileVolumeInfo(volumeType);
-    if (volume) {
-      // Decode URI in file paths.
-      path = path.split('/').map(decodeURIComponent).join('/');
-      const entry = volume.fileSystem.entries[path];
-      if (entry) {
-        setTimeout(successCallback, 0, entry);
-        return;
-      }
-    }
-  }
-  const message = `webkitResolveLocalFileSystemURL not found: ${url}`;
-  console.warn(message);
-  const error = new DOMException(message, 'NotFoundError');
-  if (errorCallback) {
-    setTimeout(errorCallback, 0, error);
-  } else {
-    throw error;
-  }
 };

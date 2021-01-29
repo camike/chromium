@@ -33,6 +33,7 @@ namespace blink {
 class ExceptionState;
 class HTMLDataListElement;
 class HTMLSelectElement;
+class OptionTextObserver;
 
 class CORE_EXPORT HTMLOptionElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
@@ -53,6 +54,8 @@ class CORE_EXPORT HTMLOptionElement final : public HTMLElement {
                                                    ExceptionState&);
 
   explicit HTMLOptionElement(Document&);
+  ~HTMLOptionElement() override;
+  void Trace(Visitor* visitor) const override;
 
   // A text to be shown to users.  The difference from |label()| is |label()|
   // returns an empty string if |label| content attribute is empty.
@@ -101,9 +104,15 @@ class CORE_EXPORT HTMLOptionElement final : public HTMLElement {
   void SetMultiSelectFocusedState(bool);
   bool IsMultiSelectFocused() const;
 
- private:
-  ~HTMLOptionElement() override;
+  void SetWasOptionInsertedCalled(bool flag) {
+    was_option_inserted_called_ = flag;
+  }
+  bool WasOptionInsertedCalled() const { return was_option_inserted_called_; }
 
+  // Callback for OptionTextObserver.
+  void DidChangeTextContent();
+
+ private:
   bool SupportsFocus() const override;
   bool MatchesDefaultPseudoClass() const override;
   bool MatchesEnabledPseudoClass() const override;
@@ -117,6 +126,8 @@ class CORE_EXPORT HTMLOptionElement final : public HTMLElement {
 
   void UpdateLabel();
 
+  Member<OptionTextObserver> text_observer_;
+
   // Represents 'selectedness'.
   // https://html.spec.whatwg.org/C/#concept-option-selectedness
   bool is_selected_;
@@ -126,6 +137,11 @@ class CORE_EXPORT HTMLOptionElement final : public HTMLElement {
   // Represents the option being focused on in a multi-select non-contiguous
   // traversal via the keyboard.
   bool is_multi_select_focused_ = false;
+
+  // True while HTMLSelectElement::OptionInserted(this) and OptionRemoved(this);
+  // This flag is necessary to detect a state where DOM tree is updated and
+  // OptionInserted() is not called yet.
+  bool was_option_inserted_called_ = false;
 };
 
 }  // namespace blink

@@ -7,8 +7,8 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/check.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
@@ -64,12 +64,12 @@ void GeolocationProviderImpl::SetGeolocationConfiguration(
   }
 }
 
-std::unique_ptr<GeolocationProvider::Subscription>
+base::CallbackListSubscription
 GeolocationProviderImpl::AddLocationUpdateCallback(
     const LocationUpdateCallback& callback,
     bool enable_high_accuracy) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
-  std::unique_ptr<GeolocationProvider::Subscription> subscription;
+  base::CallbackListSubscription subscription;
   if (enable_high_accuracy) {
     subscription = high_accuracy_callbacks_.Add(callback);
   } else {
@@ -171,7 +171,11 @@ void GeolocationProviderImpl::OnClientsChanged() {
                           base::Unretained(this));
   } else {
     if (!IsRunning()) {
-      Start();
+      base::Thread::Options options;
+#if defined(OS_MAC)
+      options.message_pump_type = base::MessagePumpType::NS_RUNLOOP;
+#endif
+      StartWithOptions(options);
       if (user_did_opt_into_location_services_)
         InformProvidersPermissionGranted();
     }

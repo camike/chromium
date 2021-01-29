@@ -13,6 +13,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/media_galleries/media_galleries_dialog_controller_test_util.h"
 #include "chrome/browser/media_galleries/media_galleries_preferences.h"
@@ -24,7 +25,7 @@
 #include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
 #include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #endif
@@ -44,9 +45,9 @@ std::string GalleryName(const MediaGalleryPrefInfo& gallery) {
 class MediaGalleriesPermissionControllerTest : public ::testing::Test {
  public:
   MediaGalleriesPermissionControllerTest()
-      : dialog_(NULL),
+      : dialog_(nullptr),
         dialog_update_count_at_destruction_(0),
-        controller_(NULL),
+        controller_(nullptr),
         profile_(new TestingProfile()) {}
 
   ~MediaGalleriesPermissionControllerTest() override {
@@ -79,11 +80,11 @@ class MediaGalleriesPermissionControllerTest : public ::testing::Test {
   void StartDialog() {
     ASSERT_FALSE(controller_);
     controller_ = new MediaGalleriesPermissionController(
-        *extension_.get(),
-        gallery_prefs_.get(),
-        base::Bind(&MediaGalleriesPermissionControllerTest::CreateMockDialog,
-                   base::Unretained(this)),
-        base::Bind(
+        *extension_.get(), gallery_prefs_.get(),
+        base::BindOnce(
+            &MediaGalleriesPermissionControllerTest::CreateMockDialog,
+            base::Unretained(this)),
+        base::BindOnce(
             &MediaGalleriesPermissionControllerTest::OnControllerDone,
             base::Unretained(this)));
   }
@@ -122,7 +123,7 @@ class MediaGalleriesPermissionControllerTest : public ::testing::Test {
       MediaGalleriesDialogController* controller) {
     EXPECT_FALSE(dialog_);
     dialog_update_count_at_destruction_ = 0;
-    dialog_ = new MockMediaGalleriesDialog(base::Bind(
+    dialog_ = new MockMediaGalleriesDialog(base::BindOnce(
         &MediaGalleriesPermissionControllerTest::OnDialogDestroyed,
         weak_factory_.GetWeakPtr()));
     return dialog_;
@@ -131,12 +132,10 @@ class MediaGalleriesPermissionControllerTest : public ::testing::Test {
   void OnDialogDestroyed(int update_count) {
     EXPECT_TRUE(dialog_);
     dialog_update_count_at_destruction_ = update_count;
-    dialog_ = NULL;
+    dialog_ = nullptr;
   }
 
-  void OnControllerDone() {
-    controller_ = NULL;
-  }
+  void OnControllerDone() { controller_ = nullptr; }
 
   // Needed for extension service & friends to work.
   content::BrowserTaskEnvironment task_environment_;
@@ -151,7 +150,7 @@ class MediaGalleriesPermissionControllerTest : public ::testing::Test {
 
   scoped_refptr<extensions::Extension> extension_;
 
-#if defined OS_CHROMEOS
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   chromeos::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
   chromeos::ScopedTestUserManager test_user_manager_;
 #endif
@@ -208,8 +207,8 @@ void MediaGalleriesPermissionControllerTest::TestForgottenType(
 
   // Add back and test whether the same pref id is preserved.
   StartDialog();
-  controller()->FileSelected(
-      MakeMediaGalleriesTestingPath("forgotten1"), 0, NULL);
+  controller()->FileSelected(MakeMediaGalleriesTestingPath("forgotten1"), 0,
+                             nullptr);
   controller()->DialogFinished(true);
   EXPECT_EQ(2U, gallery_prefs()->GalleriesForExtension(*extension()).size());
   MediaGalleryPrefInfo retrieved_info;
@@ -255,7 +254,7 @@ TEST_F(MediaGalleriesPermissionControllerTest, TestNameGeneration) {
       StorageInfo::FIXED_MASS_STORAGE, "/path/to/gallery");
   gallery.type = MediaGalleryPrefInfo::kAutoDetected;
   std::string galleryName("/path/to/gallery");
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   galleryName = "gallery";
 #endif
   EXPECT_EQ(galleryName, GalleryName(gallery));
@@ -269,7 +268,7 @@ TEST_F(MediaGalleriesPermissionControllerTest, TestNameGeneration) {
 
   gallery.path = base::FilePath(FILE_PATH_LITERAL("sub/gallery2"));
   galleryName = "/path/to/gallery/sub/gallery2";
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   galleryName = "gallery2";
 #endif
 #if defined(OS_WIN)

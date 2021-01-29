@@ -8,14 +8,13 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
-#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_action_runner.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -36,9 +35,11 @@
 #include "components/prefs/pref_service.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_action.h"
+#include "extensions/browser/extension_action_manager.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/notification_types.h"
@@ -90,17 +91,19 @@ class BlockedActionWaiter
 // BrowserActionsBarBrowserTest:
 
 BrowserActionsBarBrowserTest::BrowserActionsBarBrowserTest()
-    : toolbar_model_(nullptr) {
-  // This suite relies on behavior specific to ToolbarActionsBar. See
-  // ExtensionsMenuViewBrowserTest and ExtensionsMenuViewUnitTest for new tests.
-  feature_list_.InitAndDisableFeature(features::kExtensionsToolbarMenu);
-}
+    : toolbar_model_(nullptr) {}
 
 BrowserActionsBarBrowserTest::~BrowserActionsBarBrowserTest() {
 }
 
 void BrowserActionsBarBrowserTest::SetUpCommandLine(
     base::CommandLine* command_line) {
+  // Note: The ScopedFeatureList needs to be instantiated before the rest of
+  // set up happens.
+  // This suite relies on behavior specific to ToolbarActionsBar. See
+  // ExtensionsMenuViewBrowserTest and ExtensionsMenuViewUnitTest for new tests.
+  feature_list_.InitAndDisableFeature(features::kExtensionsToolbarMenu);
+
   extensions::ExtensionBrowserTest::SetUpCommandLine(command_line);
   ToolbarActionsBar::disable_animations_for_testing_ = true;
 }
@@ -556,7 +559,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, RemovePoppedOutAction) {
   EXPECT_EQ(3, browser_actions_bar()->NumberOfBrowserActions());
 
   // Pop out Extension 3 (index 3).
-  base::Closure closure = base::DoNothing();
+  base::RepeatingClosure closure = base::DoNothing();
   ToolbarActionsBar* const toolbar_actions_bar =
       ToolbarActionsBar::FromBrowserWindow(browser()->window());
   EXPECT_EQ(extension3->id(), toolbar_actions_bar->GetActions()[2]->GetId());
@@ -638,8 +641,9 @@ class BrowserActionsBarIncognitoTest : public BrowserActionsBarBrowserTest {
 // Regression test for crbug.com/663726.
 IN_PROC_BROWSER_TEST_F(BrowserActionsBarIncognitoTest, IncognitoMode) {
   EXPECT_TRUE(browser()->profile()->IsOffTheRecord());
-  const extensions::Extension* extension = LoadExtensionIncognito(
-      test_data_dir_.AppendASCII("api_test/browser_action_with_icon"));
+  const extensions::Extension* extension = LoadExtension(
+      test_data_dir_.AppendASCII("api_test/browser_action_with_icon"),
+      {.allow_in_incognito = true});
   ASSERT_TRUE(extension);
   Browser* second_browser = CreateBrowser(profile()->GetOriginalProfile());
   EXPECT_FALSE(second_browser->profile()->IsOffTheRecord());

@@ -8,10 +8,10 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/optional.h"
 #include "chrome/browser/ui/tabs/tab_change_type.h"
 #include "components/tab_groups/tab_group_id.h"
+#include "components/tab_groups/tab_group_visual_data.h"
 #include "ui/base/models/list_selection_model.h"
 
 class TabStripModel;
@@ -42,6 +42,16 @@ class TabStripModelChange {
   // but C++17 features are not yet approved for use in chromium.
   struct Delta {
     virtual ~Delta() = default;
+  };
+
+  struct ContentsWithIndexAndWillBeDeleted {
+    content::WebContents* contents;
+    int index;
+
+    // The specified WebContents are being closed (and eventually destroyed).
+    // TODO(https://crbug.com/1149549): Make will_be_deleted into enum to
+    // consider the case for ClosedTabCache feature separtely.
+    bool will_be_deleted;
   };
 
   struct ContentsWithIndex {
@@ -90,8 +100,10 @@ class TabStripModelChange {
     Remove(Remove&& other);
     Remove& operator=(Remove&& other);
 
-    // Contains the list of web contents removed, along with their indexes at
-    // the time of removal. For example, if we removed elements:
+    // Contains the list of web contents removed with their indexes at
+    // the time of removal along with flag |will_be_deleted| that indicates if
+    // the web contents will be deleted or not after removing. For example, if
+    // we removed elements:
     //
     // Before removal:
     // A B C D E F G
@@ -112,11 +124,7 @@ class TabStripModelChange {
     // them in the order the web contents appear in |contents|. Observers should
     // not do index-based queries based on their own internally-stored indices
     // until after processing all of |contents|.
-    std::vector<ContentsWithIndex> contents;
-
-    // The specified WebContents are being closed (and eventually destroyed).
-    // |tab_strip_model| is the TabStripModel that contained the tab.
-    bool will_be_deleted;
+    std::vector<ContentsWithIndexAndWillBeDeleted> contents;
   };
 
   // A WebContents was moved from |from_index| to |to_index|. This implicitly
@@ -141,6 +149,8 @@ class TabStripModelChange {
   explicit TabStripModelChange(Remove delta);
   explicit TabStripModelChange(Replace delta);
   explicit TabStripModelChange(Move delta);
+  TabStripModelChange(const TabStripModelChange&) = delete;
+  TabStripModelChange& operator=(const TabStripModelChange&) = delete;
   ~TabStripModelChange();
 
   Type type() const { return type_; }
@@ -154,8 +164,6 @@ class TabStripModelChange {
 
   const Type type_ = kSelectionOnly;
   std::unique_ptr<Delta> delta_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabStripModelChange);
 };
 
 // Struct to carry changes on selection/activation.
@@ -200,13 +208,41 @@ struct TabGroupChange {
   // a kContentsChange event is fired. Whenever the group's visual data changes,
   // such as its title or color, a kVisualsChange event is fired. Whenever the
   // group is moved by interacting with its header, a kMoved event is fired.
-  enum Type { kCreated, kContentsChanged, kVisualsChanged, kMoved, kClosed };
+  enum Type {
+    kCreated,
+    kEditorOpened,
+    kContentsChanged,
+    kVisualsChanged,
+    kMoved,
+    kClosed
+  };
 
-  TabGroupChange(tab_groups::TabGroupId group, Type type);
+  // Base class for all changes. Similar to TabStripModelChange::Delta.
+  struct Delta {
+    virtual ~Delta() = default;
+  };
+
+  // The TabGroupVisualData that was changed at the specified group.
+  struct VisualsChange : public Delta {
+    VisualsChange();
+    ~VisualsChange() override;
+    const tab_groups::TabGroupVisualData* old_visuals;
+    const tab_groups::TabGroupVisualData* new_visuals;
+  };
+
+  TabGroupChange(tab_groups::TabGroupId group,
+                 Type type,
+                 std::unique_ptr<Delta> deltap = nullptr);
+  explicit TabGroupChange(tab_groups::TabGroupId group, VisualsChange deltap);
   ~TabGroupChange();
+
+  const VisualsChange* GetVisualsChange() const;
 
   tab_groups::TabGroupId group;
   Type type;
+
+ private:
+  std::unique_ptr<Delta> delta;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -242,6 +278,9 @@ class TabStripModelObserver {
     // Used to indicate that CloseAllTab event complete successfully.
     kCloseAllCompleted = 1,
   };
+
+  TabStripModelObserver(const TabStripModelObserver&) = delete;
+  TabStripModelObserver& operator=(const TabStripModelObserver&) = delete;
 
   // |change| is a series of changes in tabstrip model. |change| consists
   // of changes with same type and those changes may have caused selection or
@@ -281,6 +320,7 @@ class TabStripModelObserver {
   // Called when the tab at |index| is added to the group with id |group|.
   virtual void TabGroupedStateChanged(
       base::Optional<tab_groups::TabGroupId> group,
+      content::WebContents* contents,
       int index);
 
   // The TabStripModel now no longer has any tabs. The implementer may
@@ -337,8 +377,6 @@ class TabStripModelObserver {
 
  private:
   std::set<TabStripModel*> observed_models_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabStripModelObserver);
 };
 
 #endif  // CHROME_BROWSER_UI_TABS_TAB_STRIP_MODEL_OBSERVER_H_

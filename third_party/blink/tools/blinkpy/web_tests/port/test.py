@@ -27,6 +27,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import base64
+import json
 import time
 
 from blinkpy.common import exit_codes
@@ -135,12 +136,12 @@ class TestList(object):
 #
 # These numbers may need to be updated whenever we add or delete tests. This includes virtual tests.
 #
-TOTAL_TESTS = 154
+TOTAL_TESTS = 176
 TOTAL_WONTFIX = 3
-TOTAL_SKIPS = 20 + TOTAL_WONTFIX
+TOTAL_SKIPS = 26 + TOTAL_WONTFIX
 TOTAL_CRASHES = 78
 
-UNEXPECTED_PASSES = 1
+UNEXPECTED_PASSES = 2
 UNEXPECTED_NON_VIRTUAL_FAILURES = 34
 UNEXPECTED_FAILURES = 67
 
@@ -306,6 +307,7 @@ layer at (0,0) size 800x34
         actual_checksum=None,
         expected_checksum=None)
     tests.add('passes/platform_image.html')
+    tests.add('passes/slow.html')
     tests.add(
         'passes/checksum_in_image.html',
         expected_image='tEXtchecksum\x00checksum_in_image-checksum')
@@ -478,6 +480,16 @@ virtual/skipped/failures/expected* [ Skip ]
 failures/expected/keyboard.html [ Skip ]
 failures/expected/exception.html [ Skip ]
 failures/expected/device_failure.html [ Skip ]
+virtual/virtual_failures/failures/expected/keyboard.html [ Skip ]
+virtual/virtual_failures/failures/expected/exception.html [ Skip ]
+virtual/virtual_failures/failures/expected/device_failure.html [ Skip ]
+""")
+
+    if not filesystem.exists(WEB_TEST_DIR + '/SlowTests'):
+        filesystem.write_text_file(
+            WEB_TEST_DIR + '/SlowTests', """
+# results: [ Slow ]
+passes/slow.html [ Slow ]
 """)
 
     # FIXME: This test was only being ignored because of missing a leading '/'.
@@ -516,6 +528,105 @@ failures/expected/device_failure.html [ Skip ]
 
     # Clear the list of written files so that we can watch what happens during testing.
     filesystem.clear_written_files()
+
+
+def add_manifest_to_mock_filesystem(port):
+    # Disable manifest update otherwise they'll be overwritten.
+    port.set_option_default('manifest_update', False)
+    filesystem = port.host.filesystem
+    filesystem.write_text_file(
+        WEB_TEST_DIR + '/external/wpt/MANIFEST.json',
+        json.dumps({
+            'items': {
+                'testharness': {
+                    'dom': {
+                        'ranges': {
+                            'Range-attributes.html': ['acbdef123', [None, {}]],
+                            'Range-attributes-slow.html':
+                            ['abcdef123', [None, {
+                                'timeout': 'long'
+                            }]],
+                        },
+                    },
+                    'console': {
+                        'console-is-a-namespace.any.js': [
+                            'abcdef1234',
+                            ['console/console-is-a-namespace.any.html', {}],
+                            [
+                                'console/console-is-a-namespace.any.worker.html',
+                                {
+                                    'timeout': 'long'
+                                }
+                            ],
+                        ],
+                    },
+                    'html': {
+                        'parse.html': [
+                            'abcdef123',
+                            ['html/parse.html?run_type=uri', {}],
+                            [
+                                'html/parse.html?run_type=write', {
+                                    'timeout': 'long'
+                                }
+                            ],
+                        ],
+                    },
+                },
+                'manual': {},
+                'reftest': {
+                    'html': {
+                        'dom': {
+                            'elements': {
+                                'global-attributes': {
+                                    'dir_auto-EN-L.html': [
+                                        'abcdef123',
+                                        [
+                                            None,
+                                            [[
+                                                '/html/dom/elements/global-attributes/dir_auto-EN-L-ref.html',
+                                                '=='
+                                            ]], {
+                                                'timeout': 'long'
+                                            }
+                                        ],
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                },
+                'crashtest': {
+                    'portals': {
+                        'portals-no-frame-crash.html':
+                        ['abcdef123', [None, {}]],
+                    },
+                },
+            }
+        }))
+    filesystem.write_text_file(
+        WEB_TEST_DIR + '/external/wpt/dom/ranges/Range-attributes.html', '')
+    filesystem.write_text_file(
+        WEB_TEST_DIR + '/external/wpt/dom/ranges/Range-attributes-slow.html',
+        '')
+    filesystem.write_text_file(
+        WEB_TEST_DIR + '/external/wpt/console/console-is-a-namespace.any.js',
+        '')
+    filesystem.write_text_file(
+        WEB_TEST_DIR + '/external/wpt/common/blank.html', 'foo')
+
+    filesystem.write_text_file(
+        WEB_TEST_DIR + '/wpt_internal/MANIFEST.json',
+        json.dumps({
+            'items': {
+                'testharness': {
+                    'dom': {
+                        'bar.html': ['abcdef123', [None, {}]]
+                    }
+                }
+            }
+        }))
+    filesystem.write_text_file(WEB_TEST_DIR + '/wpt_internal/dom/bar.html',
+                               'baz')
 
 
 class TestPort(Port):
@@ -636,7 +747,11 @@ class TestPort(Port):
     def default_configuration(self):
         return 'Release'
 
-    def diff_image(self, expected_contents, actual_contents):
+    def diff_image(self,
+                   expected_contents,
+                   actual_contents,
+                   max_channel_diff=None,
+                   max_pixels_diff=None):
         diffed = actual_contents != expected_contents
         if not actual_contents and not expected_contents:
             return (None, None)
@@ -715,30 +830,28 @@ class TestPort(Port):
 
     def virtual_test_suites(self):
         return [
-            VirtualTestSuite(
-                prefix='virtual_passes',
-                bases=['passes', 'passes_two'],
-                args=['--virtual-arg']),
-            VirtualTestSuite(
-                prefix='skipped',
-                bases=['failures/expected'],
-                args=['--virtual-arg-skipped']),
+            VirtualTestSuite(prefix='virtual_passes',
+                             bases=['passes', 'passes_two'],
+                             args=['--virtual-arg']),
+            VirtualTestSuite(prefix='skipped',
+                             bases=['failures/expected'],
+                             args=['--virtual-arg-skipped']),
             VirtualTestSuite(
                 prefix='virtual_failures',
-                bases=['failures/unexpected'],
+                bases=['failures/expected', 'failures/unexpected'],
                 args=['--virtual-arg-failures']),
-            VirtualTestSuite(
-                prefix='virtual_wpt',
-                bases=['external/wpt'],
-                args=['--virtual-arg-wpt']),
-            VirtualTestSuite(
-                prefix='virtual_wpt_dom',
-                bases=['external/wpt/dom', 'wpt_internal/dom'],
-                args=['--virtual-arg-wpt-dom']),
-            VirtualTestSuite(
-                prefix='virtual_empty_bases',
-                bases=[],
-                args=['--virtual-arg-empty-bases']),
+            VirtualTestSuite(prefix='virtual_wpt',
+                             bases=['external/wpt'],
+                             args=['--virtual-arg-wpt']),
+            VirtualTestSuite(prefix='virtual_wpt_dom',
+                             bases=['external/wpt/dom', 'wpt_internal/dom'],
+                             args=['--virtual-arg-wpt-dom']),
+            VirtualTestSuite(prefix='virtual_empty_bases',
+                             bases=[],
+                             args=['--virtual-arg-empty-bases']),
+            VirtualTestSuite(prefix='mixed_wpt',
+                             bases=['http', 'external/wpt/dom'],
+                             args=['--virtual-arg']),
         ]
 
 

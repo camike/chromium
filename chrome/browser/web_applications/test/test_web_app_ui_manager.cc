@@ -7,8 +7,8 @@
 #include <utility>
 
 #include "base/callback.h"
-#include "base/stl_util.h"
-#include "base/test/bind_test_util.h"
+#include "base/containers/contains.h"
+#include "base/test/bind.h"
 #include "base/threading/thread_task_runner_handle.h"
 
 namespace web_app {
@@ -16,6 +16,13 @@ namespace web_app {
 TestWebAppUiManager::TestWebAppUiManager() = default;
 
 TestWebAppUiManager::~TestWebAppUiManager() = default;
+
+void TestWebAppUiManager::SetSubsystems(
+    AppRegistryController* app_registry_controller) {}
+
+void TestWebAppUiManager::Start() {}
+
+void TestWebAppUiManager::Shutdown() {}
 
 void TestWebAppUiManager::SetNumWindowsForApp(const AppId& app_id,
                                               size_t num_windows_for_app) {
@@ -47,12 +54,13 @@ void TestWebAppUiManager::NotifyOnAllAppWindowsClosed(
                      }));
 }
 
-void TestWebAppUiManager::UninstallAndReplace(
+bool TestWebAppUiManager::UninstallAndReplaceIfExists(
     const std::vector<AppId>& from_apps,
     const AppId& to_app) {
   for (const AppId& from_app : from_apps) {
     uninstall_and_replace_map_[from_app] = to_app;
   }
+  return false;
 }
 
 bool TestWebAppUiManager::CanAddAppToQuickLaunchBar() const {
@@ -61,8 +69,8 @@ bool TestWebAppUiManager::CanAddAppToQuickLaunchBar() const {
 
 void TestWebAppUiManager::AddAppToQuickLaunchBar(const AppId& app_id) {}
 
-bool TestWebAppUiManager::IsInAppWindow(
-    content::WebContents* web_contents) const {
+bool TestWebAppUiManager::IsInAppWindow(content::WebContents* web_contents,
+                                        const AppId* app_id) const {
   return false;
 }
 

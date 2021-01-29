@@ -6,17 +6,19 @@
 
 #include <windows.h>
 
+#include <memory>
+
 #include "base/lazy_instance.h"
-#include "base/strings/string16.h"
+#include "base/notreached.h"
 #include "ui/base/cursor/cursor.h"
-#include "ui/base/mojom/cursor_type.mojom-shared.h"
+#include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
 #include "ui/resources/grit/ui_unscaled_resources.h"
 
 namespace ui {
 
 namespace {
 
-base::LazyInstance<base::string16>::DestructorAtExit
+base::LazyInstance<std::wstring>::DestructorAtExit
     g_cursor_resource_module_name;
 
 const wchar_t* GetCursorId(gfx::NativeCursor native_cursor) {
@@ -122,8 +124,8 @@ const wchar_t* GetCursorId(gfx::NativeCursor native_cursor) {
 
 }  // namespace
 
-CursorLoader* CursorLoader::Create() {
-  return new CursorLoaderWin;
+std::unique_ptr<CursorLoader> CursorLoader::Create(bool use_platform_cursors) {
+  return std::make_unique<CursorLoaderWin>();
 }
 
 CursorLoaderWin::CursorLoaderWin() {
@@ -132,20 +134,7 @@ CursorLoaderWin::CursorLoaderWin() {
 CursorLoaderWin::~CursorLoaderWin() {
 }
 
-void CursorLoaderWin::LoadImageCursor(mojom::CursorType id,
-                                      int resource_id,
-                                      const gfx::Point& hot) {
-  // NOTIMPLEMENTED();
-}
-
-void CursorLoaderWin::LoadAnimatedCursor(mojom::CursorType id,
-                                         int resource_id,
-                                         const gfx::Point& hot,
-                                         int frame_delay_ms) {
-  // NOTIMPLEMENTED();
-}
-
-void CursorLoaderWin::UnloadAll() {
+void CursorLoaderWin::UnloadCursors() {
   // NOTIMPLEMENTED();
 }
 
@@ -176,8 +165,7 @@ void CursorLoaderWin::SetPlatformCursor(gfx::NativeCursor* cursor) {
 }
 
 // static
-void CursorLoaderWin::SetCursorResourceModule(
-    const base::string16& module_name) {
+void CursorLoaderWin::SetCursorResourceModule(const std::wstring& module_name) {
   g_cursor_resource_module_name.Get() = module_name;
 }
 

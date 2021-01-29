@@ -16,7 +16,7 @@
 #include "ash/wm/window_util.h"
 #include "base/auto_reset.h"
 #include "base/command_line.h"
-#include "base/stl_util.h"
+#include "base/containers/contains.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/display/display.h"
 #include "ui/display/manager/display_manager.h"
@@ -168,7 +168,6 @@ bool IsPortraitOrientation(OrientationLockType type) {
 }
 
 OrientationLockType GetCurrentScreenOrientation() {
-  DCHECK(Shell::Get()->tablet_mode_controller()->InTabletMode());
   // ScreenOrientationController might be nullptr during shutdown.
   // TODO(xdai|sammiequon): See if we can reorder so that users of the function
   // |SplitViewController::Get| get shutdown before screen orientation
@@ -230,6 +229,8 @@ ScreenOrientationController::ScreenOrientationController()
   SplitViewController::Get(Shell::GetPrimaryRootWindow())->AddObserver(this);
   display::Screen::GetScreen()->AddObserver(this);
   Shell::Get()->window_tree_host_manager()->AddObserver(this);
+
+  OnTabletPhysicalStateChanged();
 }
 
 ScreenOrientationController::~ScreenOrientationController() {
@@ -392,18 +393,18 @@ void ScreenOrientationController::OnWindowVisibilityChanged(
 }
 
 void ScreenOrientationController::OnAccelerometerUpdated(
-    scoped_refptr<const AccelerometerUpdate> update) {
+    const AccelerometerUpdate& update) {
   if (!IsAutoRotationAllowed())
     return;
 
   if (rotation_locked_ && !CanRotateInLockedState())
     return;
-  if (!update->has(ACCELEROMETER_SOURCE_SCREEN))
+  if (!update.has(ACCELEROMETER_SOURCE_SCREEN))
     return;
   // Ignore the reading if it appears unstable. The reading is considered
   // unstable if it deviates too much from gravity
-  if (update->IsReadingStable(ACCELEROMETER_SOURCE_SCREEN))
-    HandleScreenRotation(update->get(ACCELEROMETER_SOURCE_SCREEN));
+  if (update.IsReadingStable(ACCELEROMETER_SOURCE_SCREEN))
+    HandleScreenRotation(update.get(ACCELEROMETER_SOURCE_SCREEN));
 }
 
 void ScreenOrientationController::OnDisplayConfigurationChanged() {

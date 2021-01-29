@@ -8,6 +8,19 @@
  * more displays and allows them to be arranged.
  */
 
+/**
+ * Container for DisplayUnitInfo.  Mostly here to make the DisplaySelectEvent
+ * typedef more readable.
+ * @typedef {{item: !chrome.system.display.DisplayUnitInfo}}
+ */
+let InfoItem;
+
+/**
+ * Required member fields for events which select displays.
+ * @typedef {{model: !InfoItem, target: !HTMLDivElement}}
+ */
+let DisplaySelectEvent;
+
 (function() {
 
 /** @type {number} */ const MIN_VISUAL_SCALE = .01;
@@ -55,6 +68,35 @@ Polymer({
   /** @private {!{left: number, top: number}} */
   visualOffset_: {left: 0, top: 0},
 
+  /**
+   * Stores the previous coordinates of a display once dragging starts. Used to
+   * calculate the delta during each step of the drag. Null when there is no
+   * drag in progress.
+   * @private {?{x: number, y: number}}
+   */
+  lastDragCoordinates_: null,
+
+  /** @private {?settings.DevicePageBrowserProxy} */
+  browserProxy_: null,
+
+  /** @private {boolean} */
+  allowDisplayAlignmentApi_:
+      loadTimeData.getBoolean('allowDisplayAlignmentApi'),
+
+  /** @private {boolean} */
+  allowKeyboardDrag_:
+      loadTimeData.getBoolean('allowKeyboardBasedDisplayArrangementInSettings'),
+
+  /** @private {string} */
+  invalidDisplayId_: loadTimeData.getString('invalidDisplayId'),
+
+  /** @override */
+  created() {
+    if (this.allowDisplayAlignmentApi_ || this.allowDisplayIdentificationApi_) {
+      this.browserProxy_ = settings.DevicePageBrowserProxyImpl.getInstance();
+    }
+  },
+
   /** @override */
   detached() {
     this.initializeDrag(false);
@@ -83,6 +125,8 @@ Polymer({
     }
     tryCalcVisualScale();
 
+    // Pass keyboard dragging flag to drag behavior before initializing.
+    this.keyboardDragEnabled = this.allowKeyboardDrag_;
     this.initializeDrag(
         !this.mirroring, this.$.displayArea, this.onDrag_.bind(this));
   },
@@ -223,12 +267,23 @@ Polymer({
    * @private
    */
   isSelected_(display, selectedDisplay) {
-    return display.id == selectedDisplay.id;
+    return display.id === selectedDisplay.id;
+  },
+
+  focusSelectedDisplay_() {
+    if (!this.selectedDisplay) {
+      return;
+    }
+    const children = Array.from(this.$.displayArea.children);
+    const selected =
+        children.find(display => display.id === '_' + this.selectedDisplay.id);
+    if (selected) {
+      selected.focus();
+    }
   },
 
   /**
-   * @param {!{model: !{item: !chrome.system.display.DisplayUnitInfo},
-   *     target: !HTMLDivElement}} e
+   * @param {!DisplaySelectEvent} e
    * @private
    */
   onSelectDisplayTap_(e) {
@@ -236,6 +291,15 @@ Polymer({
     // Force active in case the selected display was clicked.
     // TODO(dpapad): Ask @stevenjb, why are we setting 'active' on a div?
     e.target.active = true;
+  },
+
+  /**
+   * @param {!DisplaySelectEvent} e
+   * @private
+   */
+  onFocus_(e) {
+    this.fire('select-display', e.model.item.id);
+    this.focusSelectedDisplay_();
   },
 
   /**
@@ -249,9 +313,17 @@ Polymer({
     if (!amount) {
       this.finishUpdateDisplayBounds(id);
       newBounds = this.getCalculatedDisplayBounds(id);
+      this.lastDragCoordinates_ = null;
+      if (this.allowDisplayIdentificationApi_) {
+        // When the drag stops, remove the highlight around the display.
+        this.browserProxy_.highlightDisplay(this.invalidDisplayId_);
+      }
     } else {
+      if (this.allowDisplayIdentificationApi_) {
+        this.browserProxy_.highlightDisplay(id);
+      }
       // Make sure the dragged display is also selected.
-      if (id != this.selectedDisplay.id) {
+      if (id !== this.selectedDisplay.id) {
         this.fire('select-display', id);
       }
 
@@ -265,7 +337,30 @@ Polymer({
       if (this.displays.length >= 2) {
         newBounds = this.updateDisplayBounds(id, newBounds);
       }
+
+      if (this.allowDisplayAlignmentApi_) {
+        if (!this.lastDragCoordinates_) {
+          this.hasDragStarted_ = true;
+          this.lastDragCoordinates_ = {
+            x: calculatedBounds.left,
+            y: calculatedBounds.top
+          };
+        }
+
+        const deltaX = newBounds.left - this.lastDragCoordinates_.x;
+        const deltaY = newBounds.top - this.lastDragCoordinates_.y;
+
+        this.lastDragCoordinates_.x = newBounds.left;
+        this.lastDragCoordinates_.y = newBounds.top;
+
+        // Only call dragDisplayDelta() when there is a change in position.
+        if (deltaX !== 0 || deltaY !== 0) {
+          this.browserProxy_.dragDisplayDelta(
+              id, Math.round(deltaX), Math.round(deltaY));
+        }
+      }
     }
+
     const left =
         this.visualOffset_.left + Math.round(newBounds.left * this.visualScale);
     const top =
@@ -273,6 +368,7 @@ Polymer({
     const div = this.$$('#_' + id);
     div.style.left = '' + left + 'px';
     div.style.top = '' + top + 'px';
+    this.focusSelectedDisplay_();
   },
 
 });

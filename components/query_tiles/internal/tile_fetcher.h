@@ -19,11 +19,7 @@ namespace network {
 class SharedURLLoaderFactory;
 }  // namespace network
 
-namespace net {
-struct NetworkTrafficAnnotationTag;
-}  // namespace net
-
-namespace upboarding {
+namespace query_tiles {
 
 class TileFetcher {
  public:
@@ -33,25 +29,34 @@ class TileFetcher {
       TileInfoRequestStatus status,
       const std::unique_ptr<std::string> response_body)>;
 
-  // Method to create a fetcher and start the fetch task immediately.
-  static std::unique_ptr<TileFetcher> CreateAndFetchForTileInfo(
+  // Method to create a TileFetcher.
+  static std::unique_ptr<TileFetcher> Create(
       const GURL& url,
-      const std::string& locale,
+      const std::string& country_code,
       const std::string& accept_languages,
       const std::string& api_key,
-      const net::NetworkTrafficAnnotationTag& traffic_annotation,
-      const scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-      FinishedCallback callback);
+      const std::string& experiment_tag,
+      const std::string& client_version,
+      const scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
+
+  // For testing only.
+  static void SetOverrideURLForTesting(const GURL& url);
+
+  // Start the fetch to download tiles.
+  virtual void StartFetchForTiles(FinishedCallback callback) = 0;
 
   virtual ~TileFetcher();
 
   TileFetcher(const TileFetcher& other) = delete;
   TileFetcher& operator=(const TileFetcher& other) = delete;
 
+  // Sets the server URL.
+  virtual void SetServerUrl(const GURL& url) = 0;
+
  protected:
   TileFetcher();
 };
 
-}  // namespace upboarding
+}  // namespace query_tiles
 
 #endif  // COMPONENTS_QUERY_TILES_INTERNAL_TILE_FETCHER_H_

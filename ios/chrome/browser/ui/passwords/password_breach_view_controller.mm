@@ -20,6 +20,13 @@
 - (void)loadView {
   self.image = [UIImage imageNamed:@"password_breach_illustration"];
   self.helpButtonAvailable = YES;
+  self.helpButtonAccessibilityLabel =
+      l10n_util::GetNSString(IDS_IOS_HELP_ACCESSIBILITY_LABEL);
+
+  if (@available(iOS 13.4, *)) {
+      self.pointerInteractionEnabled = YES;
+  }
+
   [super loadView];
 }
 

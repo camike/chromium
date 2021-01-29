@@ -10,7 +10,6 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "chrome/browser/notifications/notifier_controller.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_icon.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
@@ -28,6 +27,10 @@ class ArcApplicationNotifierController : public NotifierController,
   explicit ArcApplicationNotifierController(
       NotifierController::Observer* observer);
 
+  ArcApplicationNotifierController(const ArcApplicationNotifierController&) =
+      delete;
+  ArcApplicationNotifierController& operator=(
+      const ArcApplicationNotifierController&) = delete;
   ~ArcApplicationNotifierController() override;
 
   // TODO(hirono): Rewrite the function with new API to fetch package list.
@@ -51,10 +54,7 @@ class ArcApplicationNotifierController : public NotifierController,
   std::vector<std::unique_ptr<ArcAppIcon>> icons_;
   std::map<std::string, std::string> package_to_app_ids_;
   Profile* last_profile_;
-  std::unique_ptr<KeyedServiceShutdownNotifier::Subscription>
-      shutdown_notifier_;
-
-  DISALLOW_COPY_AND_ASSIGN(ArcApplicationNotifierController);
+  base::CallbackListSubscription shutdown_subscription_;
 };
 
 }  // namespace arc

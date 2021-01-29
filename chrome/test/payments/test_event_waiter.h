@@ -23,9 +23,12 @@ enum class TestEvent : int32_t {
   kConnectionTerminated,
   kNotSupportedError,
   kAbortCalled,
-  kShowAppsReady,
+  // Received when the list of available apps is created and .show() is called.
+  // Note that this does not wait for the payment sheet UI to be actually shown.
+  kAppListReady,
   kPaymentCompleted,
   kMinimalUIReady,
+  kUIDisplayed,
 };
 
 std::ostream& operator<<(std::ostream& out, TestEvent event);

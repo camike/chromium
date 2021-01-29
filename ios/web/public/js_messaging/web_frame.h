@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/supports_user_data.h"
 #include "base/time/time.h"
@@ -17,6 +18,9 @@ class Value;
 }
 
 namespace web {
+
+// Default timeout in milliseconds for |CallJavaScriptFunction|.
+extern const double kJavaScriptFunctionCallDefaultTimeout;
 
 class WebFrame : public base::SupportsUserData {
  public:

@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/stl_util.h"
+#include "base/containers/contains.h"
 #include "net/cookies/cookie_util.h"
 
 namespace storage {
@@ -27,7 +27,7 @@ bool MockSpecialStoragePolicy::IsStorageSessionOnly(const GURL& origin) {
   return base::Contains(session_only_, origin);
 }
 
-network::SessionCleanupCookieStore::DeleteCookiePredicate
+network::DeleteCookiePredicate
 MockSpecialStoragePolicy::CreateDeleteCookieOnExitPredicate() {
   return base::BindRepeating(
       &MockSpecialStoragePolicy::ShouldDeleteCookieOnExit,

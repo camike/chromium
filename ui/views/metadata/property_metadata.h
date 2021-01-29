@@ -7,11 +7,14 @@
 
 #include <string>
 #include <type_traits>
+#include <utility>
 
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "ui/views/metadata/metadata_cache.h"
+#include "ui/views/metadata/metadata_types.h"
 #include "ui/views/metadata/type_conversion.h"
+#include "ui/views/view.h"
 #include "ui/views/views_export.h"
 
 namespace views {
@@ -24,22 +27,32 @@ namespace metadata {
 template <typename TClass,
           typename TValue,
           typename TRet,
-          TRet (TClass::*Get)() const>
+          TRet (TClass::*Get)() const,
+          typename TConverter = TypeConverter<TValue>>
 class ClassPropertyReadOnlyMetaData : public MemberMetaDataBase {
  public:
+  using MemberMetaDataBase::MemberMetaDataBase;
   ClassPropertyReadOnlyMetaData() = default;
+  ClassPropertyReadOnlyMetaData(const ClassPropertyReadOnlyMetaData&) = delete;
+  ClassPropertyReadOnlyMetaData& operator=(
+      const ClassPropertyReadOnlyMetaData&) = delete;
   ~ClassPropertyReadOnlyMetaData() override = default;
 
-  base::string16 GetValueAsString(void* obj) const override {
-    return TypeConverter<TValue>::ToString((static_cast<TClass*>(obj)->*Get)());
+  base::string16 GetValueAsString(View* obj) const override {
+    if (!kTypeIsSerializable && !kTypeIsReadOnly)
+      return base::string16();
+    return TConverter::ToString((static_cast<TClass*>(obj)->*Get)());
   }
 
   PropertyFlags GetPropertyFlags() const override {
-    return PropertyFlags::kReadOnly;
+    return kTypeIsSerializable
+               ? (PropertyFlags::kReadOnly | PropertyFlags::kSerializable)
+               : PropertyFlags::kReadOnly;
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ClassPropertyReadOnlyMetaData);
+  static constexpr bool kTypeIsSerializable = TConverter::is_serializable;
+  static constexpr bool kTypeIsReadOnly = TConverter::is_read_only;
 };
 
 // Represents meta data for a specific property member of class |TClass|, with
@@ -49,27 +62,50 @@ class ClassPropertyReadOnlyMetaData : public MemberMetaDataBase {
 // (so it will trigger things like property changed notifications).
 template <typename TClass,
           typename TValue,
-          void (TClass::*Set)(ArgType<TValue>),
+          typename TSig,
+          TSig Set,
           typename TRet,
-          TRet (TClass::*Get)() const>
-class ClassPropertyMetaData
-    : public ClassPropertyReadOnlyMetaData<TClass, TValue, TRet, Get> {
+          TRet (TClass::*Get)() const,
+          typename TConverter = TypeConverter<TValue>>
+class ClassPropertyMetaData : public ClassPropertyReadOnlyMetaData<TClass,
+                                                                   TValue,
+                                                                   TRet,
+                                                                   Get,
+                                                                   TConverter> {
  public:
+  using ClassPropertyReadOnlyMetaData<TClass, TValue, TRet, Get>::
+      ClassPropertyReadOnlyMetaData;
   ClassPropertyMetaData() = default;
+  ClassPropertyMetaData(const ClassPropertyMetaData&) = delete;
+  ClassPropertyMetaData& operator=(const ClassPropertyMetaData&) = delete;
   ~ClassPropertyMetaData() override = default;
 
-  void SetValueAsString(void* obj, const base::string16& new_value) override {
-    if (base::Optional<TValue> result =
-            TypeConverter<TValue>::FromString(new_value))
-      (static_cast<TClass*>(obj)->*Set)(result.value());
+  void SetValueAsString(View* obj, const base::string16& new_value) override {
+    if (!kTypeIsSerializable || kTypeIsReadOnly)
+      return;
+    if (base::Optional<TValue> result = TConverter::FromString(new_value)) {
+      (static_cast<TClass*>(obj)->*Set)(std::move(result.value()));
+    }
+  }
+
+  MemberMetaDataBase::ValueStrings GetValidValues() const override {
+    if (!kTypeIsSerializable)
+      return {};
+    return TConverter::GetValidStrings();
   }
 
   PropertyFlags GetPropertyFlags() const override {
-    return PropertyFlags::kEmpty;
+    PropertyFlags flags = PropertyFlags::kEmpty;
+    if (kTypeIsSerializable)
+      flags = flags | PropertyFlags::kSerializable;
+    if (kTypeIsReadOnly)
+      flags = flags | PropertyFlags::kReadOnly;
+    return flags;
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(ClassPropertyMetaData);
+  static constexpr bool kTypeIsSerializable = TConverter::is_serializable;
+  static constexpr bool kTypeIsReadOnly = TConverter::is_read_only;
 };
 
 }  // namespace metadata

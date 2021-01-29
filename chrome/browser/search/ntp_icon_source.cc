@@ -22,7 +22,7 @@
 #include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/image_fetcher/image_decoder_impl.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/search/instant_io_context.h"
+#include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/suggestions/suggestions_service_factory.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/webui_url_constants.h"
@@ -93,7 +93,7 @@ struct ParsedNtpIconPath {
   GURL url;
 
   // The requested color of the icon in 8-digit Hex format (e.g., #757575FF).
-  std::string color_rgba = "";
+  std::string color_rgba;
 
   // The size of the requested icon in dip.
   int size_in_dip = 0;
@@ -164,7 +164,7 @@ const ParsedNtpIconPath ParseNtpIconPath(const std::string& path) {
 void DrawFavicon(const SkBitmap& bitmap, gfx::Canvas* canvas, int size) {
   int x_origin = (size - bitmap.width()) / 2;
   int y_origin = (size - bitmap.height()) / 2;
-  canvas->DrawImageInt(gfx::ImageSkia(gfx::ImageSkiaRep(bitmap, /*scale=*/1.0)),
+  canvas->DrawImageInt(gfx::ImageSkia::CreateFromBitmap(bitmap, /*scale=*/1.f),
                        x_origin, y_origin);
 }
 
@@ -278,13 +278,13 @@ std::string NtpIconSource::GetMimeType(const std::string&) {
 
 bool NtpIconSource::ShouldServiceRequest(
     const GURL& url,
-    content::ResourceContext* resource_context,
+    content::BrowserContext* browser_context,
     int render_process_id) {
   if (url.SchemeIs(chrome::kChromeSearchScheme)) {
-    return InstantIOContext::ShouldServiceRequest(url, resource_context,
-                                                  render_process_id);
+    return InstantService::ShouldServiceRequest(url, browser_context,
+                                                render_process_id);
   }
-  return URLDataSource::ShouldServiceRequest(url, resource_context,
+  return URLDataSource::ShouldServiceRequest(url, browser_context,
                                              render_process_id);
 }
 

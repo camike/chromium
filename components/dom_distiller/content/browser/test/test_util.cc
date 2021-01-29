@@ -44,6 +44,7 @@ void SetUpTestServerWithoutStarting(EmbeddedTestServer* server) {
       root_dir.AppendASCII("components/dom_distiller/core/javascript"));
   server->ServeFilesFromDirectory(
       root_dir.AppendASCII("components/test/data/dom_distiller"));
+  server->ServeFilesFromDirectory(root_dir.AppendASCII("third_party/chaijs"));
   server->ServeFilesFromDirectory(root_dir.AppendASCII("third_party/mocha"));
 }
 
@@ -60,6 +61,9 @@ FakeDistilledPage::FakeDistilledPage(EmbeddedTestServer* server)
   // DomDistillerRequestViewBase::SendCommonJavaScript(); however, this method
   // is impractical to use in testing.
   AppendScriptFile("dom_distiller_viewer.js");
+
+  // Also load test helper scripts.
+  AppendScriptFile("chai.js");
   AppendScriptFile("mocha.js");
   AppendScriptFile("test_util.js");
 }
@@ -82,8 +86,8 @@ void FakeDistilledPage::Load(EmbeddedTestServer* server,
 }
 
 std::string FakeDistilledPage::GetPageHtmlWithScripts() {
-  std::string html = GetArticleTemplateHtml(mojom::Theme::kLight,
-                                            mojom::FontFamily::kSansSerif);
+  std::string html = GetArticleTemplateHtml(
+      mojom::Theme::kLight, mojom::FontFamily::kSansSerif, std::string());
   for (const std::string& file : scripts_) {
     StrAppend(&html, {JsReplace("<script src=$1></script>", file)});
   }

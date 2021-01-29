@@ -27,7 +27,7 @@
 #include "ui/views/controls/menu/menu_delegate.h"
 #include "ui/views/widget/widget_observer.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
 #include "ui/views/controls/menu/menu_closure_animation_mac.h"
 #include "ui/views/controls/menu/menu_cocoa_watcher_mac.h"
 #endif
@@ -125,7 +125,15 @@ class VIEWS_EXPORT MenuController
   // WARNING: this may be NULL.
   Widget* owner() { return owner_; }
 
-  // Get the anchor position which is used to show this menu.
+  // Gets the most-current selected menu item, if any, including if the
+  // selection has not been committed yet.
+  views::MenuItemView* GetSelectedMenuItem() { return pending_state_.item; }
+
+  // Selects a menu-item and opens its sub-menu (if one exists) if not already
+  // so. Clears any selections within the submenu if it is already open.
+  void SelectItemAndOpenSubmenu(MenuItemView* item);
+
+  // Gets the anchor position which is used to show this menu.
   MenuAnchorPosition GetAnchorPosition() { return state_.anchor; }
 
   // Cancels the current Run. See ExitType for a description of what happens
@@ -305,24 +313,26 @@ class VIEWS_EXPORT MenuController
   // Used by GetMenuPart to indicate the menu part at a particular location.
   struct MenuPart {
     // Type of part.
-    enum Type { NONE, MENU_ITEM, SCROLL_UP, SCROLL_DOWN };
+    enum class Type { kNone, kMenuItem, kScrollUp, kScrollDown };
 
-    // Convenience for testing type == SCROLL_DOWN or type == SCROLL_UP.
-    bool is_scroll() const { return type == SCROLL_DOWN || type == SCROLL_UP; }
+    // Convenience for testing type == kScrollDown or type == kScrollUp.
+    bool is_scroll() const {
+      return type == Type::kScrollDown || type == Type::kScrollUp;
+    }
 
     // Type of part.
-    Type type = NONE;
+    Type type = Type::kNone;
 
-    // If type is MENU_ITEM, this is the menu item the mouse is over, otherwise
-    // this is NULL.
-    // NOTE: if type is MENU_ITEM and the mouse is not over a valid menu item
+    // If type is kMenuItem, this is the menu item the mouse is over, otherwise
+    // this is null.
+    // NOTE: if type is kMenuItem and the mouse is not over a valid menu item
     //       but is over a menu (for example, the mouse is over a separator or
-    //       empty menu), this is NULL and parent is the menu the mouse was
+    //       empty menu), this is null and parent is the menu the mouse was
     //       clicked on.
     MenuItemView* menu = nullptr;
 
-    // If type is MENU_ITEM but the mouse is not over a menu item this is the
-    // parent of the menu item the user clicked on. Otherwise this is NULL.
+    // If type is kMenuItem but the mouse is not over a menu item this is the
+    // parent of the menu item the user clicked on. Otherwise this is null.
     MenuItemView* parent = nullptr;
 
     // This is the submenu the mouse is over.
@@ -345,9 +355,8 @@ class VIEWS_EXPORT MenuController
                                  const ui::LocatedEvent* event);
   void StartDrag(SubmenuView* source, const gfx::Point& location);
 
-  // Handles |key_code| as a keypress. Returns true if OnKeyPressed handled the
-  // key code.
-  bool OnKeyPressed(ui::KeyboardCode key_code);
+  // Returns true if OnKeyPressed handled the key |event|.
+  bool OnKeyPressed(const ui::KeyEvent& event);
 
   // Creates a MenuController. See |for_drop_| member for details on |for_drop|.
   MenuController(bool for_drop, internal::MenuControllerDelegate* delegate);
@@ -355,8 +364,9 @@ class VIEWS_EXPORT MenuController
   ~MenuController() override;
 
   // Invokes AcceleratorPressed() on the hot tracked view if there is one.
-  // Returns true if AcceleratorPressed() was invoked.
-  bool SendAcceleratorToHotTrackedView();
+  // Returns true if AcceleratorPressed() was invoked. |event_flags| is the
+  // flags of the received key event.
+  bool SendAcceleratorToHotTrackedView(int event_flags);
 
   void UpdateInitialLocation(const gfx::Rect& bounds,
                              MenuAnchorPosition position,
@@ -604,7 +614,7 @@ class VIEWS_EXPORT MenuController
                              SelectionIncrementDirectionType direction);
 
   // Updates the current |hot_button_| and its hot tracked state.
-  void SetHotTrackedButton(Button* hot_button);
+  void SetHotTrackedButton(Button* new_hot_button);
 
   // Returns whether typing a new character will continue the existing prefix
   // selection. If this returns false, typing a new character will start a new
@@ -760,7 +770,7 @@ class VIEWS_EXPORT MenuController
   // A mask of the EventFlags for the mouse buttons currently pressed.
   int current_mouse_pressed_state_ = 0;
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
   std::unique_ptr<MenuClosureAnimationMac> menu_closure_animation_;
   std::unique_ptr<MenuCocoaWatcherMac> menu_cocoa_watcher_;
 #endif

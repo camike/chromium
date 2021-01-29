@@ -11,6 +11,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/stringprintf.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/values.h"
 #include "components/sync/base/model_type.h"
 #include "net/http/http_status_code.h"
@@ -18,6 +19,8 @@
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
 
 using net::HttpRequestHeaders;
+
+namespace invalidation {
 
 namespace {
 
@@ -53,25 +56,24 @@ enum class SubscriptionStatus {
   kMaxValue = kFailure,
 };
 
-void RecordRequestStatus(
-    SubscriptionStatus status,
-    syncer::PerUserTopicSubscriptionRequest::RequestType type,
-    const std::string& topic,
-    int net_error = net::OK,
-    int response_code = 200) {
+void RecordRequestStatus(SubscriptionStatus status,
+                         PerUserTopicSubscriptionRequest::RequestType type,
+                         const std::string& topic,
+                         int net_error = net::OK,
+                         int response_code = 200) {
   switch (type) {
-    case syncer::PerUserTopicSubscriptionRequest::SUBSCRIBE: {
+    case PerUserTopicSubscriptionRequest::SUBSCRIBE: {
       base::UmaHistogramEnumeration(
           "FCMInvalidations.SubscriptionRequestStatus", status);
       break;
     }
-    case syncer::PerUserTopicSubscriptionRequest::UNSUBSCRIBE: {
+    case PerUserTopicSubscriptionRequest::UNSUBSCRIBE: {
       base::UmaHistogramEnumeration(
           "FCMInvalidations.UnsubscriptionRequestStatus", status);
       break;
     }
   }
-  if (type != syncer::PerUserTopicSubscriptionRequest::SUBSCRIBE) {
+  if (type != PerUserTopicSubscriptionRequest::SUBSCRIBE) {
     return;
   }
 
@@ -101,9 +103,7 @@ void RecordRequestStatus(
 
 }  // namespace
 
-namespace syncer {
-
-PerUserTopicSubscriptionRequest::PerUserTopicSubscriptionRequest() {}
+PerUserTopicSubscriptionRequest::PerUserTopicSubscriptionRequest() = default;
 
 PerUserTopicSubscriptionRequest::~PerUserTopicSubscriptionRequest() = default;
 
@@ -113,10 +113,26 @@ void PerUserTopicSubscriptionRequest::Start(
   DCHECK(request_completed_callback_.is_null()) << "Request already running!";
   request_completed_callback_ = std::move(callback);
 
-  simple_loader_->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
-      loader_factory,
-      base::BindOnce(&PerUserTopicSubscriptionRequest::OnURLFetchComplete,
-                     weak_ptr_factory_.GetWeakPtr()));
+  if (type_ == UNSUBSCRIBE &&
+      base::FeatureList::IsEnabled(kInvalidationsSkipUnsubscription)) {
+    // If the kInvalidationsSkipUnsubscription feature is enabled, don't send an
+    // actual unsubscription request and instead just report failure. Net error
+    // 499 is somewhat arbitrarily chosen (it's a non-standard code for "client
+    // closed request" which vaguely makes sense in this context); the important
+    // part is that it'll be reported as a non-retryable failure.
+    base::SequencedTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::BindOnce(
+            &PerUserTopicSubscriptionRequest::OnURLFetchCompleteInternal,
+            weak_ptr_factory_.GetWeakPtr(),
+            /*net_error=*/net::ERR_HTTP_RESPONSE_CODE_FAILURE,
+            /*response_code=*/499, /*response_body=*/nullptr));
+  } else {
+    simple_loader_->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
+        loader_factory,
+        base::BindOnce(&PerUserTopicSubscriptionRequest::OnURLFetchComplete,
+                       weak_ptr_factory_.GetWeakPtr()));
+  }
 }
 
 void PerUserTopicSubscriptionRequest::OnURLFetchComplete(
@@ -221,8 +237,6 @@ void PerUserTopicSubscriptionRequest::RunCompletedCallbackAndMaybeDie(
 }
 
 PerUserTopicSubscriptionRequest::Builder::Builder() = default;
-PerUserTopicSubscriptionRequest::Builder::Builder(
-    PerUserTopicSubscriptionRequest::Builder&&) = default;
 PerUserTopicSubscriptionRequest::Builder::~Builder() = default;
 
 std::unique_ptr<PerUserTopicSubscriptionRequest>
@@ -394,4 +408,4 @@ PerUserTopicSubscriptionRequest::Builder::BuildURLFetcher(
   return url_loader;
 }
 
-}  // namespace syncer
+}  // namespace invalidation

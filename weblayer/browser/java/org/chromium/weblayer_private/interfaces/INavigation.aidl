@@ -23,4 +23,22 @@ interface INavigation {
   int getLoadError() = 6;
 
   void setRequestHeader(in String name, in String value) = 7;
+
+  void setUserAgentString(in String value) = 8;
+
+  boolean isDownload() = 9;
+
+  boolean wasStopCalled() = 10;
+
+  boolean isPageInitiated() = 11;
+  boolean isReload() = 12;
+
+  // @since 89
+  boolean wasIntentLaunched() = 13;
+  boolean isUserDecidingIntentLaunch() = 14;
+  boolean isKnownProtocol() = 15;
+  boolean isServedFromBackForwardCache() = 16;
+
+  // @since 88
+  void disableNetworkErrorAutoReload() = 17;
 }

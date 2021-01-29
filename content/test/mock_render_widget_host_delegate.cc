@@ -69,12 +69,16 @@ TextInputManager* MockRenderWidgetHostDelegate::GetTextInputManager() {
   return &text_input_manager_;
 }
 
-bool MockRenderWidgetHostDelegate::IsFullscreenForCurrentTab() {
+bool MockRenderWidgetHostDelegate::IsFullscreen() {
   return is_fullscreen_;
 }
 
 RenderViewHostDelegateView* MockRenderWidgetHostDelegate::GetDelegateView() {
   return &rvh_delegate_view_;
+}
+
+bool MockRenderWidgetHostDelegate::ShouldIgnoreInputEvents() {
+  return should_ignore_input_events_;
 }
 
 }  // namespace content

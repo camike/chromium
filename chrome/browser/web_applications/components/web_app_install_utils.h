@@ -11,7 +11,6 @@
 
 #include "url/gurl.h"
 
-enum class WebappInstallSource;
 struct WebApplicationInfo;
 class SkBitmap;
 
@@ -21,6 +20,10 @@ struct Manifest;
 
 namespace content {
 class WebContents;
+}
+
+namespace webapps {
+enum class WebappInstallSource;
 }
 
 namespace web_app {
@@ -47,16 +50,13 @@ std::vector<GURL> GetValidIconUrlsToDownload(
 // A map of icon urls to the bitmaps provided by that url.
 using IconsMap = std::map<GURL, std::vector<SkBitmap>>;
 
-// Filter out square icons, ensure that the necessary-sized icons are available
-// by resizing larger icons down to smaller sizes, and generating icons for
-// sizes where resizing is not possible. |icons_map| is optional.
-//
-// Historically, |is_for_sync| is a hack for the old |ExtensionSyncService|
-// system to avoid sync wars. It is important that the linked app information in
-// any web app that gets created from sync matches the linked app information
-// that came from sync. If there are any changes, they will be synced back to
-// other devices and could potentially create a never ending sync cycle. If
-// |is_for_sync| is true then icon links won't be changed.
+// Populate shortcut item icon maps in WebApplicationInfo using the IconsMap.
+void PopulateShortcutItemIcons(WebApplicationInfo* web_app_info,
+                               const IconsMap* icons_map);
+
+// Filter to only square icons, ensure that the necessary-sized icons are
+// available by resizing larger icons down to smaller sizes, and generating
+// icons for sizes where resizing is not possible. |icons_map| is optional.
 void FilterAndResizeIconsGenerateMissing(WebApplicationInfo* web_app_info,
                                          const IconsMap* icons_map);
 
@@ -64,12 +64,8 @@ void FilterAndResizeIconsGenerateMissing(WebApplicationInfo* web_app_info,
 // shown for this app.
 void RecordAppBanner(content::WebContents* contents, const GURL& app_url);
 
-WebappInstallSource ConvertExternalInstallSourceToInstallSource(
+webapps::WebappInstallSource ConvertExternalInstallSourceToInstallSource(
     ExternalInstallSource external_install_source);
-
-void RecordExternalAppInstallResultCode(
-    const char* histogram_name,
-    std::map<GURL, InstallResultCode> install_results);
 
 }  // namespace web_app
 

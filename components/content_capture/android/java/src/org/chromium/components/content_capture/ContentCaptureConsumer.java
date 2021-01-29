@@ -19,17 +19,18 @@ public abstract class ContentCaptureConsumer {
     /**
      * Invoked when the content is captured from a frame.
      * @param parentFrame is the parent of the frame from that the content captured.
-     * @param contentCaptureData is the captured content tree, its root is the frame.
+     * @param contentCaptureFrame is the captured content tree, its root is the frame.
      */
     public abstract void onContentCaptured(
-            FrameSession parentFrame, ContentCaptureData contentCaptureData);
+            FrameSession parentFrame, ContentCaptureFrame contentCaptureFrame);
 
     /**
      * Invoked when the content is updated in a frame.
      * @param parentFrame is the parent of the frame from that the content captured.
-     * @param contentCaptureData is the captured content tree, its root is the frame.
+     * @param contentCaptureFrame is the captured content tree, its root is the frame.
      */
-    public void onContentUpdated(FrameSession parentFrame, ContentCaptureData contentCaptureData) {}
+    public void onContentUpdated(
+            FrameSession parentFrame, ContentCaptureFrame contentCaptureFrame) {}
 
     /**
      * Invoked when the session is removed
@@ -50,9 +51,13 @@ public abstract class ContentCaptureConsumer {
         // of the removal of session.
         if (current != null) {
             mManager = ContentCaptureReceiverManager.createOrGet(current);
-            mManager.setContentCaptureConsumer(this);
+            mManager.addContentCaptureConsumer(this);
         } else {
             mManager = null;
         }
+    }
+
+    protected boolean shouldCapture(String[] urls) {
+        return true;
     }
 }

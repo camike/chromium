@@ -31,6 +31,10 @@ Node* LayoutShiftAttribution::node() const {
   return Performance::CanExposeNode(node_) ? node_ : nullptr;
 }
 
+Node* LayoutShiftAttribution::rawNodeForInspector() const {
+  return node_;
+}
+
 DOMRectReadOnly* LayoutShiftAttribution::previousRect() const {
   return previous_rect_;
 }
@@ -48,7 +52,7 @@ ScriptValue LayoutShiftAttribution::toJSONForBinding(
   return builder.GetScriptValue();
 }
 
-void LayoutShiftAttribution::Trace(Visitor* visitor) {
+void LayoutShiftAttribution::Trace(Visitor* visitor) const {
   visitor->Trace(node_);
   visitor->Trace(previous_rect_);
   visitor->Trace(current_rect_);

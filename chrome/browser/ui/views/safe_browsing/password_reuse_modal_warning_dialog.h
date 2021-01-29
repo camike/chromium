@@ -42,11 +42,9 @@ class PasswordReuseModalWarningDialog
 
   // views::DialogDelegateView:
   gfx::Size CalculatePreferredSize() const override;
-  ui::ModalType GetModalType() const override;
   base::string16 GetWindowTitle() const override;
   bool ShouldShowCloseButton() const override;
   gfx::ImageSkia GetWindowIcon() override;
-  bool ShouldShowWindowIcon() const override;
 
   // ChromePasswordProtectionService::Observer:
   void OnGaiaPasswordChanged() override;

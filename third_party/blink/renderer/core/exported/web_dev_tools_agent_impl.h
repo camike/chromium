@@ -69,7 +69,7 @@ class CORE_EXPORT WebDevToolsAgentImpl final
 
   WebDevToolsAgentImpl(WebLocalFrameImpl*, bool include_view_agents);
   ~WebDevToolsAgentImpl() override;
-  virtual void Trace(Visitor*);
+  virtual void Trace(Visitor*) const;
   DevToolsAgent* GetDevToolsAgent() const { return agent_.Get(); }
 
   void WillBeDestroyed();
@@ -81,6 +81,8 @@ class CORE_EXPORT WebDevToolsAgentImpl final
 
   WebInputEventResult HandleInputEvent(const WebInputEvent&);
   void DispatchBufferedTouchEvents();
+  void PageScrollStarted();
+  void PageScrollEnded();
   void BindReceiver(
       mojo::PendingAssociatedRemote<mojom::blink::DevToolsAgentHost>,
       mojo::PendingAssociatedReceiver<mojom::blink::DevToolsAgent>);

@@ -33,6 +33,7 @@
 // <include src="../../../image_loader/load_image_request.js">
 // <include src="../../../image_loader/image_loader_client.js">
 //
+// <include src="../../../../webui/resources/js/assert.js">
 // <include src="../../../../webui/resources/js/load_time_data.js">
 // <include src="../../../../webui/resources/js/action_link.js">
 // <include src="../../../../webui/resources/js/cr.js">
@@ -86,10 +87,13 @@
 // <include src="../../common/js/util.js">
 // <include src="../../common/js/progress_center_common.js">
 // <include src="../../common/js/importer_common.js">
+// <include src="../../common/js/trash.js">
 //
 // <include src="constants.js">
+// <include src="crossover_search_utils.js">
 // <include src="web_store_utils.js">
 // <include src="ui/multi_menu.js">
+// <include src="ui/multi_menu_button.js">
 // <include src="ui/combobutton.js">
 // <include src="ui/commandbutton.js">
 // <include src="ui/file_manager_dialog_base.js">
@@ -107,11 +111,13 @@
 // <include src="android_app_list_model.js">
 // <include src="app_state_controller.js">
 // <include src="column_visibility_controller.js">
+// <include src="crostini_controller.js">
 // <include src="dialog_action_controller.js">
 // <include src="dialog_type.js">
 // <include src="directory_contents.js">
 // <include src="directory_model.js">
 // <include src="directory_tree_naming_controller.js">
+// <include src="drive_dialog_controller.js">
 // <include src="drop_effect_and_label.js">
 // <include src="empty_folder_controller.js">
 // <include src="file_manager.js">
@@ -120,10 +126,12 @@
 // <include src="file_selection.js">
 // <include src="file_tasks.js">
 // <include src="file_transfer_controller.js">
+// <include src="file_type_filters_controller.js">
 // <include src="file_watcher.js">
 // <include src="folder_shortcuts_data_model.js">
 // <include src="sort_menu_controller.js">
 // <include src="gear_menu_controller.js">
+// <include src="holding_space_util.js">
 // <include src="import_controller.js">
 // <include src="last_modified_controller.js">
 // <include src="launch_param.js">
@@ -140,7 +148,7 @@
 // <include src="naming_controller.js">
 // <include src="navigation_list_model.js">
 // <include src="navigation_uma.js">
-// <include src="progress_center_item_group.js">
+// <include src="path_component.js">
 // <include src="quick_view_controller.js">
 // <include src="quick_view_model.js">
 // <include src="quick_view_uma.js">
@@ -194,4 +202,6 @@ window.fileManager = fileManager;
 
 // Exports
 window.util = util;
+// TODO(crbug.com/1115792) remove this export.
+window.AsyncUtil = AsyncUtil;
 })();

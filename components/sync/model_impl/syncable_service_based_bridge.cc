@@ -8,8 +8,9 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
+#include "base/logging.h"
 #include "base/trace_event/memory_usage_estimator.h"
 #include "components/sync/base/client_tag_hash.h"
 #include "components/sync/model/conflict_resolution.h"
@@ -23,9 +24,6 @@
 
 namespace syncer {
 namespace {
-
-// Same as kInvalidId in syncable/base_node.h.
-constexpr int64_t kInvalidNodeId = 0;
 
 std::unique_ptr<EntityData> ConvertPersistedToEntityData(
     const ClientTagHash& client_tag_hash,
@@ -44,7 +42,7 @@ std::unique_ptr<EntityData> ConvertPersistedToEntityData(
   return entity_data;
 }
 
-sync_pb::PersistedEntityData CreatePersistedFromEntityData(
+sync_pb::PersistedEntityData CreatePersistedFromRemoteData(
     const EntityData& entity_data) {
   sync_pb::PersistedEntityData persisted;
   persisted.set_name(entity_data.name);
@@ -52,9 +50,12 @@ sync_pb::PersistedEntityData CreatePersistedFromEntityData(
   return persisted;
 }
 
-sync_pb::PersistedEntityData CreatePersistedFromSyncData(
-    const SyncDataLocal& sync_data) {
+sync_pb::PersistedEntityData CreatePersistedFromLocalData(
+    const SyncData& sync_data) {
+  DCHECK(sync_data.IsLocal());
+  DCHECK(sync_data.IsValid());
   DCHECK(!sync_data.GetTitle().empty());
+
   sync_pb::PersistedEntityData persisted;
   persisted.set_name(sync_data.GetTitle());
   *persisted.mutable_specifics() = sync_data.GetSpecifics();
@@ -72,7 +73,7 @@ SyncChange::SyncChangeType ConvertToSyncChangeType(
       return SyncChange::ACTION_UPDATE;
   }
   NOTREACHED();
-  return SyncChange::ACTION_INVALID;
+  return SyncChange::ACTION_UPDATE;
 }
 
 // Parses the content of |record_list| into |*in_memory_store|. The output
@@ -135,28 +136,22 @@ class LocalChangeProcessor : public SyncChangeProcessor {
 
     for (const SyncChange& change : change_list) {
       switch (change.change_type()) {
-        case SyncChange::ACTION_INVALID:
-          NOTREACHED() << " from " << change.location().ToString();
-          break;
-
         case SyncChange::ACTION_ADD:
         case SyncChange::ACTION_UPDATE: {
           DCHECK_EQ(type_, change.sync_data().GetDataType());
           DCHECK(change.sync_data().IsLocal())
               << " from " << change.location().ToString();
-
-          SyncDataLocal sync_data(change.sync_data());
-          DCHECK(sync_data.IsValid())
+          DCHECK(change.sync_data().IsValid())
               << " from " << change.location().ToString();
 
           const ClientTagHash client_tag_hash =
-              ClientTagHash::FromUnhashed(type_, sync_data.GetTag());
+              change.sync_data().GetClientTagHash();
           const std::string storage_key = client_tag_hash.value();
           DCHECK(!storage_key.empty());
 
-          (*in_memory_store_)[storage_key] = sync_data.GetSpecifics();
+          (*in_memory_store_)[storage_key] = change.sync_data().GetSpecifics();
           sync_pb::PersistedEntityData persisted_entity =
-              CreatePersistedFromSyncData(sync_data);
+              CreatePersistedFromLocalData(change.sync_data());
           batch->WriteData(storage_key, persisted_entity.SerializeAsString());
 
           other_->Put(storage_key,
@@ -168,19 +163,8 @@ class LocalChangeProcessor : public SyncChangeProcessor {
         }
 
         case SyncChange::ACTION_DELETE: {
-          std::string storage_key;
-          // Both SyncDataLocal and SyncDataRemote are allowed for deletions.
-          if (change.sync_data().IsLocal()) {
-            SyncDataLocal sync_data(change.sync_data());
-            DCHECK(sync_data.IsValid())
-                << " from " << change.location().ToString();
-            storage_key =
-                ClientTagHash::FromUnhashed(type_, sync_data.GetTag()).value();
-          } else {
-            SyncDataRemote sync_data(change.sync_data());
-            storage_key = sync_data.GetClientTagHash().value();
-          }
-
+          const std::string storage_key =
+              change.sync_data().GetClientTagHash().value();
           DCHECK(!storage_key.empty())
               << " from " << change.location().ToString();
 
@@ -214,29 +198,6 @@ class LocalChangeProcessor : public SyncChangeProcessor {
     // datatypes (that are integrated with this bridge).
     NOTREACHED();
     return SyncDataList();
-  }
-
-  SyncError UpdateDataTypeContext(ModelType type,
-                                  ContextRefreshStatus refresh_status,
-                                  const std::string& context) override {
-    // This function is not supported and not exercised by anyone, since
-    // the USS flow doesn't use it.
-    // TODO(crbug.com/870624): Remove this function altogether when the
-    // directory codebase is removed.
-    NOTREACHED();
-    return SyncError();
-  }
-
-  void AddLocalChangeObserver(LocalChangeObserver* observer) override {
-    // This function is not supported and not exercised by the relevant
-    // datatypes (that are integrated with this bridge).
-    NOTREACHED();
-  }
-
-  void RemoveLocalChangeObserver(LocalChangeObserver* observer) override {
-    // This function is not supported and not exercised by the relevant
-    // datatypes (that are integrated with this bridge).
-    NOTREACHED();
   }
 
  private:
@@ -530,9 +491,9 @@ base::Optional<ModelError> SyncableServiceBasedBridge::StartSyncableService() {
   initial_sync_data.reserve(in_memory_store_.size());
   for (const std::pair<const std::string, sync_pb::EntitySpecifics>& record :
        in_memory_store_) {
+    // Note that client tag hash is used as storage key too.
     initial_sync_data.push_back(SyncData::CreateRemoteData(
-        /*id=*/kInvalidNodeId, std::move(record.second),
-        /*client_tag_hash=*/record.first));
+        std::move(record.second), ClientTagHash::FromHashed(record.first)));
   }
 
   auto error_callback =
@@ -573,9 +534,8 @@ SyncChangeList SyncableServiceBasedBridge::StoreAndConvertRemoteChanges(
                  << ": Processing deletion with storage key: " << storage_key;
         output_sync_change_list.emplace_back(
             FROM_HERE, SyncChange::ACTION_DELETE,
-            SyncData::CreateRemoteData(
-                /*id=*/kInvalidNodeId, in_memory_store_[storage_key],
-                /*client_tag_hash=*/""));
+            SyncData::CreateRemoteData(in_memory_store_[storage_key],
+                                       ClientTagHash::FromHashed(storage_key)));
 
         // For tombstones, there is no actual data, which means no client tag
         // hash either, but the processor provides the storage key.
@@ -601,13 +561,12 @@ SyncChangeList SyncableServiceBasedBridge::StoreAndConvertRemoteChanges(
 
         output_sync_change_list.emplace_back(
             FROM_HERE, ConvertToSyncChangeType(change->type()),
-            SyncData::CreateRemoteData(
-                /*id=*/kInvalidNodeId, change->data().specifics,
-                change->data().client_tag_hash.value()));
+            SyncData::CreateRemoteData(change->data().specifics,
+                                       change->data().client_tag_hash));
 
         batch->WriteData(
             storage_key,
-            CreatePersistedFromEntityData(change->data()).SerializeAsString());
+            CreatePersistedFromRemoteData(change->data()).SerializeAsString());
         in_memory_store_[storage_key] = change->data().specifics;
         break;
       }

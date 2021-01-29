@@ -59,7 +59,7 @@
       // type of sort asc/desc will happen.
       chrome.test.assertTrue('aria-describedby' in header.attributes);
       // role button is used so users know that it's clickable.
-      chrome.test.assertEq('button', header.attributes.role);
+      chrome.test.assertEq('button', header.attributes['role']);
     }
   };
 
@@ -149,8 +149,8 @@
    *
    * @param {string} appId
    * @param {number} expectedCount
-   * @param {?string} expectedMessage
-   * @return {string} Latest a11y message.
+   * @param {?string=} expectedMessage
+   * @return {!Promise<string>} Latest a11y message.
    */
   async function countAndCheckLatestA11yMessage(
       appId, expectedCount, expectedMessage) {
@@ -318,8 +318,6 @@
 
     // Delete item and confirm delete.
     await remoteCall.waitAndClickElement(appId, '#delete-button');
-    await remoteCall.waitAndClickElement(
-        appId, '.files-confirm-dialog .cr-dialog-ok');
 
     // Wait for completion of file deletion.
     await remoteCall.waitForElementLost(
@@ -342,8 +340,6 @@
     await remoteCall.waitAndClickElement(
         appId, '#file-list [file-name="photos"]');
     await remoteCall.waitAndClickElement(appId, '#delete-button');
-    await remoteCall.waitAndClickElement(
-        appId, '.files-confirm-dialog .cr-dialog-ok');
 
     // Wait for file deletion.
     await remoteCall.waitForElementLost(

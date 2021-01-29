@@ -9,6 +9,8 @@
 #include "components/tab_groups/tab_group_id.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/focus_ring.h"
+#include "ui/views/metadata/metadata_header_macros.h"
+#include "ui/views/view_targeter_delegate.h"
 #include "ui/views/widget/widget_observer.h"
 
 class TabStrip;
@@ -22,9 +24,14 @@ class View;
 // View for tab group headers in the tab strip, which are markers of group
 // boundaries. There is one header for each group, which is included in the tab
 // strip flow and positioned left of the leftmost tab in the group.
-class TabGroupHeader : public TabSlotView, public views::ContextMenuController {
+class TabGroupHeader : public TabSlotView,
+                       public views::ContextMenuController,
+                       public views::ViewTargeterDelegate {
  public:
+  METADATA_HEADER(TabGroupHeader);
   TabGroupHeader(TabStrip* tab_strip, const tab_groups::TabGroupId& group);
+  TabGroupHeader(const TabGroupHeader&) = delete;
+  TabGroupHeader& operator=(const TabGroupHeader&) = delete;
   ~TabGroupHeader() override;
 
   // TabSlotView:
@@ -45,6 +52,10 @@ class TabGroupHeader : public TabSlotView, public views::ContextMenuController {
                                   const gfx::Point& point,
                                   ui::MenuSourceType source_type) override;
 
+  // views::ViewTargeterDelegate:
+  bool DoesIntersectRect(const views::View* target,
+                         const gfx::Rect& rect) const override;
+
   // Updates our visual state according to the tab_groups::TabGroupVisualData
   // for our group.
   void VisualsChanged();
@@ -56,7 +67,11 @@ class TabGroupHeader : public TabSlotView, public views::ContextMenuController {
   friend class TabGroupEditorBubbleViewDialogBrowserTest;
 
   // Calculate the width for this View.
-  int CalculateWidth() const;
+  int GetDesiredWidth() const;
+
+  // Helper method used to log the time since the group was last expanded or
+  // collapsed.
+  void LogCollapseTime();
 
   TabStrip* const tab_strip_;
 
@@ -64,7 +79,10 @@ class TabGroupHeader : public TabSlotView, public views::ContextMenuController {
   views::Label* title_;
 
   // Focus ring for accessibility.
-  std::unique_ptr<views::FocusRing> focus_ring_;
+  views::FocusRing* focus_ring_ = nullptr;
+
+  // Time used for logging the last time the group was collapsed or expanded.
+  base::TimeTicks last_modified_expansion_;
 
   // Tracks whether our editor bubble is open. At most one can be open
   // at once.
@@ -86,8 +104,6 @@ class TabGroupHeader : public TabSlotView, public views::ContextMenuController {
   };
 
   EditorBubbleTracker editor_bubble_tracker_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabGroupHeader);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_TABS_TAB_GROUP_HEADER_H_

@@ -2,6 +2,88 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// clang-format off
+// #import {List} from 'chrome://resources/js/cr/ui/list.m.js';
+// #import {ArrayDataModel} from 'chrome://resources/js/cr/ui/array_data_model.m.js';
+// #import {FilesMessage} from '../elements/files_message.m.js';
+// #import {FileListSelectionModel} from './ui/file_list_selection_model.m.js';
+// #import {A11yAnnounce} from './ui/a11y_announce.m.js';
+// #import {ProgressCenter} from '../../../externs/background/progress_center.m.js';
+// #import {FakeEntry, FilesAppDirEntry} from '../../../externs/files_app_entry_interfaces.m.js';
+// #import {FileBrowserBackgroundFull} from '../../../externs/background/file_browser_background_full.m.js';
+// #import {BackgroundWindow} from '../../../externs/background_window.m.js';
+// #import {FileOperationManager} from '../../../externs/background/file_operation_manager.m.js';
+// #import {mediaImportInterfaces} from '../../../externs/background/media_import_handler.m.js';
+// #import {mediaScannerInterfaces} from '../../../externs/background/media_scanner.m.js';
+// #import {Crostini} from '../../../externs/background/crostini.m.js';
+// #import {importerHistoryInterfaces} from '../../../externs/background/import_history.m.js';
+// #import {CommandHandlerDeps} from '../../../externs/command_handler_deps.m.js';
+// #import {ProgressItemState} from '../../common/js/progress_center_common.m.js';
+// #import {crossoverSearchUtils} from './crossover_search_utils.m.js';
+// #import {FileTasks} from './file_tasks.m.js';
+// #import {CrostiniController} from './crostini_controller.m.js';
+// #import {NavigationListModel, NavigationModelFakeItem, NavigationModelItemType} from './navigation_list_model.m.js';
+// #import {DirectoryTree} from './ui/directory_tree.m.js';
+// #import {NavigationUma} from './navigation_uma.m.js';
+// #import {FileTypeFiltersController} from './file_type_filters_controller.m.js';
+// #import {DialogActionController} from './dialog_action_controller.m.js';
+// #import {SpinnerController} from './spinner_controller.m.js';
+// #import {DirectoryTreeNamingController} from './directory_tree_naming_controller.m.js';
+// #import {SearchController} from './search_controller.m.js';
+// #import {TaskController} from './task_controller.m.js';
+// #import {NamingController} from './naming_controller.m.js';
+// #import {MetadataUpdateController} from './metadata_update_controller.m.js';
+// #import {ColumnVisibilityController} from './column_visibility_controller.m.js';
+// #import {ListThumbnailLoader} from './list_thumbnail_loader.m.js';
+// #import {FileSelectionHandler, FileSelection} from './file_selection.m.js';
+// #import {FakeEntryImpl} from '../../common/js/files_app_entry_types.m.js';
+// #import {AndroidAppListModel} from './android_app_list_model.m.js';
+// #import {FolderShortcutsDataModel} from './folder_shortcuts_data_model.m.js';
+// #import {DirectoryModel} from './directory_model.m.js';
+// #import {assert, assertInstanceof} from 'chrome://resources/js/assert.m.js';
+// #import {FileGrid} from './ui/file_grid.m.js';
+// #import {FileTable} from './ui/file_table.m.js';
+// #import {FileManagerUI} from './ui/file_manager_ui.m.js';
+// #import {queryRequiredElement} from 'chrome://resources/js/util.m.js';
+// #import {FileFilter} from './directory_contents.m.js';
+// #import {ProvidersModel} from './providers_model.m.js';
+// #import {ThumbnailModel} from './metadata/thumbnail_model.m.js';
+// #import {MetadataModel} from './metadata/metadata_model.m.js';
+// #import {ContentMetadataProvider} from './metadata/content_metadata_provider.m.js';
+// #import {FilteredVolumeManager} from '../../../base/js/filtered_volume_manager.m.js';
+// #import {LaunchParam} from './launch_param.m.js';
+// #import {contextMenuHandler} from 'chrome://resources/js/cr/ui/context_menu_handler.m.js';
+// #import {CommandButton} from './ui/commandbutton.m.js';
+// #import {CommandHandler, CommandUtil} from './file_manager_commands.m.js';
+// #import {FileTransferController} from './file_transfer_controller.m.js';
+// #import {Banners} from './ui/banners.m.js';
+// #import {MainWindowComponent} from './main_window_component.m.js';
+// #import {QuickViewController} from './quick_view_controller.m.js';
+// #import {MetadataBoxController} from './metadata_box_controller.m.js';
+// #import {QuickViewUma} from './quick_view_uma.m.js';
+// #import {QuickViewModel} from './quick_view_model.m.js';
+// #import {LastModifiedController} from './last_modified_controller.m.js';
+// #import {ActionsController} from './actions_controller.m.js';
+// #import {EmptyFolderController} from './empty_folder_controller.m.js';
+// #import {ToolbarController} from './toolbar_controller.m.js';
+// #import {Menu} from 'chrome://resources/js/cr/ui/menu.m.js';
+// #import {util, str} from '../../common/js/util.m.js';
+// #import {SelectionMenuController} from './selection_menu_controller.m.js';
+// #import {GearMenuController} from './gear_menu_controller.m.js';
+// #import {SortMenuController} from './sort_menu_controller.m.js';
+// #import {ScanController} from './scan_controller.m.js';
+// #import {DriveDialogController} from './drive_dialog_controller.m.js';
+// #import {VolumeManagerCommon, AllowedPaths} from '../../../base/js/volume_manager_types.m.js';
+// #import {AppStateController} from './app_state_controller.m.js';
+// #import {DialogType} from './dialog_type.m.js';
+// #import {FileMetadataFormatter} from './ui/file_metadata_formatter.m.js';
+// #import {NativeEventTarget as EventTarget} from 'chrome://resources/js/cr/event_target.m.js';
+// #import {importer} from './import_controller.m.js';
+// #import {metrics} from '../../common/js/metrics.m.js';
+// #import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+// #import {importElements} from './elements_importer.m.js';
+// clang-format on
+
 /**
  * FileManager constructor.
  *
@@ -10,7 +92,7 @@
  *
  * @implements {CommandHandlerDeps}
  */
-class FileManager extends cr.EventTarget {
+/* #export */ class FileManager extends cr.EventTarget {
   constructor() {
     super();
 
@@ -23,35 +105,40 @@ class FileManager extends cr.EventTarget {
      */
     this.volumeManager_;
 
-    /** @private {?importer.HistoryLoader} */
+    /** @private {?importerHistoryInterfaces.HistoryLoader} */
     this.historyLoader_ = null;
 
     /** @private {?Crostini} */
     this.crostini_ = null;
 
+    /** @private {?CrostiniController} */
+    this.crostiniController_ = null;
+
     /**
      * ImportHistory. Non-null only once history observer is added in
      * {@code addHistoryObserver}.
-     * @private {?importer.ImportHistory}
+     * @private {?importerHistoryInterfaces.ImportHistory}
      */
     this.importHistory_ = null;
 
     /**
-     * Bound observer for use with {@code importer.ImportHistory.Observer}.
-     * The instance is bound once here as {@code ImportHistory.removeObserver}
-     * uses object equivilency to remove observers.
+     * Bound observer for use with {@code
+     * importerHistoryInterfaces.ImportHistory.Observer}. The instance is bound
+     * once here as {@code ImportHistory.removeObserver} uses object equivilency
+     * to remove observers.
      *
-     * @private @const {function(!importer.ImportHistory.ChangedEvent)}
+     * @private
+     *     @const {function(!importerHistoryInterfaces.ImportHistory.ChangedEvent)}
      */
     this.onHistoryChangedBound_ = this.onHistoryChanged_.bind(this);
 
-    /** @private {?importer.MediaScanner} */
+    /** @private {?mediaScannerInterfaces.MediaScanner} */
     this.mediaScanner_ = null;
 
     /** @private {?importer.ImportController} */
     this.importController_ = null;
 
-    /** @private {?importer.ImportRunner} */
+    /** @private {?mediaImportInterfaces.ImportRunner} */
     this.mediaImportHandler_ = null;
 
     /** @private {?MetadataModel} */
@@ -110,6 +197,12 @@ class FileManager extends cr.EventTarget {
      * @private {ActionsController}
      */
     this.actionsController_ = null;
+
+    /**
+     * Controller for showing dialogs from Drive.
+     * @private {?DriveDialogController}
+     */
+    this.driveDialogController_ = null;
 
     /**
      * Handler for command events.
@@ -256,6 +349,9 @@ class FileManager extends cr.EventTarget {
     /** @private {?QuickViewController} */
     this.quickViewController_ = null;
 
+    /** @private {?FileTypeFiltersController} */
+    this.fileTypeFiltersController_ = null;
+
     /**
      * Records histograms of directory-changed event.
      * @private {?NavigationUma}
@@ -324,6 +420,19 @@ class FileManager extends cr.EventTarget {
      * @private {?NavigationModelFakeItem}
      */
     this.fakeDriveItem_ = null;
+
+    /**
+     * A fake entry for Recents.
+     * @private {?FakeEntry}
+     */
+    this.recentEntry_ = null;
+  }
+
+  /**
+   * @return {!ProgressCenter}
+   */
+  get progressCenter() {
+    return assert(this.fileBrowserBackground_.progressCenter);
   }
 
   /**
@@ -452,7 +561,7 @@ class FileManager extends cr.EventTarget {
   }
 
   /**
-   * @return {importer.HistoryLoader}
+   * @return {importerHistoryInterfaces.HistoryLoader}
    */
   get historyLoader() {
     return this.historyLoader_;
@@ -466,7 +575,7 @@ class FileManager extends cr.EventTarget {
   }
 
   /**
-   * @return {importer.ImportRunner}
+   * @return {mediaImportInterfaces.ImportRunner}
    */
   get mediaImportHandler() {
     return this.mediaImportHandler_;
@@ -484,7 +593,16 @@ class FileManager extends cr.EventTarget {
    * @param {Object=} appState App state.
    */
   launchFileManager(appState) {
-    this.backgroundPage_.launcher.launchFileManager(appState);
+    this.fileBrowserBackground_.launchFileManager(appState);
+  }
+
+  /**
+   * Returns the last URL visited with visitURL() (e.g. for "Manage in Drive").
+   * Used by the integration tests.
+   * @return {string}
+   */
+  getLastVisitedURL() {
+    return util.getLastVisitedURL();
   }
 
   /**
@@ -576,6 +694,11 @@ class FileManager extends cr.EventTarget {
         assert(this.folderShortcutsModel_),
         this.fileBrowserBackground_.driveSyncHandler, this.selectionHandler_,
         assert(this.ui_));
+    if (this.dialogType === DialogType.FULL_PAGE) {
+      this.driveDialogController_ = new DriveDialogController(this.ui_);
+      this.fileBrowserBackground_.driveSyncHandler.addDialog(
+          window.appID, this.driveDialogController_);
+    }
     this.lastModifiedController_ = new LastModifiedController(
         this.ui_.listContainer.table, this.directoryModel_);
 
@@ -585,7 +708,8 @@ class FileManager extends cr.EventTarget {
     this.quickViewUma_ =
         new QuickViewUma(assert(this.volumeManager_), assert(this.dialogType));
     const metadataBoxController = new MetadataBoxController(
-        this.metadataModel_, this.quickViewModel_, this.fileMetadataFormatter_);
+        this.metadataModel_, this.quickViewModel_, this.fileMetadataFormatter_,
+        assert(this.volumeManager_));
     this.quickViewController_ = new QuickViewController(
         this, assert(this.metadataModel_), assert(this.selectionHandler_),
         assert(this.ui_.listContainer), assert(this.ui_.selectionMenuButton),
@@ -612,6 +736,10 @@ class FileManager extends cr.EventTarget {
         this.appStateController_, this.taskController_);
 
     this.initDataTransferOperations_();
+    fileListPromise.then(() => {
+      this.taskController_.setFileTransferController(
+          this.fileTransferController_);
+    });
 
     this.selectionHandler_.onFileSelectionChanged();
     this.ui_.listContainer.endBatchUpdates();
@@ -641,8 +769,7 @@ class FileManager extends cr.EventTarget {
     this.fileTransferController_ = new FileTransferController(
         assert(this.document_), assert(this.ui_.listContainer),
         assert(this.ui_.directoryTree),
-        this.ui_.showConfirmationDialog.bind(this.ui_),
-        assert(this.fileBrowserBackground_.progressCenter),
+        this.ui_.showConfirmationDialog.bind(this.ui_), this.progressCenter,
         assert(this.fileOperationManager_), assert(this.metadataModel_),
         assert(this.thumbnailModel_), assert(this.directoryModel_),
         assert(this.volumeManager_), assert(this.selectionHandler_));
@@ -679,6 +806,7 @@ class FileManager extends cr.EventTarget {
     this.document_.addEventListener(
         'command',
         this.ui_.listContainer.clearHover.bind(this.ui_.listContainer));
+    CommandHandler.registerUndoDeleteToast(this);
   }
 
   /**
@@ -758,18 +886,30 @@ class FileManager extends cr.EventTarget {
     this.document_ = this.dialogDom_.ownerDocument;
 
     metrics.startInterval('Load.InitDocuments');
-    await Promise.all(
-        [this.initBackgroundPagePromise_, window.importElementsPromise]);
+    if (window.importElementsPromise) {
+      // For non-js modules version these promises can run in parallel.
+      await Promise.all(
+          [this.initBackgroundPagePromise_, window.importElementsPromise]);
+    } else if (window.importElements) {
+      // importElements depend on loadTimeData which is initialized in the
+      // initBackgroundPagePromise_.
+      await this.initBackgroundPagePromise_;
+      await window.importElements();
+    }
     metrics.recordInterval('Load.InitDocuments');
 
     metrics.startInterval('Load.InitUI');
-    if (util.isFilesNg()) {
-      this.document_.documentElement.classList.add('files-ng');
-      this.dialogDom_.classList.add('files-ng');
-    } else {
-      this.document_.documentElement.classList.remove('files-ng');
-      this.dialogDom_.classList.remove('files-ng');
-    }
+    this.document_.documentElement.classList.add('files-ng');
+    this.dialogDom_.classList.add('files-ng');
+
+    this.dialogDom_.classList.toggle(
+        'camera-folder-enabled', util.isFilesCameraFolderEnabled());
+
+    chrome.fileManagerPrivate.isTabletModeEnabled(
+        this.onTabletModeChanged_.bind(this));
+    chrome.fileManagerPrivate.onTabletModeChanged.addListener(
+        this.onTabletModeChanged_.bind(this));
+
     this.initEssentialUI_();
     this.initAdditionalUI_();
     await this.initSettingsPromise_;
@@ -819,12 +959,17 @@ class FileManager extends cr.EventTarget {
   async startInitBackgroundPage_() {
     metrics.startInterval('Load.InitBackgroundPage');
 
-    /** @type {!Window} */
-    const backgroundPage =
-        await new Promise(resolve => chrome.runtime.getBackgroundPage(resolve));
-    assert(backgroundPage);
-    this.backgroundPage_ =
-        /** @type {!BackgroundWindow} */ (backgroundPage);
+    /** @type {!BackgroundWindow} */
+    this.backgroundPage_ = await new Promise(resolve => {
+      if (window.isSWA) {
+        const backgroundWindowSWA = window.BackgroundWindowSWA || null;
+        resolve(new backgroundWindowSWA());
+      } else {
+        chrome.runtime.getBackgroundPage(resolve);
+      }
+    });
+
+    assert(this.backgroundPage_);
     this.fileBrowserBackground_ =
         /** @type {!FileBrowserBackgroundFull} */ (
             this.backgroundPage_.background);
@@ -832,7 +977,7 @@ class FileManager extends cr.EventTarget {
     await new Promise(resolve => this.fileBrowserBackground_.ready(resolve));
     loadTimeData.data = this.fileBrowserBackground_.stringData;
     if (util.runningInBrowser()) {
-      this.backgroundPage_.registerDialog(window);
+      this.fileBrowserBackground_.registerDialog(window);
     }
     this.fileOperationManager_ =
         this.fileBrowserBackground_.fileOperationManager;
@@ -840,6 +985,7 @@ class FileManager extends cr.EventTarget {
     this.mediaScanner_ = this.fileBrowserBackground_.mediaScanner;
     this.historyLoader_ = this.fileBrowserBackground_.historyLoader;
     this.crostini_ = this.fileBrowserBackground_.crostini;
+
     metrics.recordInterval('Load.InitBackgroundPage');
   }
 
@@ -862,7 +1008,8 @@ class FileManager extends cr.EventTarget {
     // Note that the Drive enabling preference change is listened by
     // DriveIntegrationService, so here we don't need to take care about it.
     this.volumeManager_ = new FilteredVolumeManager(
-        allowedPaths, writableOnly, this.backgroundPage_);
+        allowedPaths, writableOnly,
+        this.fileBrowserBackground_.getVolumeManager());
   }
 
   /**
@@ -885,12 +1032,20 @@ class FileManager extends cr.EventTarget {
       DialogType.FULL_PAGE,
     ]);
 
+    if (util.isFilesJsModulesEnabled()) {
+      ContentMetadataProvider.configure(
+          'foreground/js/metadata_dispatcher.m.js', /*isModule=*/ true);
+    } else if (window.isSWA) {
+      ContentMetadataProvider.configure(
+          'foreground/js/metadata/metadata_dispatcher.js');
+    }
+
     // Create the metadata cache.
     assert(this.volumeManager_);
     this.metadataModel_ = MetadataModel.create(this.volumeManager_);
     this.thumbnailModel_ = new ThumbnailModel(this.metadataModel_);
     this.providersModel_ = new ProvidersModel(this.volumeManager_);
-    this.fileFilter_ = new FileFilter(this.metadataModel_);
+    this.fileFilter_ = new FileFilter(this.volumeManager_);
 
     // Set the files-ng class for dialog header styling.
     const dialogHeader = queryRequiredElement('.dialog-header');
@@ -944,8 +1099,7 @@ class FileManager extends cr.EventTarget {
         this.volumeManager_);
 
     // Handle UI events.
-    this.fileBrowserBackground_.progressCenter.addPanel(
-        this.ui_.progressCenterPanel);
+    this.progressCenter.addPanel(this.ui_.progressCenterPanel);
 
     util.addIsFocusedMethod();
 
@@ -980,7 +1134,7 @@ class FileManager extends cr.EventTarget {
     // we want to update grid/list view when it changes.
     this.historyLoader_.addHistoryLoadedListener(
         /**
-         * @param {!importer.ImportHistory} history
+         * @param {!importerHistoryInterfaces.ImportHistory} history
          * @this {FileManager}
          */
         history => {
@@ -992,7 +1146,7 @@ class FileManager extends cr.EventTarget {
   /**
    * Handles events when import history changed.
    *
-   * @param {!importer.ImportHistory.ChangedEvent} event
+   * @param {!importerHistoryInterfaces.ImportHistory.ChangedEvent} event
    * @private
    */
   onHistoryChanged_(event) {
@@ -1037,6 +1191,10 @@ class FileManager extends cr.EventTarget {
     this.androidAppListModel_ = new AndroidAppListModel(
         this.launchParams_.showAndroidPickerApps,
         this.launchParams_.includeAllFiles, this.launchParams_.typeList);
+
+    this.recentEntry_ = new FakeEntryImpl(
+        str('RECENT_ROOT_LABEL'), VolumeManagerCommon.RootType.RECENT,
+        this.getSourceRestriction_());
 
     assert(this.launchParams_);
     this.selectionHandler_ = new FileSelectionHandler(
@@ -1085,7 +1243,7 @@ class FileManager extends cr.EventTarget {
         this.dialogType, this.volumeManager_, this.ui_, this.metadataModel_,
         this.directoryModel_, this.selectionHandler_,
         this.metadataUpdateController_, this.namingController_,
-        assert(this.crostini_));
+        assert(this.crostini_), this.progressCenter);
 
     // Create search controller.
     this.searchController_ = new SearchController(
@@ -1107,6 +1265,13 @@ class FileManager extends cr.EventTarget {
         this.dialogType, this.ui_.dialogFooter, this.directoryModel_,
         this.metadataModel_, this.volumeManager_, this.fileFilter_,
         this.namingController_, this.selectionHandler_, this.launchParams_);
+
+    // Create file-type filter controller.
+    if (util.isRecentsFilterEnabled()) {
+      this.fileTypeFiltersController_ = new FileTypeFiltersController(
+          this.ui_.fileTypeFilterContainer, this.directoryModel_,
+          this.recentEntry_);
+    }
 
     return directoryTreePromise;
   }
@@ -1131,10 +1296,7 @@ class FileManager extends cr.EventTarget {
                 !DialogType.isFolderDialog(this.launchParams_.type) ?
             new NavigationModelFakeItem(
                 str('RECENT_ROOT_LABEL'), NavigationModelItemType.RECENT,
-                new FakeEntry(
-                    str('RECENT_ROOT_LABEL'),
-                    VolumeManagerCommon.RootType.RECENT,
-                    this.getSourceRestriction_())) :
+                assert(this.recentEntry_)) :
             null,
         assert(this.directoryModel_), assert(this.androidAppListModel_));
 
@@ -1151,81 +1313,15 @@ class FileManager extends cr.EventTarget {
     // multiple VMs.
     chrome.fileManagerPrivate.onCrostiniChanged.addListener(
         this.onCrostiniChanged_.bind(this));
-    return this.setupCrostini_();
-  }
-
-  /**
-   * Sets up Crostini 'Linux files'.
-   * @return {!Promise<void>}
-   * @private
-   */
-  async setupCrostini_() {
-    // Setup Linux files fake root.
-    this.directoryTree.dataModel.linuxFilesItem =
-        this.crostini_.isEnabled(constants.DEFAULT_CROSTINI_VM) ?
-        new NavigationModelFakeItem(
-            str('LINUX_FILES_ROOT_LABEL'), NavigationModelItemType.CROSTINI,
-            new FakeEntry(
-                str('LINUX_FILES_ROOT_LABEL'),
-                VolumeManagerCommon.RootType.CROSTINI)) :
-        null;
-    // Redraw the tree to ensure 'Linux files' is added/removed.
-    this.directoryTree.redraw(false);
-
-    // Load any existing shared paths.
-    // Only observe firstForSession when using full-page FilesApp.
-    // I.e., don't show toast in a dialog.
-    let showToast = false;
-    const getSharedPaths = async (vmName) => {
-      if (!this.crostini_.isEnabled(vmName)) {
-        return 0;
-      }
-
-      return new Promise(resolve => {
-        chrome.fileManagerPrivate.getCrostiniSharedPaths(
-            this.dialogType === DialogType.FULL_PAGE, vmName,
-            (entries, firstForSession) => {
-              showToast = showToast || firstForSession;
-              for (const entry of entries) {
-                this.crostini_.registerSharedPath(vmName, entry);
-              }
-              resolve(entries.length);
-            });
-      });
-    };
-
-    const toast = (count, msgSingle, msgPlural, action, subPage, umaItem) => {
-      if (!showToast || count == 0) {
-        return;
-      }
-      this.ui_.toast.show(
-          count == 1 ? str(msgSingle) : strf(msgPlural, count), {
-            text: str(action),
-            callback: () => {
-              chrome.fileManagerPrivate.openSettingsSubpage(subPage);
-              CommandHandler.recordMenuItemSelected(umaItem);
-            }
-          });
-    };
-
-    const [crostiniShareCount, pluginVmShareCount] = await Promise.all([
-      getSharedPaths(constants.DEFAULT_CROSTINI_VM),
-      getSharedPaths(constants.PLUGIN_VM)
-    ]);
-
-    toast(
-        crostiniShareCount, 'FOLDER_SHARED_WITH_CROSTINI',
-        'FOLDER_SHARED_WITH_CROSTINI_PLURAL',
-        'MANAGE_LINUX_SHARING_BUTTON_LABEL', 'crostini/sharedPaths',
-        CommandHandler.MenuCommandsForUMA.MANAGE_LINUX_SHARING_TOAST_STARTUP);
-    // TODO(crbug.com/949356): UX to provide guidance for what to do
-    // when we have shared paths with both Linux and Plugin VM.
-    toast(
-        pluginVmShareCount, 'FOLDER_SHARED_WITH_PLUGIN_VM',
-        'FOLDER_SHARED_WITH_PLUGIN_VM_PLURAL',
-        'MANAGE_PLUGIN_VM_SHARING_BUTTON_LABEL', 'pluginVm/sharedPaths',
-        CommandHandler.MenuCommandsForUMA
-            .MANAGE_PLUGIN_VM_SHARING_TOAST_STARTUP);
+    this.crostiniController_ = new CrostiniController(
+        assert(this.crostini_), /** @type {!FilesMessage} */
+        (this.document_.querySelector('#files-message')), this.directoryModel_,
+        assert(this.directoryTree));
+    await this.crostiniController_.redraw();
+    // Never show toast in an open-file dialog.
+    const maybeShowToast = this.dialogType === DialogType.FULL_PAGE;
+    return this.crostiniController_.loadSharedPaths(
+        maybeShowToast, this.ui_.toast);
   }
 
   /**
@@ -1245,11 +1341,24 @@ class FileManager extends cr.EventTarget {
     switch (event.eventType) {
       case chrome.fileManagerPrivate.CrostiniEventType.ENABLE:
         this.crostini_.setEnabled(event.vmName, true);
-        return this.setupCrostini_();
+        return this.crostiniController_.redraw();
 
       case chrome.fileManagerPrivate.CrostiniEventType.DISABLE:
         this.crostini_.setEnabled(event.vmName, false);
-        return this.setupCrostini_();
+        return this.crostiniController_.redraw();
+
+      // Event is sent when a user drops an unshared file on Plugin VM.
+      // We show the move dialog so the user can move the file or share the
+      // directory.
+      case chrome.fileManagerPrivate.CrostiniEventType
+          .DROP_FAILED_PLUGIN_VM_DIRECTORY_NOT_SHARED:
+        if (this.ui_.dragInProcess) {
+          FileTasks.showPluginVmMoveDialog(
+              this.selectionHandler.selection.entries, this.volumeManager_,
+              assert(this.ui_), 'Windows', this.fileTransferController_,
+              assert(this.directoryModel_));
+        }
+        break;
     }
   }
 
@@ -1288,10 +1397,8 @@ class FileManager extends cr.EventTarget {
             nextCurrentDirEntry = inEntry;
           }
 
-          // If this dialog attempts to open file(s) and the selection is a
-          // directory, the selection should be the current directory.
-          if (DialogType.isOpenFileDialog(this.dialogType) &&
-              inEntry.isDirectory) {
+          // If the |selectionURL| is a directory make it the current directory.
+          if (inEntry.isDirectory) {
             nextCurrentDirEntry = inEntry;
           }
 
@@ -1304,6 +1411,24 @@ class FileManager extends cr.EventTarget {
       } catch (error) {
         console.warn(error.stack || error);
       }
+    }
+
+    // If searchQuery param is set, find the first directory that matches the
+    // query, and select it if exists.
+    const searchQuery = this.launchParams_.searchQuery;
+    if (searchQuery) {
+      metrics.startInterval('Load.ProcessInitialSearchQuery');
+      this.searchController_.setSearchQuery(searchQuery);
+      // Show a spinner, as the crossover search function call could be slow.
+      const hideSpinnerCallback = this.spinnerController_.show();
+      const queryMatchedDirEntry =
+          await crossoverSearchUtils.findQueryMatchedDirectoryEntry(
+              this.directoryTree.dataModel_, this.directoryModel_, searchQuery);
+      if (queryMatchedDirEntry) {
+        nextCurrentDirEntry = queryMatchedDirEntry;
+      }
+      hideSpinnerCallback();
+      metrics.recordInterval('Load.ProcessInitialSearchQuery');
     }
 
     // Resolve the currentDirectoryURL to currentDirectoryEntry (if not done by
@@ -1430,6 +1555,9 @@ class FileManager extends cr.EventTarget {
         if (opt_selectionEntry) {
           this.directoryModel_.selectEntry(opt_selectionEntry);
         }
+        if (this.launchParams_.searchQuery) {
+          this.searchController_.setSearchQuery(this.launchParams_.searchQuery);
+        }
       } else {
         console.warn('No entry for finishSetupCurrentDirectory_');
       }
@@ -1475,17 +1603,19 @@ class FileManager extends cr.EventTarget {
     if (this.fileTransferController_) {
       for (const taskId of assert(
                this.fileTransferController_.pendingTaskIds)) {
-        const item =
-            this.fileBrowserBackground_.progressCenter.getItemById(taskId);
+        const item = this.progressCenter.getItemById(taskId);
         item.message = '';
         item.state = ProgressItemState.CANCELED;
-        this.fileBrowserBackground_.progressCenter.updateItem(item);
+        this.progressCenter.updateItem(item);
       }
     }
 
     if (this.ui_ && this.ui_.progressCenterPanel) {
-      this.fileBrowserBackground_.progressCenter.removePanel(
-          this.ui_.progressCenterPanel);
+      this.progressCenter.removePanel(this.ui_.progressCenterPanel);
+    }
+
+    if (this.driveDialogController_) {
+      this.fileBrowserBackground_.driveSyncHandler.removeDialog(window.appID);
     }
   }
 
@@ -1563,7 +1693,7 @@ class FileManager extends cr.EventTarget {
             if (!this.fakeDriveItem_) {
               this.fakeDriveItem_ = new NavigationModelFakeItem(
                   str('DRIVE_DIRECTORY_LABEL'), NavigationModelItemType.DRIVE,
-                  new FakeEntry(
+                  new FakeEntryImpl(
                       str('DRIVE_DIRECTORY_LABEL'),
                       VolumeManagerCommon.RootType.DRIVE_FAKE_ROOT));
             }
@@ -1585,5 +1715,14 @@ class FileManager extends cr.EventTarget {
           }
           this.directoryTree.redraw(false);
         });
+  }
+
+  /**
+   * Updates the DOM to reflect the specified tablet mode `enabled` state.
+   * @param {boolean} enabled
+   * @private
+   */
+  onTabletModeChanged_(enabled) {
+    this.dialogDom_.classList.toggle('tablet-mode-enabled', enabled);
   }
 }

@@ -2,15 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// #import {util} from '../../../common/js/util.m.js';
+// #import {BaseDialog} from 'chrome://resources/js/cr/ui/dialogs.m.js';
+
 /**
  * This class is an extended class, to manage the status of the dialogs.
  */
-class FileManagerDialogBase extends cr.ui.dialogs.BaseDialog {
+/* #export */ class FileManagerDialogBase extends cr.ui.dialogs.BaseDialog {
   /**
    * @param {HTMLElement} parentNode Parent node of the dialog.
    */
   constructor(parentNode) {
     super(parentNode);
+
+    if (util.isFilesNg()) {
+      this.container.classList.add('files-ng');
+    }
   }
 
   /**
@@ -50,6 +57,22 @@ class FileManagerDialogBase extends cr.ui.dialogs.BaseDialog {
     super.showWithTitle(title, message, onOk, onCancel, null);
 
     return true;
+  }
+
+  /**
+   * @override
+   */
+  showWithTitle(title, message, ...args) {
+    this.frame.classList.toggle('no-title', !title);
+    super.showWithTitle(title, message, ...args);
+  }
+
+  /**
+   * @override
+   */
+  showHtml(title, message, ...args) {
+    this.frame.classList.toggle('no-title', !title);
+    super.showHtml(title, message, ...args);
   }
 
   /**

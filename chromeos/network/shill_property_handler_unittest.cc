@@ -12,7 +12,8 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/test/task_environment.h"
@@ -38,14 +39,12 @@ void ErrorCallbackFunction(const std::string& error_name,
 
 class TestListener : public internal::ShillPropertyHandler::Listener {
  public:
-  TestListener() : technology_list_updates_(0),
-                   errors_(0) {
-  }
+  TestListener() : technology_list_updates_(0), errors_(0) {}
 
   void UpdateManagedList(ManagedState::ManagedType type,
                          const base::ListValue& entries) override {
-    VLOG(1) << "UpdateManagedList[" << ManagedState::TypeToString(type) << "]: "
-            << entries.GetSize();
+    VLOG(1) << "UpdateManagedList[" << ManagedState::TypeToString(type)
+            << "]: " << entries.GetSize();
     UpdateEntries(GetTypeString(type), entries);
   }
 
@@ -56,7 +55,12 @@ class TestListener : public internal::ShillPropertyHandler::Listener {
     initial_property_updates(GetTypeString(type))[path] += 1;
   }
 
-  void ProfileListChanged() override {}
+  void ProfileListChanged(const base::Value& profile_list) override {
+    if (!profile_list.is_list()) {
+      return;
+    }
+    profile_list_size_ = profile_list.GetList().size();
+  }
 
   void UpdateNetworkServiceProperty(const std::string& service_path,
                                     const std::string& key,
@@ -77,12 +81,16 @@ class TestListener : public internal::ShillPropertyHandler::Listener {
     AddPropertyUpdate(shill::kIPConfigsProperty, ip_config_path);
   }
 
+  void CheckPortalListChanged(const std::string& check_portal_list) override {}
+
+  void HostnameChanged(const std::string& hostname) override {
+    hostname_ = hostname;
+  }
+
   void TechnologyListChanged() override {
     VLOG(1) << "TechnologyListChanged.";
     ++technology_list_updates_;
   }
-
-  void CheckPortalListChanged(const std::string& check_portal_list) override {}
 
   void ManagedStateListChanged(ManagedState::ManagedType type) override {
     VLOG(1) << "ManagedStateListChanged: " << GetTypeString(type);
@@ -108,14 +116,18 @@ class TestListener : public internal::ShillPropertyHandler::Listener {
     list_updates_.clear();
     technology_list_updates_ = 0;
   }
+  std::string hostname() { return hostname_; }
   int errors() { return errors_; }
+  int profile_list_size() { return profile_list_size_; }
 
  private:
   std::string GetTypeString(ManagedState::ManagedType type) {
-    if (type == ManagedState::MANAGED_TYPE_NETWORK)
-      return shill::kServiceCompleteListProperty;
-    if (type == ManagedState::MANAGED_TYPE_DEVICE)
-      return shill::kDevicesProperty;
+    switch (type) {
+      case ManagedState::MANAGED_TYPE_NETWORK:
+        return shill::kServiceCompleteListProperty;
+      case ManagedState::MANAGED_TYPE_DEVICE:
+        return shill::kDevicesProperty;
+    }
     NOTREACHED();
     return std::string();
   }
@@ -149,9 +161,11 @@ class TestListener : public internal::ShillPropertyHandler::Listener {
   std::map<std::string, std::map<std::string, int>> property_updates_;
   std::map<std::string, std::map<std::string, int>> initial_property_updates_;
   // Map of list-type -> list update counts
-  std::map<std::string, int > list_updates_;
+  std::map<std::string, int> list_updates_;
   int technology_list_updates_;
+  std::string hostname_;
   int errors_;
+  int profile_list_size_;
 };
 
 }  // namespace
@@ -194,21 +208,15 @@ class ShillPropertyHandlerTest : public testing::Test {
     device_test_->AddDevice(id, type, id);
   }
 
-  void RemoveDevice(const std::string& id) {
-    device_test_->RemoveDevice(id);
-  }
+  void RemoveDevice(const std::string& id) { device_test_->RemoveDevice(id); }
 
   void AddService(const std::string& type,
                   const std::string& id,
                   const std::string& state) {
     VLOG(2) << "AddService: " << type << ": " << id << ": " << state;
     ASSERT_TRUE(IsValidType(type));
-    service_test_->AddService(id /* service_path */,
-                              id /* guid */,
-                              id /* name */,
-                              type,
-                              state,
-                              true /* visible */);
+    service_test_->AddService(id /* service_path */, id /* guid */,
+                              id /* name */, type, state, true /* visible */);
   }
 
   void AddServiceWithIPConfig(const std::string& type,
@@ -217,23 +225,16 @@ class ShillPropertyHandlerTest : public testing::Test {
                               const std::string& ipconfig_path) {
     ASSERT_TRUE(IsValidType(type));
     service_test_->AddServiceWithIPConfig(id, /* service_path */
-                                          id /* guid */,
-                                          id /* name */,
-                                          type,
-                                          state,
-                                          ipconfig_path,
+                                          id /* guid */, id /* name */, type,
+                                          state, ipconfig_path,
                                           true /* visible */);
   }
 
   void AddServiceToProfile(const std::string& type,
                            const std::string& id,
                            bool visible) {
-    service_test_->AddService(id /* service_path */,
-                              id /* guid */,
-                              id /* name */,
-                              type,
-                              shill::kStateIdle,
-                              visible);
+    service_test_->AddService(id /* service_path */, id /* guid */,
+                              id /* name */, type, shill::kStateIdle, visible);
     std::vector<std::string> profiles;
     profile_test_->GetProfilePaths(&profiles);
     ASSERT_TRUE(profiles.size() > 0);
@@ -255,10 +256,8 @@ class ShillPropertyHandlerTest : public testing::Test {
   }
 
   bool IsValidType(const std::string& type) {
-    return (type == shill::kTypeEthernet ||
-            type == shill::kTypeEthernetEap ||
-            type == shill::kTypeWifi ||
-            type == shill::kTypeCellular ||
+    return (type == shill::kTypeEthernet || type == shill::kTypeEthernetEap ||
+            type == shill::kTypeWifi || type == shill::kTypeCellular ||
             type == shill::kTypeVPN);
   }
 
@@ -300,6 +299,25 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerStub) {
   EXPECT_EQ(0, listener_->errors());
 }
 
+TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerProfileListChanged) {
+  EXPECT_EQ(1, listener_->profile_list_size());
+
+  const char kMountedUserDirectory[] = "/profile/chronos/shill";
+  // Simulate a user logging in. When a user logs in the mounted user directory
+  // path is added to the list of profile paths.
+  profile_test_->AddProfile(kMountedUserDirectory, /*user_hash=*/"");
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(2, listener_->profile_list_size());
+}
+
+TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerHostnameChanged) {
+  EXPECT_TRUE(listener_->hostname().empty());
+  const char kTestHostname[] = "Test Hostname";
+  shill_property_handler_->SetHostname(kTestHostname);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(listener_->hostname(), kTestHostname);
+}
+
 TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerTechnologyChanged) {
   const int initial_technology_updates = 2;  // Available and Enabled lists
   EXPECT_EQ(initial_technology_updates, listener_->technology_list_updates());
@@ -315,8 +333,7 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerTechnologyChanged) {
   manager_test_->AddTechnology(shill::kTypeWifi, false);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, listener_->technology_list_updates());
-  EXPECT_TRUE(shill_property_handler_->IsTechnologyAvailable(
-      shill::kTypeWifi));
+  EXPECT_TRUE(shill_property_handler_->IsTechnologyAvailable(shill::kTypeWifi));
   EXPECT_FALSE(shill_property_handler_->IsTechnologyEnabled(shill::kTypeWifi));
 
   // Enable the technology.
@@ -327,6 +344,24 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerTechnologyChanged) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, listener_->technology_list_updates());
   EXPECT_TRUE(shill_property_handler_->IsTechnologyEnabled(shill::kTypeWifi));
+
+  // Prohibit the technology.
+  listener_->reset_list_updates();
+  manager_test_->SetTechnologyProhibited(shill::kTypeWifi,
+                                         /*prohibited=*/true);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1, listener_->technology_list_updates());
+  EXPECT_TRUE(
+      shill_property_handler_->IsTechnologyProhibited(shill::kTypeWifi));
+
+  // Un-prohibit the technology.
+  listener_->reset_list_updates();
+  manager_test_->SetTechnologyProhibited(shill::kTypeWifi,
+                                         /*prohibited=*/false);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1, listener_->technology_list_updates());
+  EXPECT_FALSE(
+      shill_property_handler_->IsTechnologyProhibited(shill::kTypeWifi));
 
   EXPECT_EQ(0, listener_->errors());
 }
@@ -401,7 +436,7 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServicePropertyChanged) {
             listener_->entries(shill::kServiceCompleteListProperty).size());
   // Service receives an initial property update.
   EXPECT_EQ(1, listener_->initial_property_updates(
-      shill::kServiceCompleteListProperty)[kTestServicePath]);
+                   shill::kServiceCompleteListProperty)[kTestServicePath]);
   // Change a property.
   base::Value scan_interval(3);
   ShillServiceClient::Get()->SetProperty(
@@ -410,7 +445,7 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServicePropertyChanged) {
   base::RunLoop().RunUntilIdle();
   // Property change triggers an update (but not a service list update).
   EXPECT_EQ(1, listener_->property_updates(
-      shill::kServiceCompleteListProperty)[kTestServicePath]);
+                   shill::kServiceCompleteListProperty)[kTestServicePath]);
 
   // Set the state of the service to Connected. This will trigger a service list
   // update.
@@ -465,7 +500,7 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerIPConfigPropertyChanged) {
   base::RunLoop().RunUntilIdle();
   // This is the initial property update.
   EXPECT_EQ(1, listener_->initial_property_updates(
-      shill::kServiceCompleteListProperty)[kTestServicePath1]);
+                   shill::kServiceCompleteListProperty)[kTestServicePath1]);
   ShillServiceClient::Get()->SetProperty(
       dbus::ObjectPath(kTestServicePath1), shill::kIPConfigProperty,
       base::Value(kTestIPConfigPath), base::DoNothing(),
@@ -473,17 +508,17 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerIPConfigPropertyChanged) {
   base::RunLoop().RunUntilIdle();
   // IPConfig property change on the service should trigger an IPConfigs update.
   EXPECT_EQ(1, listener_->property_updates(
-      shill::kIPConfigsProperty)[kTestIPConfigPath]);
+                   shill::kIPConfigsProperty)[kTestIPConfigPath]);
 
   // Now, Add a new service with the IPConfig already set.
   const std::string kTestServicePath2("test_wifi_service2");
-  AddServiceWithIPConfig(shill::kTypeWifi, kTestServicePath2,
-                         shill::kStateIdle, kTestIPConfigPath);
+  AddServiceWithIPConfig(shill::kTypeWifi, kTestServicePath2, shill::kStateIdle,
+                         kTestIPConfigPath);
   base::RunLoop().RunUntilIdle();
   // A service with the IPConfig property already set should trigger an
   // additional IPConfigs update.
   EXPECT_EQ(2, listener_->property_updates(
-      shill::kIPConfigsProperty)[kTestIPConfigPath]);
+                   shill::kIPConfigsProperty)[kTestIPConfigPath]);
 }
 
 TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServiceList) {
@@ -499,9 +534,9 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServiceList) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, listener_->list_updates(shill::kServiceCompleteListProperty));
   EXPECT_EQ(1, listener_->initial_property_updates(
-      shill::kServiceCompleteListProperty)[kTestServicePath1]);
+                   shill::kServiceCompleteListProperty)[kTestServicePath1]);
   EXPECT_EQ(1, listener_->property_updates(
-      shill::kServiceCompleteListProperty)[kTestServicePath1]);
+                   shill::kServiceCompleteListProperty)[kTestServicePath1]);
 
   // Add a new entry to the services and the profile; should also trigger a
   // service list update, and a property update.
@@ -512,9 +547,9 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServiceList) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, listener_->list_updates(shill::kServiceCompleteListProperty));
   EXPECT_EQ(1, listener_->initial_property_updates(
-      shill::kServiceCompleteListProperty)[kTestServicePath2]);
+                   shill::kServiceCompleteListProperty)[kTestServicePath2]);
   EXPECT_EQ(1, listener_->property_updates(
-      shill::kServiceCompleteListProperty)[kTestServicePath2]);
+                   shill::kServiceCompleteListProperty)[kTestServicePath2]);
 }
 
 TEST_F(ShillPropertyHandlerTest, ProhibitedTechnologies) {
@@ -522,8 +557,7 @@ TEST_F(ShillPropertyHandlerTest, ProhibitedTechnologies) {
   prohibited_technologies.push_back(shill::kTypeEthernet);
   EXPECT_TRUE(
       shill_property_handler_->IsTechnologyEnabled(shill::kTypeEthernet));
-  shill_property_handler_->SetProhibitedTechnologies(
-      prohibited_technologies, network_handler::ErrorCallback());
+  shill_property_handler_->SetProhibitedTechnologies(prohibited_technologies);
   base::RunLoop().RunUntilIdle();
   // Disabled
   EXPECT_FALSE(
@@ -538,8 +572,7 @@ TEST_F(ShillPropertyHandlerTest, ProhibitedTechnologies) {
 
   // Can enable it back after policy changes
   prohibited_technologies.clear();
-  shill_property_handler_->SetProhibitedTechnologies(
-      prohibited_technologies, network_handler::ErrorCallback());
+  shill_property_handler_->SetProhibitedTechnologies(prohibited_technologies);
   shill_property_handler_->SetTechnologyEnabled(
       shill::kTypeEthernet, true, network_handler::ErrorCallback());
   base::RunLoop().RunUntilIdle();

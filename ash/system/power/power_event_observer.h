@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "ash/ash_export.h"
-#include "ash/session/session_observer.h"
+#include "ash/public/cpp/session/session_observer.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/unguessable_token.h"
@@ -51,7 +51,7 @@ class ASH_EXPORT PowerEventObserver
 
   // chromeos::PowerManagerClient::Observer overrides:
   void SuspendImminent(power_manager::SuspendImminent::Reason reason) override;
-  void SuspendDone(const base::TimeDelta& sleep_duration) override;
+  void SuspendDone(base::TimeDelta sleep_duration) override;
 
   // SessionObserver overrides:
   void OnLockStateChanged(bool locked) override;

@@ -68,6 +68,7 @@ rootWebArea
 ++++++++++++inlineTextBox name='This should NOT have banner role.'
 ++++++details
 ++++++++disclosureTriangle name='Details'
+++++++++++staticText ignored name='▸ '
 ++++++++++staticText name='Details'
 ++++++++++++inlineTextBox name='Details'
 ++++++group
@@ -80,9 +81,10 @@ rootWebArea
 ++++++++++++inlineTextBox name='This should NOT have banner role.'
 ++++++group
 ++++++++genericContainer ignored
-++++++++++headerAsNonLandmark
-++++++++++++staticText name='This should NOT have banner role.'
-++++++++++++++inlineTextBox name='This should NOT have banner role.'
+++++++++++genericContainer ignored
+++++++++++++headerAsNonLandmark
+++++++++++++++staticText name='This should NOT have banner role.'
+++++++++++++++++inlineTextBox name='This should NOT have banner role.'
 ++++++main
 ++++++++headerAsNonLandmark
 ++++++++++staticText name='This should NOT have banner role.'
@@ -114,6 +116,7 @@ rootWebArea
 ++++++++++++++inlineTextBox name='This should NOT have banner role.'
 ++++++details
 ++++++++disclosureTriangle name='Details'
+++++++++++staticText ignored name='▸ '
 ++++++++++staticText name='Details'
 ++++++++++++inlineTextBox name='Details'
 ++++++group
@@ -129,9 +132,10 @@ rootWebArea
 ++++++none ignored
 ++++++++genericContainer ignored
 ++++++++++genericContainer ignored
-++++++++++++headerAsNonLandmark
-++++++++++++++staticText name='This should NOT have banner role.'
-++++++++++++++++inlineTextBox name='This should NOT have banner role.'
+++++++++++++genericContainer ignored
+++++++++++++++headerAsNonLandmark
+++++++++++++++++staticText name='This should NOT have banner role.'
+++++++++++++++++++inlineTextBox name='This should NOT have banner role.'
 ++++++main
 ++++++++genericContainer ignored
 ++++++++++headerAsNonLandmark
@@ -159,6 +163,7 @@ rootWebArea
 ++++++++++++inlineTextBox name='This should NOT have footer role.'
 ++++++details
 ++++++++disclosureTriangle name='Details'
+++++++++++staticText ignored name='▸ '
 ++++++++++staticText name='Details'
 ++++++++++++inlineTextBox name='Details'
 ++++++group
@@ -171,9 +176,10 @@ rootWebArea
 ++++++++++++inlineTextBox name='This should NOT have footer role.'
 ++++++none ignored
 ++++++++genericContainer ignored
-++++++++++footerAsNonLandmark
-++++++++++++staticText name='This should NOT have footer role.'
-++++++++++++++inlineTextBox name='This should NOT have footer role.'
+++++++++++genericContainer ignored
+++++++++++++footerAsNonLandmark
+++++++++++++++staticText name='This should NOT have footer role.'
+++++++++++++++++inlineTextBox name='This should NOT have footer role.'
 ++++++main
 ++++++++footerAsNonLandmark
 ++++++++++staticText name='This should NOT have footer role.'
@@ -205,6 +211,7 @@ rootWebArea
 ++++++++++++++inlineTextBox name='This should NOT have footer role.'
 ++++++details
 ++++++++disclosureTriangle name='Details'
+++++++++++staticText ignored name='▸ '
 ++++++++++staticText name='Details'
 ++++++++++++inlineTextBox name='Details'
 ++++++group
@@ -220,9 +227,10 @@ rootWebArea
 ++++++group
 ++++++++genericContainer ignored
 ++++++++++genericContainer ignored
-++++++++++++footerAsNonLandmark
-++++++++++++++staticText name='This should NOT have footer role.'
-++++++++++++++++inlineTextBox name='This should NOT have footer role.'
+++++++++++++genericContainer ignored
+++++++++++++++footerAsNonLandmark
+++++++++++++++++staticText name='This should NOT have footer role.'
+++++++++++++++++++inlineTextBox name='This should NOT have footer role.'
 ++++++main
 ++++++++genericContainer ignored
 ++++++++++footerAsNonLandmark

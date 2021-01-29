@@ -39,7 +39,10 @@ class DeviceLocalAccountPolicyStore : public UserCloudPolicyStoreBase {
       scoped_refptr<base::SequencedTaskRunner> background_task_runner);
   ~DeviceLocalAccountPolicyStore() override;
 
-  const std::string& account_id() const { return account_id_; }
+  const std::string& account_id() const {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    return account_id_;
+  }
 
   // CloudPolicyStore:
   void Store(const enterprise_management::PolicyFetchResponse& policy) override;
@@ -58,7 +61,7 @@ class DeviceLocalAccountPolicyStore : public UserCloudPolicyStoreBase {
   // The callback invoked once policy validation is complete. Passed are the
   // used public key and the validator.
   using ValidateCompletionCallback =
-      base::Callback<void(const std::string&, UserCloudPolicyValidator*)>;
+      base::OnceCallback<void(const std::string&, UserCloudPolicyValidator*)>;
 
   // Called back by |session_manager_client_| after policy retrieval. Checks for
   // success and triggers policy validation.
@@ -85,13 +88,13 @@ class DeviceLocalAccountPolicyStore : public UserCloudPolicyStoreBase {
       bool valid_timestamp_required,
       std::unique_ptr<enterprise_management::PolicyFetchResponse> policy,
       bool validate_in_background,
-      const ValidateCompletionCallback& callback);
+      ValidateCompletionCallback callback);
 
   // Triggers policy validation.
   void Validate(
       bool valid_timestamp_required,
       std::unique_ptr<enterprise_management::PolicyFetchResponse> policy,
-      const ValidateCompletionCallback& callback,
+      ValidateCompletionCallback callback,
       bool validate_in_background,
       chromeos::DeviceSettingsService::OwnershipStatus ownership_status);
 

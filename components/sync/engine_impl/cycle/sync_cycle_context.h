@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/macros.h"
@@ -22,10 +23,6 @@ namespace syncer {
 class ExtensionsActivity;
 class ModelTypeRegistry;
 class ServerConnectionManager;
-
-namespace syncable {
-class Directory;
-}
 
 // Default number of items a client can commit in a single message.
 static const int kDefaultMaxCommitBatchSize = 25;
@@ -42,12 +39,12 @@ static const int kDefaultMaxCommitBatchSize = 25;
 class SyncCycleContext {
  public:
   SyncCycleContext(ServerConnectionManager* connection_manager,
-                   syncable::Directory* directory,
                    ExtensionsActivity* extensions_activity,
                    const std::vector<SyncEngineEventListener*>& listeners,
                    DebugInfoGetter* debug_info_getter,
                    ModelTypeRegistry* model_type_registry,
                    const std::string& invalidator_client_id,
+                   const std::string& cache_guid,
                    const std::string& birthday,
                    const std::string& bag_of_chips,
                    base::TimeDelta poll_interval);
@@ -55,7 +52,6 @@ class SyncCycleContext {
   ~SyncCycleContext();
 
   ServerConnectionManager* connection_manager() { return connection_manager_; }
-  syncable::Directory* directory() { return directory_; }
 
   ModelTypeSet GetEnabledTypes() const;
 
@@ -70,6 +66,8 @@ class SyncCycleContext {
     notifications_enabled_ = enabled;
   }
   bool notifications_enabled() { return notifications_enabled_; }
+
+  const std::string& cache_guid() const { return cache_guid_; }
 
   void set_birthday(const std::string& birthday);
   const std::string& birthday() const { return birthday_; }
@@ -115,9 +113,8 @@ class SyncCycleContext {
     cookie_jar_mismatch_ = cookie_jar_mismatch;
   }
 
-  bool cookie_jar_empty() const { return cookie_jar_empty_; }
-
-  void set_cookie_jar_empty(bool empty_jar) { cookie_jar_empty_ = empty_jar; }
+  bool single_client() const { return single_client_; }
+  void set_single_client(bool single_client) { single_client_ = single_client; }
 
   base::TimeDelta poll_interval() const { return poll_interval_; }
   void set_poll_interval(base::TimeDelta interval) {
@@ -125,11 +122,19 @@ class SyncCycleContext {
     poll_interval_ = interval;
   }
 
+  const std::vector<std::string>& active_device_fcm_registration_tokens()
+      const {
+    return active_device_fcm_registration_tokens_;
+  }
+  void set_active_device_fcm_registration_tokens(
+      std::vector<std::string> fcm_registration_tokens) {
+    active_device_fcm_registration_tokens_ = std::move(fcm_registration_tokens);
+  }
+
  private:
   base::ObserverList<SyncEngineEventListener>::Unchecked listeners_;
 
   ServerConnectionManager* const connection_manager_;
-  syncable::Directory* const directory_;
 
   // We use this to stuff extensions activity into CommitMessages so the server
   // can correlate commit traffic with extension-related bookmark mutations.
@@ -138,6 +143,8 @@ class SyncCycleContext {
   // Kept up to date with talk events to determine whether notifications are
   // enabled. True only if the notification channel is authorized and open.
   bool notifications_enabled_;
+
+  const std::string cache_guid_;
 
   std::string birthday_;
 
@@ -169,8 +176,11 @@ class SyncCycleContext {
   // mismatch implies all of them are different from the chrome account.
   bool cookie_jar_mismatch_;
 
-  // If there's a cookie jar mismatch, whether the cookie jar was empty or not.
-  bool cookie_jar_empty_;
+  // If there are no other known active devices.
+  bool single_client_;
+
+  // A list of FCM registration tokens to send invalidations.
+  std::vector<std::string> active_device_fcm_registration_tokens_;
 
   base::TimeDelta poll_interval_;
 

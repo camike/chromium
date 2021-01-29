@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
-#include "base/task/post_task.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -205,7 +204,8 @@ class DeleteOperation {
 }  // namespace
 
 DriveFsAsyncFileUtil::DriveFsAsyncFileUtil(Profile* profile)
-    : AsyncFileUtilAdapter(new DriveFsFileUtil), profile_(profile) {}
+    : AsyncFileUtilAdapter(std::make_unique<DriveFsFileUtil>()),
+      profile_(profile) {}
 
 DriveFsAsyncFileUtil::~DriveFsAsyncFileUtil() = default;
 
@@ -216,8 +216,8 @@ void DriveFsAsyncFileUtil::CopyFileLocal(
     CopyOrMoveOption option,
     CopyFileProgressCallback progress_callback,
     StatusCallback callback) {
-  base::PostTask(
-      FROM_HERE, {content::BrowserThread::UI},
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(
           &CopyOperation::Start,
           base::Unretained(new CopyOperation(
@@ -231,8 +231,8 @@ void DriveFsAsyncFileUtil::DeleteRecursively(
     std::unique_ptr<storage::FileSystemOperationContext> context,
     const storage::FileSystemURL& url,
     StatusCallback callback) {
-  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
-                 base::BindOnce(&DeleteOperation::Start,
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&DeleteOperation::Start,
                                 base::Unretained(new DeleteOperation(
                                     profile_, url.path(), std::move(callback),
                                     base::SequencedTaskRunnerHandle::Get(),

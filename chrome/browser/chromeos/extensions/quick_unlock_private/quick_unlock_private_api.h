@@ -26,13 +26,8 @@ class QuickUnlockPrivateGetAuthTokenFunction
       public chromeos::AuthStatusConsumer {
  public:
   using AuthenticatorAllocator =
-      base::Callback<chromeos::ExtendedAuthenticator*(
+      base::RepeatingCallback<chromeos::ExtendedAuthenticator*(
           chromeos::AuthStatusConsumer* auth_status_consumer)>;
-
-  class TestObserver {
-   public:
-    virtual void OnGetAuthTokenCalled(const std::string&) = 0;
-  };
 
   QuickUnlockPrivateGetAuthTokenFunction();
 
@@ -41,9 +36,6 @@ class QuickUnlockPrivateGetAuthTokenFunction
   void SetAuthenticatorAllocatorForTesting(
       const AuthenticatorAllocator& allocator);
 
-  // Test API.
-  static void SetTestObserver(
-      QuickUnlockPrivateGetAuthTokenFunction::TestObserver* observer);
 
   DECLARE_EXTENSION_FUNCTION("quickUnlockPrivate.getAuthToken",
                              QUICKUNLOCKPRIVATE_GETAUTHTOKEN)
@@ -83,6 +75,47 @@ class QuickUnlockPrivateSetLockScreenEnabledFunction
   ChromeExtensionFunctionDetails chrome_details_;
 
   DISALLOW_COPY_AND_ASSIGN(QuickUnlockPrivateSetLockScreenEnabledFunction);
+};
+
+class QuickUnlockPrivateSetPinAutosubmitEnabledFunction
+    : public ExtensionFunction {
+ public:
+  QuickUnlockPrivateSetPinAutosubmitEnabledFunction();
+  DECLARE_EXTENSION_FUNCTION("quickUnlockPrivate.setPinAutosubmitEnabled",
+                             QUICKUNLOCKPRIVATE_SETPINAUTOSUBMITENABLED)
+
+ protected:
+  ~QuickUnlockPrivateSetPinAutosubmitEnabledFunction() override;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+
+ private:
+  void HandleSetPinAutoSubmitResult(bool result);
+
+  ChromeExtensionFunctionDetails chrome_details_;
+
+  DISALLOW_COPY_AND_ASSIGN(QuickUnlockPrivateSetPinAutosubmitEnabledFunction);
+};
+
+class QuickUnlockPrivateCanAuthenticatePinFunction : public ExtensionFunction {
+ public:
+  QuickUnlockPrivateCanAuthenticatePinFunction();
+  DECLARE_EXTENSION_FUNCTION("quickUnlockPrivate.canAuthenticatePin",
+                             QUICKUNLOCKPRIVATE_CANAUTHENTICATEPIN)
+
+ protected:
+  ~QuickUnlockPrivateCanAuthenticatePinFunction() override;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+
+ private:
+  void HandleCanAuthenticateResult(bool result);
+
+  ChromeExtensionFunctionDetails chrome_details_;
+
+  DISALLOW_COPY_AND_ASSIGN(QuickUnlockPrivateCanAuthenticatePinFunction);
 };
 
 class QuickUnlockPrivateGetAvailableModesFunction : public ExtensionFunction {
@@ -162,7 +195,7 @@ class QuickUnlockPrivateSetModesFunction : public ExtensionFunction {
   using QuickUnlockMode =
       extensions::api::quick_unlock_private::QuickUnlockMode;
   using ModesChangedEventHandler =
-      base::Callback<void(const std::vector<QuickUnlockMode>&)>;
+      base::RepeatingCallback<void(const std::vector<QuickUnlockMode>&)>;
 
   QuickUnlockPrivateSetModesFunction();
 

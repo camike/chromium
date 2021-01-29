@@ -166,7 +166,7 @@ emitted.
 
 In order to record UKM events, your code needs a UkmRecorder object, defined by [//services/metrics/public/cpp/ukm_recorder.h](https://cs.chromium.org/chromium/src/services/metrics/public/cpp/ukm_recorder.h)
 
-There are two main ways of getting a UkmRecorder instance.
+There are three main ways of getting a UkmRecorder instance.
 
 1) Use `ukm::UkmRecorder::Get()`.  This currently only works from the Browser process.
 
@@ -180,11 +180,15 @@ ukm::builders::MyEvent(source_id)
     .Record(ukm_recorder.get());
 ```
 
+3) Within blink/renderer, use `blink::Document::UkmRecorder()`.
+
 ### Get A ukm::SourceId
 
 UKM identifies navigations by their source ID and you'll need to associate an ID with your event in order to tie it to a main frame URL.  Preferably, get an existing ID for the navigation from another object.
 
-The main method for doing this is by getting a navigation ID:
+Prefer using `ukm::SourceId` if only the underlying int64 value is required to identify a source and is used in Mojo interface, and no type conversion needs to be performed. If additional source type information is needed, `ukm::SourceIdObj` can be used.
+
+The main method for getting an existing ID is by converting from the navigation ID:
 
 ```cpp
 ukm::SourceId source_id = GetSourceIdForWebContentsDocument(web_contents);
@@ -236,7 +240,7 @@ void OnGoatTeleported() {
   ...
   ukm::builders::Goat_Teleported(source_id)
       .SetDuration(duration.InMilliseconds())
-      .SetType(goat_type)
+      .SetGoatType(goat_type)
       .Record(ukm_recorder);
 }
 ```

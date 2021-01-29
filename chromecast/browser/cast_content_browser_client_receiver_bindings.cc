@@ -25,8 +25,8 @@
 #include "components/cdm/browser/media_drm_storage_impl.h"
 #include "content/public/browser/render_process_host.h"
 #include "media/mojo/buildflags.h"
+#include "mojo/public/cpp/bindings/binder_map.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
-#include "services/service_manager/public/cpp/binder_map.h"
 #include "url/origin.h"
 
 #if BUILDFLAG(ENABLE_CAST_RENDERER)
@@ -35,11 +35,7 @@
 #include "media/mojo/services/media_service.h"  // nogncheck
 #endif  // BUILDFLAG(ENABLE_CAST_RENDERER)
 
-#if BUILDFLAG(ENABLE_EXTERNAL_MOJO_SERVICES)
-#include "chromecast/external_mojo/broker_service/broker_service.h"
-#endif
-
-#if defined(OS_LINUX) && defined(USE_OZONE)
+#if (defined(OS_LINUX) || defined(OS_CHROMEOS)) && defined(USE_OZONE)
 #include "chromecast/browser/webview/js_channel_service.h"
 #include "chromecast/common/mojom/js_channel.mojom.h"
 #endif
@@ -79,14 +75,6 @@ void CreateMediaDrmStorage(
       render_frame_host, pref_service, base::BindRepeating(&CreateOriginId),
       base::BindRepeating(&AllowEmptyOriginIdCB), std::move(receiver));
 }
-
-#if BUILDFLAG(ENABLE_EXTERNAL_MOJO_SERVICES)
-void StartExternalMojoBrokerService(
-    service_manager::mojom::ServiceRequest request) {
-  service_manager::Service::RunAsyncUntilTermination(
-      std::make_unique<external_mojo::BrokerService>(std::move(request)));
-}
-#endif  // BUILDFLAG(ENABLE_EXTERNAL_MOJO_SERVICES)
 
 }  // namespace
 
@@ -139,7 +127,7 @@ void CastContentBrowserClient::BindMediaServiceReceiver(
 
 void CastContentBrowserClient::RegisterBrowserInterfaceBindersForFrame(
     content::RenderFrameHost* render_frame_host,
-    service_manager::BinderMapWithContext<content::RenderFrameHost*>* map) {
+    mojo::BinderMapWithContext<content::RenderFrameHost*>* map) {
   PopulateCastFrameBinders(render_frame_host, map);
 }
 
@@ -212,19 +200,12 @@ void CastContentBrowserClient::BindGpuHostReceiver(
 
 void CastContentBrowserClient::RunServiceInstance(
     const service_manager::Identity& identity,
-    mojo::PendingReceiver<service_manager::mojom::Service>* receiver) {
-#if BUILDFLAG(ENABLE_EXTERNAL_MOJO_SERVICES)
-  if (identity.name() == external_mojo::BrokerService::kServiceName) {
-    StartExternalMojoBrokerService(std::move(*receiver));
-    return;
-  }
-#endif  // BUILDFLAG(ENABLE_EXTERNAL_MOJO_SERVICES)
-}
+    mojo::PendingReceiver<service_manager::mojom::Service>* receiver) {}
 
 void CastContentBrowserClient::BindHostReceiverForRenderer(
     content::RenderProcessHost* render_process_host,
     mojo::GenericPendingReceiver receiver) {
-#if defined(OS_LINUX) && defined(USE_OZONE)
+#if (defined(OS_LINUX) || defined(OS_CHROMEOS)) && defined(USE_OZONE)
   if (auto r = receiver.As<::chromecast::mojom::JsChannelBindingProvider>()) {
     JsChannelService::Create(render_process_host, std::move(r),
                              base::ThreadTaskRunnerHandle::Get());

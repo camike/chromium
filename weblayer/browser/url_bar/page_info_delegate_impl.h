@@ -5,12 +5,15 @@
 #ifndef WEBLAYER_BROWSER_URL_BAR_PAGE_INFO_DELEGATE_IMPL_H_
 #define WEBLAYER_BROWSER_URL_BAR_PAGE_INFO_DELEGATE_IMPL_H_
 
+#include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "components/browsing_data/content/local_shared_objects_container.h"
 #include "components/page_info/page_info_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "url/gurl.h"
+
+namespace weblayer {
 
 class PageInfoDelegateImpl : public PageInfoDelegate {
  public:
@@ -40,16 +43,23 @@ class PageInfoDelegateImpl : public PageInfoDelegate {
       override;
   StatefulSSLHostStateDelegate* GetStatefulSSLHostStateDelegate() override;
   HostContentSettingsMap* GetContentSettings() override;
-  std::unique_ptr<content_settings::TabSpecificContentSettings::Delegate>
-  GetTabSpecificContentSettingsDelegate() override;
+  std::unique_ptr<content_settings::PageSpecificContentSettings::Delegate>
+  GetPageSpecificContentSettingsDelegate() override;
+  bool IsSubresourceFilterActivated(const GURL& site_url) override;
   bool IsContentDisplayedInVrHeadset() override;
   security_state::SecurityLevel GetSecurityLevel() override;
   security_state::VisibleSecurityState GetVisibleSecurityState() override;
+
+#if defined(OS_ANDROID)
+  const base::string16 GetClientApplicationName() override;
+#endif
 
  private:
   content::BrowserContext* GetBrowserContext() const;
 
   content::WebContents* web_contents_;
 };
+
+}  //  namespace weblayer
 
 #endif  // WEBLAYER_BROWSER_URL_BAR_PAGE_INFO_DELEGATE_IMPL_H_

@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/check_op.h"
 #include "base/location.h"
 #include "base/no_destructor.h"
@@ -19,8 +19,6 @@
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_util.h"
 #include "net/cookies/parsed_cookie.h"
-#include "net/url_request/url_request_context.h"
-#include "net/url_request/url_request_context_getter.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
 #include "url/gurl.h"
 
@@ -31,8 +29,10 @@ namespace {
 const char kGlobalCookieSetURL[] = "chrome://cookieset";
 }  // namespace
 
-CookieHelper::CookieHelper(content::StoragePartition* storage_partition)
-    : storage_partition_(storage_partition) {
+CookieHelper::CookieHelper(content::StoragePartition* storage_partition,
+                           IsDeletionDisabledCallback callback)
+    : storage_partition_(storage_partition),
+      delete_disabled_callback_(std::move(callback)) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
@@ -47,13 +47,19 @@ void CookieHelper::StartFetching(FetchCallback callback) {
 
 void CookieHelper::DeleteCookie(const net::CanonicalCookie& cookie) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (delete_disabled_callback_ &&
+      delete_disabled_callback_.Run(net::cookie_util::CookieOriginToURL(
+          cookie.Domain(), cookie.IsSecure()))) {
+    return;
+  }
   storage_partition_->GetCookieManagerForBrowserProcess()
       ->DeleteCanonicalCookie(cookie, base::DoNothing());
 }
 
 CannedCookieHelper::CannedCookieHelper(
-    content::StoragePartition* storage_partition)
-    : CookieHelper(storage_partition) {}
+    content::StoragePartition* storage_partition,
+    IsDeletionDisabledCallback callback)
+    : CookieHelper(storage_partition, callback) {}
 
 CannedCookieHelper::~CannedCookieHelper() {
   Reset();
@@ -86,18 +92,22 @@ size_t CannedCookieHelper::GetCookieCount() const {
 
 void CannedCookieHelper::StartFetching(FetchCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  net::CookieList cookie_list;
-  for (const auto& pair : origin_cookie_set_map_) {
-    cookie_list.insert(cookie_list.begin(), pair.second->begin(),
-                       pair.second->end());
-  }
-  std::move(callback).Run(cookie_list);
+  std::move(callback).Run(GetCookieList());
 }
 
 void CannedCookieHelper::DeleteCookie(const net::CanonicalCookie& cookie) {
   for (const auto& pair : origin_cookie_set_map_)
     DeleteMatchingCookie(cookie, pair.second.get());
   CookieHelper::DeleteCookie(cookie);
+}
+
+net::CookieList CannedCookieHelper::GetCookieList() {
+  net::CookieList cookie_list;
+  for (const auto& pair : origin_cookie_set_map_) {
+    cookie_list.insert(cookie_list.begin(), pair.second->begin(),
+                       pair.second->end());
+  }
+  return cookie_list;
 }
 
 bool CannedCookieHelper::DeleteMatchingCookie(

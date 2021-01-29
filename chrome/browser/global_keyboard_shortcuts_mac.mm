@@ -7,7 +7,7 @@
 #import <AppKit/AppKit.h>
 #include <Carbon/Carbon.h>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/mac/foundation_util.h"
 #include "base/no_destructor.h"
 #include "base/stl_util.h"
@@ -16,6 +16,7 @@
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/ui/cocoa/accelerators_cocoa.h"
 #import "chrome/browser/ui/cocoa/nsmenuitem_additions.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/accelerators/platform_accelerator_cocoa.h"
 #include "ui/events/event_constants.h"
@@ -170,6 +171,9 @@ const std::vector<KeyboardShortcutData>& GetShortcutsNotPresentInMainMenu() {
     {true,  false, false, true,  kVK_DownArrow,         IDC_FOCUS_NEXT_PANE},
     {true,  false, false, true,  kVK_UpArrow,           IDC_FOCUS_PREVIOUS_PANE},
   });
+  if (base::FeatureList::IsEnabled(features::kTabSearch)) {
+    keys->push_back({true,  true,  false, false, kVK_ANSI_A, IDC_TAB_SEARCH});
+  }
   // clang-format on
   return *keys;
 }

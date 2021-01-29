@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import posixpath
+import pprint
 import random
 import re
 import shutil
@@ -72,6 +73,9 @@ def ProcessResults(options):
   should_compute_metrics = any(
       fmt in FORMATS_WITH_METRICS for fmt in options.output_formats)
 
+  if options.extra_metrics:
+    _AddExtraMetrics(test_results, options.extra_metrics)
+
   begin_time = time.time()
   util.ApplyInParallel(
       lambda result: ProcessTestResult(
@@ -84,7 +88,8 @@ def ProcessResults(options):
           max_num_values=options.max_values_per_test_case,
           test_path_format=options.test_path_format,
           trace_processor_path=options.trace_processor_path,
-          enable_tbmv3=options.experimental_tbmv3_metrics),
+          enable_tbmv3=options.experimental_tbmv3_metrics,
+          fetch_power_profile=options.fetch_power_profile),
       test_results,
       on_failure=util.SetUnexpectedFailure,
   )
@@ -120,10 +125,22 @@ def _AmortizeProcessingDuration(processing_duration, test_results):
         result['runDuration'] = unicode(str(new_story_cost) + 's', 'utf-8')
 
 
-def ProcessTestResult(test_result, upload_bucket, results_label,
-                      run_identifier, test_suite_start, should_compute_metrics,
-                      max_num_values, test_path_format, trace_processor_path,
-                      enable_tbmv3):
+def _AddExtraMetrics(test_results, extra_metrics):
+  extra_metric_tags = []
+  for metric in extra_metrics:
+    version, name = metric.split(':')
+    if version not in ('tbmv2', 'tbmv3'):
+      raise ValueError('Invalid metric name: %s' % metric)
+    extra_metric_tags.append({'key': version, 'value': name})
+
+  for test_result in test_results:
+    test_result.setdefault('tags', []).extend(extra_metric_tags)
+
+
+def ProcessTestResult(test_result, upload_bucket, results_label, run_identifier,
+                      test_suite_start, should_compute_metrics, max_num_values,
+                      test_path_format, trace_processor_path, enable_tbmv3,
+                      fetch_power_profile):
   ConvertProtoTraces(test_result, trace_processor_path)
   AggregateTBMv2Traces(test_result)
   if enable_tbmv3:
@@ -135,7 +152,8 @@ def ProcessTestResult(test_result, upload_bucket, results_label,
     test_result['_histograms'] = histogram_set.HistogramSet()
     compute_metrics.ComputeTBMv2Metrics(test_result)
     if enable_tbmv3:
-      compute_metrics.ComputeTBMv3Metrics(test_result, trace_processor_path)
+      compute_metrics.ComputeTBMv3Metrics(test_result, trace_processor_path,
+                                          fetch_power_profile)
     ExtractMeasurements(test_result)
     num_values = len(test_result['_histograms'])
     if max_num_values is not None and num_values > max_num_values:
@@ -167,7 +185,7 @@ def GenerateExitCode(test_results):
   """
   if any(r['status'] == 'FAIL' for r in test_results):
     return 1
-  if all(r['status'] == 'SKIP' for r in test_results):
+  if test_results and all(r['status'] == 'SKIP' for r in test_results):
     return 111
   return 0
 
@@ -267,7 +285,7 @@ def AggregateTBMv3Traces(test_result):
     proto_files = [artifacts[name]['filePath'] for name in traces]
     concatenated_path = _BuildOutputPath(
         proto_files, compute_metrics.CONCATENATED_PROTO_NAME)
-    with open(concatenated_path, 'w') as concatenated_trace:
+    with open(concatenated_path, 'wb') as concatenated_trace:
       for trace_file in proto_files:
         if trace_file.endswith('.pb.gz'):
           with gzip.open(trace_file, 'rb') as f:
@@ -389,7 +407,10 @@ def MeasurementToHistogram(name, measurement):
     unit = info.name
     samples = [s * info.conversion_factor for s in samples]
   if unit not in histogram.UNIT_NAMES:
-    raise ValueError('Unknown unit: %s' % unit)
+    raise ValueError(('Unknown unit: "%s". Valid options include:\n%s\n'
+                      'Valid legacy options include:\n%s') %
+                     (unit, pprint.pformat(histogram.UNIT_NAMES),
+                      pprint.pformat(legacy_unit_info.LEGACY_UNIT_INFO.keys())))
   return histogram.Histogram.Create(name, unit, samples,
                                     description=description)
 

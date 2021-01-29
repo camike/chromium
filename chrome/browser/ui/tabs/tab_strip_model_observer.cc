@@ -95,10 +95,26 @@ TabStripSelectionChange& TabStripSelectionChange::operator=(
 ////////////////////////////////////////////////////////////////////////////////
 // TabGroupChange
 //
-TabGroupChange::TabGroupChange(tab_groups::TabGroupId group, Type type)
-    : group(group), type(type) {}
+TabGroupChange::TabGroupChange(tab_groups::TabGroupId group,
+                               Type type,
+                               std::unique_ptr<Delta> deltap)
+    : group(group), type(type), delta(std::move(deltap)) {}
 
 TabGroupChange::~TabGroupChange() = default;
+
+TabGroupChange::VisualsChange::VisualsChange() = default;
+TabGroupChange::VisualsChange::~VisualsChange() = default;
+
+const TabGroupChange::VisualsChange* TabGroupChange::GetVisualsChange() const {
+  DCHECK_EQ(type, Type::kVisualsChanged);
+  return static_cast<const VisualsChange*>(delta.get());
+}
+
+TabGroupChange::TabGroupChange(tab_groups::TabGroupId group,
+                               VisualsChange deltap)
+    : TabGroupChange(group,
+                     Type::kVisualsChanged,
+                     std::make_unique<VisualsChange>(std::move(deltap))) {}
 
 ////////////////////////////////////////////////////////////////////////////////
 // TabStripModelObserver
@@ -137,6 +153,7 @@ void TabStripModelObserver::TabBlockedStateChanged(WebContents* contents,
 
 void TabStripModelObserver::TabGroupedStateChanged(
     base::Optional<tab_groups::TabGroupId> group,
+    content::WebContents* contents,
     int index) {}
 
 void TabStripModelObserver::TabStripEmpty() {

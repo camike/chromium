@@ -22,6 +22,7 @@
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/simple_url_loader_test_helper.h"
 #include "net/test/embedded_test_server/default_handlers.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -129,14 +130,17 @@ class CacheCounterTest : public InProcessBrowserTest {
 };
 
 // Tests that for the empty cache, the result is zero.
-// Flaky. See crbug.com/971650.
-#if defined(OS_LINUX)
-#define MAYBE_Empty DISABLED_Empty
-#else
-#define MAYBE_Empty Empty
-#endif
-IN_PROC_BROWSER_TEST_F(CacheCounterTest, MAYBE_Empty) {
+IN_PROC_BROWSER_TEST_F(CacheCounterTest, Empty) {
   Profile* profile = browser()->profile();
+
+  // Clear the |profile| to ensure that there was no data added from other
+  // processes unrelated to this test.
+  base::RunLoop wait_until_empty;
+  content::BrowserContext::GetDefaultStoragePartition(browser()->profile())
+      ->GetNetworkContext()
+      ->ClearHttpCache(base::Time(), base::Time::Max(), nullptr,
+                       wait_until_empty.QuitClosure());
+  wait_until_empty.Run();
 
   CacheCounter counter(profile);
   counter.Init(
@@ -184,16 +188,9 @@ IN_PROC_BROWSER_TEST_F(CacheCounterTest, AfterDoom) {
   EXPECT_EQ(0u, GetResult());
 }
 
-// TODO(crbug.com/985131): Test is flaky in Linux, Win and ChromeOS.
-#if defined(OS_LINUX) || defined(OS_WIN) || defined(OS_CHROMEOS)
-#define MAYBE_PrefChanged DISABLED_PrefChanged
-#else
-#define MAYBE_PrefChanged PrefChanged
-#endif
-
 // Tests that the counter starts counting automatically when the deletion
 // pref changes to true.
-IN_PROC_BROWSER_TEST_F(CacheCounterTest, MAYBE_PrefChanged) {
+IN_PROC_BROWSER_TEST_F(CacheCounterTest, PrefChanged) {
   SetCacheDeletionPref(false);
 
   Profile* profile = browser()->profile();
@@ -203,8 +200,10 @@ IN_PROC_BROWSER_TEST_F(CacheCounterTest, MAYBE_PrefChanged) {
       base::Bind(&CacheCounterTest::CountingCallback, base::Unretained(this)));
   SetCacheDeletionPref(true);
 
+  // Test that changing the pref causes the counter to be restarted. If it
+  // doesn't, this WaitForCountingResult() statement will time out. The actual
+  // value returned by the counter is not important.
   WaitForCountingResult();
-  EXPECT_EQ(0u, GetResult());
 }
 
 // Tests that the counting is restarted when the time period changes.

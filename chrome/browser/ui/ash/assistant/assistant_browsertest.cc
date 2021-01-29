@@ -2,31 +2,29 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/strings/string_util.h"
-#include "base/test/bind_test_util.h"
+#include "base/run_loop.h"
+#include "base/test/bind.h"
+#include "base/test/scoped_run_loop_timeout.h"
+#include "base/time/time.h"
 #include "chrome/browser/ui/ash/assistant/assistant_test_mixin.h"
 #include "chrome/test/base/mixin_based_in_process_browser_test.h"
+#include "chromeos/assistant/test_support/expect_utils.h"
 #include "chromeos/audio/cras_audio_handler.h"
-#include "chromeos/dbus/power/power_manager_client.h"
 #include "chromeos/dbus/power_manager/backlight.pb.h"
 #include "chromeos/services/assistant/public/cpp/features.h"
-#include "ui/message_center/message_center.h"
-#include "ui/message_center/public/cpp/notification.h"
+#include "chromeos/services/assistant/service.h"
+#include "content/public/test/browser_test.h"
 
 namespace chromeos {
 namespace assistant {
 
 namespace {
+// Please remember to set auth token when running in |kProxy| mode.
+constexpr auto kMode = FakeS3Mode::kReplay;
+// Update this when you introduce breaking changes to existing tests.
+constexpr int kVersion = 1;
 
 constexpr int kStartBrightnessPercent = 50;
-
-// Ensures that |str_| starts with |prefix_|. If it doesn't, this will print a
-// nice error message.
-#define EXPECT_STARTS_WITH(str_, prefix_)                                      \
-  ({                                                                           \
-    EXPECT_TRUE(base::StartsWith(str_, prefix_, base::CompareCase::SENSITIVE)) \
-        << "Expected '" << str_ << "'' to start with '" << prefix_ << "'";     \
-  })
 
 // Ensures that |value_| is within the range {min_, max_}. If it isn't, this
 // will print a nice error message.
@@ -39,17 +37,24 @@ constexpr int kStartBrightnessPercent = 50;
 
 }  // namespace
 
+using chromeos::assistant::test::ExpectResult;
+
 class AssistantBrowserTest : public MixinBasedInProcessBrowserTest {
  public:
   AssistantBrowserTest() = default;
   ~AssistantBrowserTest() override = default;
+
+  AssistantTestMixin* tester() { return &tester_; }
 
   void ShowAssistantUi() {
     if (!tester()->IsVisible())
       tester()->PressAssistantKey();
   }
 
-  AssistantTestMixin* tester() { return &tester_; }
+  void CloseAssistantUi() {
+    if (tester()->IsVisible())
+      tester()->PressAssistantKey();
+  }
 
   void InitializeBrightness() {
     auto* power_manager = chromeos::PowerManagerClient::Get();
@@ -62,7 +67,7 @@ class AssistantBrowserTest : public MixinBasedInProcessBrowserTest {
     chromeos::PowerManagerClient::Get()->SetScreenBrightness(request);
 
     // Wait for the initial value to settle.
-    tester()->ExpectResult(
+    ExpectResult(
         true, base::BindLambdaForTesting([&]() {
           constexpr double kEpsilon = 0.1;
           auto current_brightness = tester()->SyncCall(base::BindOnce(
@@ -77,7 +82,7 @@ class AssistantBrowserTest : public MixinBasedInProcessBrowserTest {
   void ExpectBrightnessUp() {
     auto* power_manager = chromeos::PowerManagerClient::Get();
     // Check the brightness changes
-    tester()->ExpectResult(
+    ExpectResult(
         true, base::BindLambdaForTesting([&]() {
           constexpr double kEpsilon = 1;
           auto current_brightness = tester()->SyncCall(base::BindOnce(
@@ -92,7 +97,7 @@ class AssistantBrowserTest : public MixinBasedInProcessBrowserTest {
   void ExpectBrightnessDown() {
     auto* power_manager = chromeos::PowerManagerClient::Get();
     // Check the brightness changes
-    tester()->ExpectResult(
+    ExpectResult(
         true, base::BindLambdaForTesting([&]() {
           constexpr double kEpsilon = 1;
           auto current_brightness = tester()->SyncCall(base::BindOnce(
@@ -105,8 +110,9 @@ class AssistantBrowserTest : public MixinBasedInProcessBrowserTest {
   }
 
  private:
-  AssistantTestMixin tester_{&mixin_host_, this, embedded_test_server(),
-                             FakeS3Mode::kReplay};
+  base::test::ScopedFeatureList feature_list_;
+  AssistantTestMixin tester_{&mixin_host_, this, embedded_test_server(), kMode,
+                             kVersion};
 
   DISALLOW_COPY_AND_ASSIGN(AssistantBrowserTest);
 };
@@ -140,7 +146,7 @@ IN_PROC_BROWSER_TEST_F(AssistantBrowserTest, ShouldDisplayCardResponse) {
 
   ShowAssistantUi();
 
-  EXPECT_TRUE(tester()->IsVisible());
+  ASSERT_TRUE(tester()->IsVisible());
 
   tester()->SendTextQuery("What is the highest mountain in the world?");
   tester()->ExpectCardResponse("Mount Everest");
@@ -151,7 +157,7 @@ IN_PROC_BROWSER_TEST_F(AssistantBrowserTest, ShouldTurnUpVolume) {
 
   ShowAssistantUi();
 
-  EXPECT_TRUE(tester()->IsVisible());
+  ASSERT_TRUE(tester()->IsVisible());
 
   auto* cras = chromeos::CrasAudioHandler::Get();
   constexpr int kStartVolumePercent = 50;
@@ -160,12 +166,12 @@ IN_PROC_BROWSER_TEST_F(AssistantBrowserTest, ShouldTurnUpVolume) {
 
   tester()->SendTextQuery("turn up volume");
 
-  tester()->ExpectResult(true, base::BindRepeating(
-                                   [](chromeos::CrasAudioHandler* cras) {
-                                     return cras->GetOutputVolumePercent() >
-                                            kStartVolumePercent;
-                                   },
-                                   cras));
+  ExpectResult(true, base::BindRepeating(
+                         [](chromeos::CrasAudioHandler* cras) {
+                           return cras->GetOutputVolumePercent() >
+                                  kStartVolumePercent;
+                         },
+                         cras));
 }
 
 IN_PROC_BROWSER_TEST_F(AssistantBrowserTest, ShouldTurnDownVolume) {
@@ -173,7 +179,7 @@ IN_PROC_BROWSER_TEST_F(AssistantBrowserTest, ShouldTurnDownVolume) {
 
   ShowAssistantUi();
 
-  EXPECT_TRUE(tester()->IsVisible());
+  ASSERT_TRUE(tester()->IsVisible());
 
   auto* cras = chromeos::CrasAudioHandler::Get();
   constexpr int kStartVolumePercent = 50;
@@ -182,12 +188,12 @@ IN_PROC_BROWSER_TEST_F(AssistantBrowserTest, ShouldTurnDownVolume) {
 
   tester()->SendTextQuery("turn down volume");
 
-  tester()->ExpectResult(true, base::BindRepeating(
-                                   [](chromeos::CrasAudioHandler* cras) {
-                                     return cras->GetOutputVolumePercent() <
-                                            kStartVolumePercent;
-                                   },
-                                   cras));
+  ExpectResult(true, base::BindRepeating(
+                         [](chromeos::CrasAudioHandler* cras) {
+                           return cras->GetOutputVolumePercent() <
+                                  kStartVolumePercent;
+                         },
+                         cras));
 }
 
 IN_PROC_BROWSER_TEST_F(AssistantBrowserTest, ShouldTurnUpBrightness) {
@@ -195,7 +201,7 @@ IN_PROC_BROWSER_TEST_F(AssistantBrowserTest, ShouldTurnUpBrightness) {
 
   ShowAssistantUi();
 
-  EXPECT_TRUE(tester()->IsVisible());
+  ASSERT_TRUE(tester()->IsVisible());
 
   InitializeBrightness();
 
@@ -209,7 +215,7 @@ IN_PROC_BROWSER_TEST_F(AssistantBrowserTest, ShouldTurnDownBrightness) {
 
   ShowAssistantUi();
 
-  EXPECT_TRUE(tester()->IsVisible());
+  ASSERT_TRUE(tester()->IsVisible());
 
   InitializeBrightness();
 
@@ -218,48 +224,44 @@ IN_PROC_BROWSER_TEST_F(AssistantBrowserTest, ShouldTurnDownBrightness) {
   ExpectBrightnessDown();
 }
 
-// TODO(b/153485859): Move to assistant_timers_browsertest.cc.
-class AssistantTimersV2BrowserTest : public AssistantBrowserTest {
- public:
-  AssistantTimersV2BrowserTest() {
-    feature_list_.InitAndEnableFeature(features::kAssistantTimersV2);
-  }
-
-  AssistantTimersV2BrowserTest(const AssistantTimersV2BrowserTest&) = delete;
-  AssistantTimersV2BrowserTest& operator=(const AssistantTimersV2BrowserTest&) =
-      delete;
-  ~AssistantTimersV2BrowserTest() override = default;
-
- private:
-  base::test::ScopedFeatureList feature_list_;
-};
-
-IN_PROC_BROWSER_TEST_F(AssistantTimersV2BrowserTest,
-                       ShouldDismissTimerNotificationsWhenDisablingAssistant) {
+IN_PROC_BROWSER_TEST_F(AssistantBrowserTest,
+                       ShouldPuntWhenChangingUnsupportedSetting) {
   tester()->StartAssistantAndWaitForReady();
 
   ShowAssistantUi();
-  EXPECT_TRUE(tester()->IsVisible());
 
-  // Confirm no Assistant notifications are currently being shown.
-  auto* message_center = message_center::MessageCenter::Get();
-  EXPECT_TRUE(message_center->FindNotificationsByAppId("assistant").empty());
+  ASSERT_TRUE(tester()->IsVisible());
 
-  // Start a timer for one minute.
-  tester()->SendTextQuery("Set a timer for 1 minute.");
-  tester()->ExpectTextResponse("Alright, 1 min. And that's starting… now.");
+  tester()->SendTextQuery("enable night mode");
 
-  // Confirm that an Assistant timer notification is now showing.
-  auto notifications = message_center->FindNotificationsByAppId("assistant");
-  EXPECT_EQ(1u, notifications.size());
-  EXPECT_STARTS_WITH((*notifications.begin())->id(), "assistant/timer");
+  tester()->ExpectTextResponse("Night Mode isn't available on your device");
+}
 
-  // Disable Assistant.
-  tester()->SetAssistantEnabled(false);
+// TODO(crbug.com/1112278): Disabled because it's flaky.
+IN_PROC_BROWSER_TEST_F(AssistantBrowserTest,
+                       DISABLED_ShouldShowSingleErrorOnNetworkDown) {
+  tester()->StartAssistantAndWaitForReady();
+
+  ShowAssistantUi();
+
+  ASSERT_TRUE(tester()->IsVisible());
+
+  tester()->DisableFakeS3Server();
+
   base::RunLoop().RunUntilIdle();
 
-  // Confirm that our Assistant timer notification has been dismissed.
-  EXPECT_TRUE(message_center->FindNotificationsByAppId("assistant").empty());
+  tester()->SendTextQuery("Is this thing on?");
+
+  tester()->ExpectErrorResponse(
+      "Something went wrong. Try again in a few seconds");
+
+  // Make sure no further changes happen to the view hierarchy.
+  tester()->ExpectNoChange(base::TimeDelta::FromSeconds(1));
+
+  // This is necessary to prevent a UserInitiatedVoicelessActivity from
+  // blocking test harness teardown while we wait on assistant to finish
+  // the interaction.
+  CloseAssistantUi();
 }
 
 }  // namespace assistant

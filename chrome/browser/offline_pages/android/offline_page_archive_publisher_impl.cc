@@ -37,7 +37,8 @@ OfflinePageArchivePublisherImpl::Delegate* GetDefaultDelegate() {
 }
 
 bool ShouldUseDownloadsCollection() {
-  return base::android::BuildInfo::GetInstance()->is_at_least_q();
+  return base::android::BuildInfo::GetInstance()->sdk_int() >=
+         base::android::SDK_VERSION_Q;
 }
 
 // Helper function to do the move and register synchronously. Make sure this is
@@ -126,7 +127,7 @@ void OfflinePageArchivePublisherImpl::UnpublishArchives(
   for (auto& id : publish_ids) {
     if (id.download_id == kArchivePublishedWithoutDownloadId) {
       DCHECK(id.new_file_path.IsContentUri());
-      base::DeleteFile(id.new_file_path, false);
+      base::DeleteFile(id.new_file_path);
     } else if (id.download_id != kArchiveNotPublished) {
       download_manager_ids.push_back(id.download_id);
     }

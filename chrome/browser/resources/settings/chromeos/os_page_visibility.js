@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// #import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+
 /**
  * Specifies page visibility based on incognito status and Chrome OS guest mode.
  * @typedef {{
@@ -14,6 +16,7 @@
  *   device: (boolean|undefined),
  *   downloads: (DownloadsPageVisibility|undefined),
  *   internet: (boolean|undefined),
+ *   kerberos: (boolean|undefined),
  *   languages: (LanguagesPageVisibility|undefined),
  *   multidevice: (boolean|undefined),
  *   onStartup: (boolean|undefined),
@@ -23,7 +26,7 @@
  *   reset: (boolean|undefined),
  * }}
  */
-let OSPageVisibility;
+/* #export */ let OSPageVisibility;
 
 /**
  * @typedef {{
@@ -34,7 +37,7 @@ let OSPageVisibility;
  *   setWallpaper: boolean,
  * }}
  */
-let OSAppearancePageVisibility;
+/* #export */ let OSAppearancePageVisibility;
 
 /**
  * @typedef {{
@@ -42,7 +45,7 @@ let OSAppearancePageVisibility;
  *   smbShares: boolean,
  * }}
  */
-let DownloadsPageVisibility;
+/* #export */ let DownloadsPageVisibility;
 
 /**
  * @typedef {{
@@ -52,7 +55,7 @@ let DownloadsPageVisibility;
  *   manageUsers: boolean,
  * }}
  */
-let PeoplePageVisibility;
+/* #export */ let PeoplePageVisibility;
 
 /**
  * @typedef {{
@@ -62,7 +65,7 @@ let PeoplePageVisibility;
  *   wakeOnWifi: boolean,
  * }}
  */
-let OSPrivacyPageVisibility;
+/* #export */ let OSPrivacyPageVisibility;
 
 /**
  * @typedef {{
@@ -70,20 +73,23 @@ let OSPrivacyPageVisibility;
  *   inputMethodsList: boolean,
  * }}
  */
-let LanguagesPageVisibility;
+/* #export */ let LanguagesPageVisibility;
 
 cr.define('settings', function() {
   /**
    * Dictionary defining page visibility.
    * @type {!OSPageVisibility}
    */
-  let osPageVisibility;
+  /* #export */ let osPageVisibility;
 
   const isAccountManagerEnabled =
       loadTimeData.valueExists('isAccountManagerEnabled') &&
       loadTimeData.getBoolean('isAccountManagerEnabled');
   const isKerberosEnabled = loadTimeData.valueExists('isKerberosEnabled') &&
       loadTimeData.getBoolean('isKerberosEnabled');
+  const isKerberosSettingsSectionEnabled =
+      loadTimeData.valueExists('isKerberosSettingsSectionEnabled') &&
+      loadTimeData.getBoolean('isKerberosSettingsSectionEnabled');
 
   if (loadTimeData.getBoolean('isGuest')) {
     osPageVisibility = {
@@ -92,6 +98,7 @@ cr.define('settings', function() {
       multidevice: false,
       autofill: false,
       people: false,
+      kerberos: isKerberosEnabled && isKerberosSettingsSectionEnabled,
       onStartup: false,
       reset: false,
       appearance: {
@@ -130,10 +137,12 @@ cr.define('settings', function() {
       autofill: true,
       people: {
         lockScreen: true,
-        kerberosAccounts: isKerberosEnabled,
+        kerberosAccounts:
+            isKerberosEnabled && !isKerberosSettingsSectionEnabled,
         googleAccounts: isAccountManagerEnabled,
         manageUsers: true,
       },
+      kerberos: isKerberosEnabled && isKerberosSettingsSectionEnabled,
       onStartup: true,
       reset: true,
       appearance: {

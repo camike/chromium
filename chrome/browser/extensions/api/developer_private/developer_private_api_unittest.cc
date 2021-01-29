@@ -138,7 +138,7 @@ class DeveloperPrivateApiUnitTest : public ExtensionServiceTestWithInstall {
   const Extension* LoadSimpleExtension();
 
   // Tests modifying the extension's configuration.
-  void TestExtensionPrefSetting(const base::Callback<bool()>& has_pref,
+  void TestExtensionPrefSetting(const base::RepeatingCallback<bool()>& has_pref,
                                 const std::string& key,
                                 const std::string& extension_id);
 
@@ -231,7 +231,7 @@ const Extension* DeveloperPrivateApiUnitTest::LoadSimpleExtension() {
 }
 
 void DeveloperPrivateApiUnitTest::TestExtensionPrefSetting(
-    const base::Callback<bool()>& has_pref,
+    const base::RepeatingCallback<bool()>& has_pref,
     const std::string& key,
     const std::string& extension_id) {
   scoped_refptr<ExtensionFunction> function(
@@ -361,7 +361,7 @@ void DeveloperPrivateApiUnitTest::SetUp() {
   Browser::CreateParams params(profile(), true);
   params.type = Browser::TYPE_NORMAL;
   params.window = browser_window_.get();
-  browser_.reset(new Browser(params));
+  browser_.reset(Browser::Create(params));
 
   // Allow the API to be created.
   EventRouterFactory::GetInstance()->SetTestingFactory(
@@ -394,10 +394,12 @@ TEST_F(DeveloperPrivateApiUnitTest,
       .SetWithholdHostPermissions(true);
 
   TestExtensionPrefSetting(
-      base::Bind(&HasPrefsPermission, &util::IsIncognitoEnabled, profile(), id),
+      base::BindRepeating(&HasPrefsPermission, &util::IsIncognitoEnabled,
+                          profile(), id),
       "incognitoAccess", id);
   TestExtensionPrefSetting(
-      base::Bind(&HasPrefsPermission, &util::AllowFileAccess, profile(), id),
+      base::BindRepeating(&HasPrefsPermission, &util::AllowFileAccess,
+                          profile(), id),
       "fileAccess", id);
 }
 
@@ -466,7 +468,7 @@ TEST_F(DeveloperPrivateApiUnitTest, DeveloperPrivatePackFunction) {
 
   // Try to pack a final time when omitting (an existing) pem file. We should
   // get an error.
-  base::DeleteFile(crx_path, false);
+  base::DeleteFile(crx_path);
   EXPECT_TRUE(pack_args.Remove(1u, nullptr));  // Remove the pem key argument.
   EXPECT_TRUE(pack_args.Remove(1u, nullptr));  // Remove the flags argument.
   EXPECT_TRUE(TestPackExtensionFunction(
@@ -1229,7 +1231,7 @@ TEST_F(DeveloperPrivateApiUnitTest, LoadUnpackedFailsWithoutDevMode) {
   prefs->SetBoolean(prefs::kExtensionsUIDeveloperMode, true);
 }
 
-TEST_F(DeveloperPrivateApiUnitTest, LoadUnpackedFailsWithBlacklistingPolicy) {
+TEST_F(DeveloperPrivateApiUnitTest, LoadUnpackedFailsWithBlocklistingPolicy) {
   std::unique_ptr<content::WebContents> web_contents(
       content::WebContentsTester::CreateTestWebContents(profile(), nullptr));
 
@@ -1239,15 +1241,15 @@ TEST_F(DeveloperPrivateApiUnitTest, LoadUnpackedFailsWithBlacklistingPolicy) {
   {
     ExtensionManagementPrefUpdater<sync_preferences::TestingPrefServiceSyncable>
         pref_updater(testing_profile()->GetTestingPrefService());
-    pref_updater.SetBlacklistedByDefault(true);
+    pref_updater.SetBlocklistedByDefault(true);
   }
   EXPECT_TRUE(
       ExtensionManagementFactory::GetForBrowserContext(browser_context())
-          ->BlacklistedByDefault());
+          ->BlocklistedByDefault());
 
   EXPECT_FALSE(
       ExtensionManagementFactory::GetForBrowserContext(browser_context())
-          ->HasWhitelistedExtension());
+          ->HasAllowlistedExtension());
 
   auto info = DeveloperPrivateAPI::CreateProfileInfo(testing_profile());
 
@@ -1262,7 +1264,7 @@ TEST_F(DeveloperPrivateApiUnitTest, LoadUnpackedFailsWithBlacklistingPolicy) {
 }
 
 TEST_F(DeveloperPrivateApiUnitTest,
-       LoadUnpackedWorksWithBlacklistingPolicyAlongWhitelistingPolicy) {
+       LoadUnpackedWorksWithBlocklistingPolicyAlongAllowlistingPolicy) {
   std::unique_ptr<content::WebContents> web_contents(
       content::WebContentsTester::CreateTestWebContents(profile(), nullptr));
 
@@ -1272,17 +1274,17 @@ TEST_F(DeveloperPrivateApiUnitTest,
   {
     ExtensionManagementPrefUpdater<sync_preferences::TestingPrefServiceSyncable>
         pref_updater(testing_profile()->GetTestingPrefService());
-    pref_updater.SetBlacklistedByDefault(true);
+    pref_updater.SetBlocklistedByDefault(true);
     pref_updater.SetIndividualExtensionInstallationAllowed(kGoodCrx, true);
   }
 
   EXPECT_TRUE(
       ExtensionManagementFactory::GetForBrowserContext(browser_context())
-          ->BlacklistedByDefault());
+          ->BlocklistedByDefault());
 
   EXPECT_TRUE(
       ExtensionManagementFactory::GetForBrowserContext(browser_context())
-          ->HasWhitelistedExtension());
+          ->HasAllowlistedExtension());
 
   auto info = DeveloperPrivateAPI::CreateProfileInfo(testing_profile());
 
@@ -1479,14 +1481,7 @@ TEST_F(DeveloperPrivateApiUnitTest, RemoveHostPermission) {
   EXPECT_FALSE(modifier.HasGrantedHostPermission(kMapsGoogleCom));
 }
 
-// This test is flaky on chromeos.
-// https://crbug.com/937355
-#if defined(OS_CHROMEOS)
-#define MAYBE_UpdateHostAccess DISABLED_UpdateHostAccess
-#else
-#define MAYBE_UpdateHostAccess UpdateHostAccess
-#endif
-TEST_F(DeveloperPrivateApiUnitTest, MAYBE_UpdateHostAccess) {
+TEST_F(DeveloperPrivateApiUnitTest, UpdateHostAccess) {
   scoped_refptr<const Extension> extension =
       ExtensionBuilder("test").AddPermission("<all_urls>").Build();
   service()->AddExtension(extension.get());

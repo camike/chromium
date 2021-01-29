@@ -4,15 +4,22 @@
 
 #include "weblayer/browser/url_bar/page_info_delegate_impl.h"
 
+#include "build/build_config.h"
 #include "components/permissions/permission_manager.h"
 #include "components/security_interstitials/content/stateful_ssl_host_state_delegate.h"
 #include "components/security_state/content/content_utils.h"
 #include "content/public/browser/browser_context.h"
 #include "weblayer/browser/host_content_settings_map_factory.h"
+#include "weblayer/browser/page_specific_content_settings_delegate.h"
 #include "weblayer/browser/permissions/permission_decision_auto_blocker_factory.h"
 #include "weblayer/browser/permissions/permission_manager_factory.h"
 #include "weblayer/browser/stateful_ssl_host_state_delegate_factory.h"
-#include "weblayer/browser/tab_specific_content_settings_delegate.h"
+
+#if defined(OS_ANDROID)
+#include "weblayer/browser/weblayer_impl_android.h"
+#endif
+
+namespace weblayer {
 
 PageInfoDelegateImpl::PageInfoDelegateImpl(content::WebContents* web_contents)
     : web_contents_(web_contents) {
@@ -21,8 +28,8 @@ PageInfoDelegateImpl::PageInfoDelegateImpl(content::WebContents* web_contents)
 
 permissions::ChooserContextBase* PageInfoDelegateImpl::GetChooserContext(
     ContentSettingsType type) {
-  // TODO(crbug.com/1052375): Implement.
-  NOTREACHED();
+  // TODO(crbug.com/1052375): Once WebLayer has USB and Bluetooth support,
+  // add more logic here.
   return nullptr;
 }
 
@@ -49,8 +56,7 @@ base::string16 PageInfoDelegateImpl::GetWarningDetailText() {
 permissions::PermissionResult PageInfoDelegateImpl::GetPermissionStatus(
     ContentSettingsType type,
     const GURL& site_url) {
-  return weblayer::PermissionManagerFactory::GetForBrowserContext(
-             GetBrowserContext())
+  return PermissionManagerFactory::GetForBrowserContext(GetBrowserContext())
       ->GetPermissionStatus(type, site_url, site_url);
 }
 
@@ -69,19 +75,28 @@ void PageInfoDelegateImpl::ShowSiteSettings(const GURL& site_url) {
 
 permissions::PermissionDecisionAutoBlocker*
 PageInfoDelegateImpl::GetPermissionDecisionAutoblocker() {
-  return weblayer::PermissionDecisionAutoBlockerFactory::GetForBrowserContext(
+  return PermissionDecisionAutoBlockerFactory::GetForBrowserContext(
       GetBrowserContext());
 }
 
 StatefulSSLHostStateDelegate*
 PageInfoDelegateImpl::GetStatefulSSLHostStateDelegate() {
-  return weblayer::StatefulSSLHostStateDelegateFactory::GetInstance()
+  return StatefulSSLHostStateDelegateFactory::GetInstance()
       ->GetForBrowserContext(GetBrowserContext());
 }
 
 HostContentSettingsMap* PageInfoDelegateImpl::GetContentSettings() {
-  return weblayer::HostContentSettingsMapFactory::GetForBrowserContext(
+  return HostContentSettingsMapFactory::GetForBrowserContext(
       GetBrowserContext());
+}
+
+bool PageInfoDelegateImpl::IsSubresourceFilterActivated(const GURL& site_url) {
+  // As the WebLayer does not support subresource filtering, a site
+  // will not have ads blocked as a result of this setting. Return false
+  // so we do not show the ad blocking permission.
+  // TODO(https://crbug.com/1116095): Add subresource filtering to the
+  // WebLayer.
+  return false;
 }
 
 bool PageInfoDelegateImpl::IsContentDisplayedInVrHeadset() {
@@ -102,12 +117,19 @@ PageInfoDelegateImpl::GetVisibleSecurityState() {
   return *security_state::GetVisibleSecurityState(web_contents_);
 }
 
-std::unique_ptr<content_settings::TabSpecificContentSettings::Delegate>
-PageInfoDelegateImpl::GetTabSpecificContentSettingsDelegate() {
-  return std::make_unique<weblayer::TabSpecificContentSettingsDelegate>(
-      web_contents_);
+std::unique_ptr<content_settings::PageSpecificContentSettings::Delegate>
+PageInfoDelegateImpl::GetPageSpecificContentSettingsDelegate() {
+  return std::make_unique<PageSpecificContentSettingsDelegate>(web_contents_);
 }
+
+#if defined(OS_ANDROID)
+const base::string16 PageInfoDelegateImpl::GetClientApplicationName() {
+  return weblayer::GetClientApplicationName();
+}
+#endif
 
 content::BrowserContext* PageInfoDelegateImpl::GetBrowserContext() const {
   return web_contents_->GetBrowserContext();
 }
+
+}  //  namespace weblayer

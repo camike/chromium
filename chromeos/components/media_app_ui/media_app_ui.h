@@ -9,7 +9,6 @@
 
 #include "chromeos/components/media_app_ui/media_app_ui.mojom.h"
 #include "chromeos/components/media_app_ui/media_app_ui_delegate.h"
-#include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "ui/webui/mojo_web_ui_controller.h"
 
@@ -31,6 +30,8 @@ class MediaAppUI : public ui::MojoWebUIController,
   void BindInterface(
       mojo::PendingReceiver<media_app_ui::mojom::PageHandlerFactory> receiver);
   MediaAppUIDelegate* delegate() { return delegate_.get(); }
+
+  bool IsJavascriptErrorReportingEnabled() override;
 
  private:
   // media_app_ui::mojom::PageHandlerFactory:

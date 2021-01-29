@@ -98,7 +98,7 @@ TEST_F(HTMLCanvasElementModuleTest, TransferControlToOffscreen) {
 // information sent to the CompositorFrameSink.
 TEST_P(HTMLCanvasElementModuleTest, LowLatencyCanvasCompositorFrameOpacity) {
   // TODO(crbug.com/922218): enable desynchronized on Mac.
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
   // This test relies on GpuMemoryBuffers being supported and enabled for low
   // latency canvas.  The latter is true only on ChromeOS in production.
   ScopedTestingPlatformSupport<LowLatencyTestPlatform> platform;
@@ -108,7 +108,7 @@ TEST_P(HTMLCanvasElementModuleTest, LowLatencyCanvasCompositorFrameOpacity) {
   auto context_provider = viz::TestContextProvider::Create();
   context_provider->UnboundTestContextGL()
       ->set_supports_gpu_memory_buffer_format(
-          CanvasColorParams().GetBufferFormat(), true);
+          CanvasColorParams().GetAsResourceParams().GetBufferFormat(), true);
   InitializeSharedGpuContext(context_provider.get());
 
   // To intercept SubmitCompositorFrame/SubmitCompositorFrameSync messages sent

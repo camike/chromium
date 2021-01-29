@@ -5,9 +5,11 @@
 #import "ios/chrome/browser/safe_browsing/safe_browsing_unsafe_resource_container.h"
 
 #include "base/bind.h"
+#import "components/safe_browsing/ios/browser/safe_browsing_url_allow_list.h"
 #import "ios/web/public/navigation/navigation_item.h"
-#import "ios/web/public/test/fakes/test_navigation_manager.h"
-#import "ios/web/public/test/fakes/test_web_state.h"
+#import "ios/web/public/test/fakes/fake_navigation_manager.h"
+#import "ios/web/public/test/fakes/fake_web_state.h"
+#include "services/network/public/mojom/fetch_api.mojom.h"
 #include "testing/platform_test.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -21,78 +23,79 @@ class SafeBrowsingUnsafeResourceContainerTest : public PlatformTest {
  public:
   SafeBrowsingUnsafeResourceContainerTest()
       : item_(web::NavigationItem::Create()) {
-    std::unique_ptr<web::TestNavigationManager> navigation_manager =
-        std::make_unique<web::TestNavigationManager>();
+    auto navigation_manager = std::make_unique<web::FakeNavigationManager>();
     navigation_manager->SetLastCommittedItem(item_.get());
     web_state_.SetNavigationManager(std::move(navigation_manager));
+    SafeBrowsingUrlAllowList::CreateForWebState(&web_state_);
     SafeBrowsingUnsafeResourceContainer::CreateForWebState(&web_state_);
   }
 
-  UnsafeResource MakeUnsafeResource(bool is_main_frame) {
+  UnsafeResource MakePendingUnsafeResource(bool is_main_frame) {
     UnsafeResource resource;
     resource.url = GURL("http://www.chromium.test");
+    resource.navigation_url = resource.url;
+    resource.threat_type = safe_browsing::SB_THREAT_TYPE_URL_PHISHING;
     resource.callback =
         base::BindRepeating([](bool proceed, bool showed_interstitial) {});
-    resource.resource_type = is_main_frame
-                                 ? safe_browsing::ResourceType::kMainFrame
-                                 : safe_browsing::ResourceType::kSubFrame;
+    resource.request_destination =
+        is_main_frame ? network::mojom::RequestDestination::kDocument
+                      : network::mojom::RequestDestination::kIframe;
     resource.web_state_getter = web_state_.CreateDefaultGetter();
+    allow_list()->AddPendingUnsafeNavigationDecision(resource.url,
+                                                     resource.threat_type);
     return resource;
   }
 
-  SafeBrowsingUnsafeResourceContainer* stack() {
+  SafeBrowsingUrlAllowList* allow_list() {
+    return SafeBrowsingUrlAllowList::FromWebState(&web_state_);
+  }
+  SafeBrowsingUnsafeResourceContainer* container() {
     return SafeBrowsingUnsafeResourceContainer::FromWebState(&web_state_);
   }
 
  protected:
   std::unique_ptr<web::NavigationItem> item_;
-  web::TestWebState web_state_;
+  web::FakeWebState web_state_;
 };
 
 // Tests that main frame resources are correctly stored in and released from the
 // container.
 TEST_F(SafeBrowsingUnsafeResourceContainerTest, MainFrameResource) {
-  UnsafeResource resource = MakeUnsafeResource(/*is_main_frame=*/true);
+  UnsafeResource resource = MakePendingUnsafeResource(/*is_main_frame=*/true);
 
   // The container should not have any unsafe main frame resources initially.
-  EXPECT_FALSE(stack()->HasMainFrameUnsafeResource());
+  EXPECT_FALSE(container()->GetMainFrameUnsafeResource());
 
   // Store |resource| in the container.
-  stack()->StoreUnsafeResource(resource);
-  EXPECT_TRUE(stack()->HasMainFrameUnsafeResource());
+  container()->StoreMainFrameUnsafeResource(resource);
+  const UnsafeResource* resource_copy =
+      container()->GetMainFrameUnsafeResource();
+  ASSERT_TRUE(resource_copy);
+  EXPECT_EQ(resource.url, resource_copy->url);
 
-  // Release the resource and check that it matches and that the callback has
-  // been removed.
-  std::unique_ptr<UnsafeResource> popped_resource =
-      stack()->ReleaseMainFrameUnsafeResource();
-  EXPECT_EQ(resource.url, popped_resource->url);
-  EXPECT_TRUE(popped_resource->callback.is_null());
-
-  // Verify that the main frame resource was removed from the container.
-  EXPECT_FALSE(stack()->HasMainFrameUnsafeResource());
-  EXPECT_FALSE(stack()->ReleaseMainFrameUnsafeResource());
+  // Remove the pending decision and verify that the resource is removed from
+  // the container.
+  allow_list()->RemovePendingUnsafeNavigationDecisions(resource.url);
+  EXPECT_FALSE(container()->GetMainFrameUnsafeResource());
 }
 
 // Tests that subresources are correctly stored in and released from the
 // container.
 TEST_F(SafeBrowsingUnsafeResourceContainerTest, SubFrameResource) {
-  UnsafeResource resource = MakeUnsafeResource(/*is_main_frame=*/false);
+  UnsafeResource resource = MakePendingUnsafeResource(/*is_main_frame=*/false);
 
   // The container should not have any unsafe sub frame resources initially.
-  EXPECT_FALSE(stack()->HasSubFrameUnsafeResource(item_.get()));
+  EXPECT_FALSE(container()->GetSubFrameUnsafeResource(item_.get()));
 
   // Store |resource| in the container.
-  stack()->StoreUnsafeResource(resource);
-  EXPECT_TRUE(stack()->HasSubFrameUnsafeResource(item_.get()));
+  container()->StoreSubFrameUnsafeResource(resource, item_.get());
+  const UnsafeResource* resource_copy =
+      container()->GetSubFrameUnsafeResource(item_.get());
+  ASSERT_TRUE(resource_copy);
+  EXPECT_EQ(resource.url, resource_copy->url);
 
-  // Release the resource and check that it matches and that the callback has
-  // been removed.
-  std::unique_ptr<UnsafeResource> popped_resource =
-      stack()->ReleaseSubFrameUnsafeResource(item_.get());
-  EXPECT_EQ(resource.url, popped_resource->url);
-  EXPECT_TRUE(popped_resource->callback.is_null());
-
-  // Verify that the sub frame resource was removed from the container.
-  EXPECT_FALSE(stack()->HasSubFrameUnsafeResource(item_.get()));
-  EXPECT_FALSE(stack()->ReleaseSubFrameUnsafeResource(item_.get()));
+  // Remove the pending decision and verify that the resource is removed from
+  // the container.
+  allow_list()->RemovePendingUnsafeNavigationDecisions(resource.url);
+  EXPECT_FALSE(container()->GetSubFrameUnsafeResource(item_.get()));
 }

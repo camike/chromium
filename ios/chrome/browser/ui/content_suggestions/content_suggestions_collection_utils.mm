@@ -5,14 +5,12 @@
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_collection_utils.h"
 
 #include "base/i18n/rtl.h"
-#include "base/logging.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_most_visited_cell.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_constant.h"
 #import "ios/chrome/browser/ui/location_bar/location_bar_constants.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_header_constants.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_utils.h"
-#include "ios/chrome/browser/ui/ui_feature_flags.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
@@ -59,17 +57,19 @@ namespace content_suggestions {
 const int kSearchFieldBackgroundColor = 0xF1F3F4;
 const CGFloat kHintTextScale = 0.15;
 
-CGFloat doodleHeight(BOOL logoIsShowing) {
-  if (!IsRegularXRegularSizeClass() && !logoIsShowing)
+CGFloat doodleHeight(BOOL logoIsShowing, UITraitCollection* traitCollection) {
+  if (!IsRegularXRegularSizeClass(traitCollection) && !logoIsShowing)
     return kNonGoogleSearchDoodleHeight;
 
   return kGoogleSearchDoodleHeight;
 }
 
-CGFloat doodleTopMargin(BOOL toolbarPresent, CGFloat topInset) {
-  if (!IsCompactWidth() && !IsCompactHeight())
+CGFloat doodleTopMargin(BOOL toolbarPresent,
+                        CGFloat topInset,
+                        UITraitCollection* traitCollection) {
+  if (IsRegularXRegularSizeClass(traitCollection))
     return kDoodleTopMarginRegularXRegular;
-  if (IsCompactHeight())
+  if (IsCompactHeight(traitCollection))
     return topInset;
   return topInset + kDoodleTopMarginOther +
          AlignValueToPixel(kDoodleScaledTopMarginOther *
@@ -80,8 +80,9 @@ CGFloat searchFieldTopMargin() {
   return kSearchFieldTopMargin;
 }
 
-CGFloat searchFieldWidth(CGFloat superviewWidth) {
-  if (!IsCompactWidth() && !IsCompactHeight())
+CGFloat searchFieldWidth(CGFloat superviewWidth,
+                         UITraitCollection* traitCollection) {
+  if (!IsCompactWidth(traitCollection) && !IsCompactHeight(traitCollection))
     return kSearchFieldLarge;
 
   // Special case for narrow sizes.
@@ -91,14 +92,15 @@ CGFloat searchFieldWidth(CGFloat superviewWidth) {
 CGFloat heightForLogoHeader(BOOL logoIsShowing,
                             BOOL promoCanShow,
                             BOOL toolbarPresent,
-                            CGFloat topInset) {
+                            CGFloat topInset,
+                            UITraitCollection* traitCollection) {
   CGFloat headerHeight =
-      doodleTopMargin(toolbarPresent, topInset) + doodleHeight(logoIsShowing) +
-      searchFieldTopMargin() +
+      doodleTopMargin(toolbarPresent, topInset, traitCollection) +
+      doodleHeight(logoIsShowing, traitCollection) + searchFieldTopMargin() +
       ToolbarExpandedHeight(
           [UIApplication sharedApplication].preferredContentSizeCategory) +
       kNTPSearchFieldBottomPadding;
-  if (!IsRegularXRegularSizeClass()) {
+  if (!IsRegularXRegularSizeClass(traitCollection)) {
     return headerHeight;
   }
   if (!logoIsShowing) {
@@ -143,16 +145,12 @@ void configureVoiceSearchButton(UIButton* voiceSearchButton,
                                                IDS_IOS_ACCNAME_VOICE_SEARCH)];
   [voiceSearchButton setAccessibilityIdentifier:@"Voice Search"];
 
-#if defined(__IPHONE_13_4)
   if (@available(iOS 13.4, *)) {
-    if (base::FeatureList::IsEnabled(kPointerSupport)) {
       voiceSearchButton.pointerInteractionEnabled = YES;
       // Make the pointer shape fit the location bar's semi-circle end shape.
       voiceSearchButton.pointerStyleProvider =
           CreateLiftEffectCirclePointerStyleProvider();
-    }
   }
-#endif  // defined(__IPHONE_13_4)
 }
 
 UIView* nearestAncestor(UIView* view, Class aClass) {

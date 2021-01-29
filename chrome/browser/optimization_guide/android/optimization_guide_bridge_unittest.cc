@@ -15,9 +15,7 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "components/leveldb_proto/public/proto_database_provider.h"
-#include "components/optimization_guide/optimization_guide_prefs.h"
-#include "components/optimization_guide/optimization_guide_service.h"
+#include "components/optimization_guide/core/optimization_guide_prefs.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/testing_pref_service.h"
 #include "content/public/test/browser_task_environment.h"
@@ -26,6 +24,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::ByRef;
+using ::testing::Eq;
 using ::testing::Return;
 using ::testing::UnorderedElementsAre;
 
@@ -34,23 +33,16 @@ namespace android {
 
 class MockOptimizationGuideHintsManager : public OptimizationGuideHintsManager {
  public:
-  MockOptimizationGuideHintsManager(
-      optimization_guide::OptimizationGuideService* optimization_guide_service,
-      Profile* profile,
-      base::FilePath file_path,
-      leveldb_proto::ProtoDatabaseProvider* db_provider,
-      PrefService* pref_service)
-      : OptimizationGuideHintsManager({},
-                                      optimization_guide_service,
-                                      profile,
-                                      file_path,
+  MockOptimizationGuideHintsManager(Profile* profile, PrefService* pref_service)
+      : OptimizationGuideHintsManager(profile,
                                       pref_service,
-                                      db_provider,
+                                      /*hint_store=*/nullptr,
                                       /*top_host_provider=*/nullptr,
                                       /*url_loader_factory=*/nullptr) {}
   ~MockOptimizationGuideHintsManager() override = default;
-  MOCK_METHOD3(CanApplyOptimizationAsync,
+  MOCK_METHOD4(CanApplyOptimizationAsync,
                void(const GURL&,
+                    const base::Optional<int64_t>&,
                     optimization_guide::proto::OptimizationType,
                     optimization_guide::OptimizationGuideDecisionCallback));
 };
@@ -63,10 +55,9 @@ class MockOptimizationGuideKeyedService : public OptimizationGuideKeyedService {
   ~MockOptimizationGuideKeyedService() override = default;
 
   MOCK_METHOD0(GetHintsManager, OptimizationGuideHintsManager*());
-  MOCK_METHOD2(
-      RegisterOptimizationTypesAndTargets,
-      void(const std::vector<optimization_guide::proto::OptimizationType>&,
-           const std::vector<optimization_guide::proto::OptimizationTarget>&));
+  MOCK_METHOD1(
+      RegisterOptimizationTypes,
+      void(const std::vector<optimization_guide::proto::OptimizationType>&));
 };
 
 class OptimizationGuideBridgeTest : public testing::Test {
@@ -95,28 +86,20 @@ class OptimizationGuideBridgeTest : public testing::Test {
                       return std::make_unique<
                           MockOptimizationGuideKeyedService>(context);
                     })));
-    optimization_guide_service_ =
-        std::make_unique<optimization_guide::OptimizationGuideService>(
-            task_environment_.GetMainThreadTaskRunner());
-    db_provider_ = std::make_unique<leveldb_proto::ProtoDatabaseProvider>(
-        temp_dir_.GetPath());
     optimization_guide_hints_manager_ =
         std::make_unique<MockOptimizationGuideHintsManager>(
-            optimization_guide_service_.get(), profile_, temp_dir_.GetPath(),
-            db_provider_.get(), pref_service_.get());
+            profile_, pref_service_.get());
   }
 
   void TearDown() override {
+    optimization_guide_hints_manager_->Shutdown();
     optimization_guide_hints_manager_.reset();
-    db_provider_.reset();
-    optimization_guide_service_.reset();
   }
 
-  void RegisterOptimizationTypesAndTargets() {
-    optimization_guide_keyed_service_->RegisterOptimizationTypesAndTargets(
+  void RegisterOptimizationTypes() {
+    optimization_guide_keyed_service_->RegisterOptimizationTypes(
         {optimization_guide::proto::DEFER_ALL_SCRIPT,
-         optimization_guide::proto::PERFORMANCE_HINTS},
-        {});
+         optimization_guide::proto::PERFORMANCE_HINTS});
   }
 
  protected:
@@ -131,23 +114,17 @@ class OptimizationGuideBridgeTest : public testing::Test {
       base::test::TaskEnvironment::MainThreadType::UI};
   TestingProfileManager profile_manager_;
   TestingProfile* profile_;
-  std::unique_ptr<optimization_guide::OptimizationGuideService>
-      optimization_guide_service_;
-  std::unique_ptr<leveldb_proto::ProtoDatabaseProvider> db_provider_;
   base::ScopedTempDir temp_dir_;
   std::unique_ptr<TestingPrefServiceSimple> pref_service_;
 };
 
-TEST_F(OptimizationGuideBridgeTest, RegisterOptimizationTypesAndTargets) {
-  EXPECT_CALL(
-      *optimization_guide_keyed_service_,
-      RegisterOptimizationTypesAndTargets(
-          UnorderedElementsAre(optimization_guide::proto::PERFORMANCE_HINTS,
-                               optimization_guide::proto::DEFER_ALL_SCRIPT),
-          UnorderedElementsAre(optimization_guide::proto::
-                                   OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD)));
+TEST_F(OptimizationGuideBridgeTest, RegisterOptimizationTypes) {
+  EXPECT_CALL(*optimization_guide_keyed_service_,
+              RegisterOptimizationTypes(UnorderedElementsAre(
+                  optimization_guide::proto::PERFORMANCE_HINTS,
+                  optimization_guide::proto::DEFER_ALL_SCRIPT)));
 
-  Java_OptimizationGuideBridgeNativeUnitTest_testRegisterOptimizationTypesAndTargets(
+  Java_OptimizationGuideBridgeNativeUnitTest_testRegisterOptimizationTypes(
       env_, j_test_);
 }
 
@@ -155,13 +132,13 @@ TEST_F(OptimizationGuideBridgeTest, CanApplyOptimizationPreInit) {
   EXPECT_CALL(*optimization_guide_keyed_service_, GetHintsManager())
       .WillOnce(Return(nullptr));
 
-  RegisterOptimizationTypesAndTargets();
+  RegisterOptimizationTypes();
   Java_OptimizationGuideBridgeNativeUnitTest_testCanApplyOptimizationPreInit(
       env_, j_test_);
 }
 
 TEST_F(OptimizationGuideBridgeTest, CanApplyOptimizationHasHint) {
-  RegisterOptimizationTypesAndTargets();
+  RegisterOptimizationTypes();
   EXPECT_CALL(*optimization_guide_keyed_service_, GetHintsManager())
       .Times(2)
       .WillRepeatedly(Return(optimization_guide_hints_manager_.get()));
@@ -173,10 +150,10 @@ TEST_F(OptimizationGuideBridgeTest, CanApplyOptimizationHasHint) {
   metadata.set_performance_hints_metadata(hints_metadata);
   EXPECT_CALL(
       *optimization_guide_hints_manager_,
-      CanApplyOptimizationAsync(GURL("https://example.com/"),
+      CanApplyOptimizationAsync(GURL("https://example.com/"), Eq(base::nullopt),
                                 optimization_guide::proto::PERFORMANCE_HINTS,
                                 base::test::IsNotNullCallback()))
-      .WillOnce(base::test::RunOnceCallback<2>(
+      .WillOnce(base::test::RunOnceCallback<3>(
           optimization_guide::OptimizationGuideDecision::kTrue,
           ByRef(metadata)));
 

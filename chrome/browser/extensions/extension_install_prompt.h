@@ -16,6 +16,8 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
+#include "base/observer_list_types.h"
 #include "base/strings/string16.h"
 #include "base/threading/thread_checker.h"
 #include "chrome/browser/extensions/install_prompt_permissions.h"
@@ -79,6 +81,19 @@ class ExtensionInstallPrompt {
   // The last prompt type to display; only used for testing.
   static PromptType g_last_prompt_type_for_tests;
 
+  // Interface for observing events on the prompt.
+  class Observer : public base::CheckedObserver {
+   public:
+    // Called right before the dialog is about to show.
+    virtual void OnDialogOpened() = 0;
+
+    // Called when the user clicks accept on the dialog.
+    virtual void OnDialogAccepted() = 0;
+
+    // Called when the user clicks cancel on the dialog, presses 'x' or escape.
+    virtual void OnDialogCanceled() = 0;
+  };
+
   // Extra information needed to display an installation or uninstallation
   // prompt. Gets populated with raw data and exposes getters for formatted
   // strings so that the GTK/views/Cocoa install dialogs don't have to repeat
@@ -116,7 +131,7 @@ class ExtensionInstallPrompt {
     bool requires_parent_permission() const {
       return requires_parent_permission_;
     }
-#endif
+#endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
 
     bool ShouldShowPermissions() const;
     bool ShouldDisplayWithholdingUI() const;
@@ -169,6 +184,18 @@ class ExtensionInstallPrompt {
 
     bool has_webstore_data() const { return has_webstore_data_; }
 
+    void AddObserver(Observer* observer);
+    void RemoveObserver(Observer* observer);
+
+    // Called right before the dialog is about to show.
+    void OnDialogOpened();
+
+    // Called when the user clicks accept on the dialog.
+    void OnDialogAccepted();
+
+    // Called when the user clicks cancel on the dialog, presses 'x' or escape.
+    void OnDialogCanceled();
+
    private:
     bool ShouldDisplayRevokeButton() const;
 
@@ -181,7 +208,7 @@ class ExtensionInstallPrompt {
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
     // True if the current user is a child.
     bool requires_parent_permission_ = false;
-#endif
+#endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
 
     bool is_requesting_host_permissions_;
 
@@ -212,6 +239,8 @@ class ExtensionInstallPrompt {
     std::vector<base::FilePath> retained_files_;
     std::vector<base::string16> retained_device_messages_;
 
+    base::ObserverList<Observer> observers_;
+
     DISALLOW_COPY_AND_ASSIGN(Prompt);
   };
 
@@ -225,11 +254,12 @@ class ExtensionInstallPrompt {
     ABORTED,
   };
 
-  using DoneCallback = base::Callback<void(Result result)>;
+  using DoneCallback = base::OnceCallback<void(Result result)>;
 
-  typedef base::Callback<void(ExtensionInstallPromptShowParams*,
-                              const DoneCallback&,
-                              std::unique_ptr<ExtensionInstallPrompt::Prompt>)>
+  typedef base::RepeatingCallback<void(
+      ExtensionInstallPromptShowParams*,
+      DoneCallback,
+      std::unique_ptr<ExtensionInstallPrompt::Prompt>)>
       ShowDialogCallback;
 
   // Callback to show the default extension install dialog.
@@ -279,11 +309,11 @@ class ExtensionInstallPrompt {
   // current permissions are used.
   //
   // The |install_callback| *MUST* eventually be called.
-  void ShowDialog(const DoneCallback& install_callback,
+  void ShowDialog(DoneCallback install_callback,
                   const extensions::Extension* extension,
                   const SkBitmap* icon,
                   const ShowDialogCallback& show_dialog_callback);
-  void ShowDialog(const DoneCallback& install_callback,
+  void ShowDialog(DoneCallback install_callback,
                   const extensions::Extension* extension,
                   const SkBitmap* icon,
                   std::unique_ptr<Prompt> prompt,
@@ -292,7 +322,7 @@ class ExtensionInstallPrompt {
   // Note: if all you want to do is automatically confirm or cancel, prefer
   // ScopedTestDialogAutoConfirm from extension_dialog_auto_confirm.h
   virtual void ShowDialog(
-      const DoneCallback& install_callback,
+      DoneCallback install_callback,
       const extensions::Extension* extension,
       const SkBitmap* icon,
       std::unique_ptr<Prompt> prompt,
@@ -308,6 +338,8 @@ class ExtensionInstallPrompt {
   virtual void OnInstallFailure(const extensions::CrxInstallError& error);
 
   bool did_call_show_dialog() const { return did_call_show_dialog_; }
+
+  std::unique_ptr<Prompt> GetPromptForTesting();
 
  private:
   // Sets the icon that will be used in any UI. If |icon| is NULL, or contains

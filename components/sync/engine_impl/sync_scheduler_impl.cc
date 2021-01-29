@@ -59,6 +59,7 @@ bool ShouldRequestEarlyExit(const SyncProtocolError& error) {
     case CLIENT_DATA_OBSOLETE:
     case CLEAR_PENDING:
     case DISABLED_BY_ADMIN:
+    case ENCRYPTION_OBSOLETE:
       // If we send terminate sync early then |sync_cycle_ended| notification
       // would not be sent. If there were no actions then |ACTIONABLE_ERROR|
       // notification wouldnt be sent either. Then the UI layer would be left
@@ -68,6 +69,8 @@ bool ShouldRequestEarlyExit(const SyncProtocolError& error) {
     // Make UNKNOWN_ERROR a NOTREACHED. All the other error should be explicitly
     // handled.
     case UNKNOWN_ERROR:
+      // TODO(crbug.com/1081266): This NOTREACHED is questionable because the
+      // sync server can cause it.
       NOTREACHED();
       return false;
   }
@@ -113,17 +116,18 @@ ConfigurationParams::~ConfigurationParams() = default;
 #define SDVLOG_LOC(from_here, verbose_level) \
   DVLOG_LOC(from_here, verbose_level) << name_ << ": "
 
-SyncSchedulerImpl::SyncSchedulerImpl(const std::string& name,
-                                     BackoffDelayProvider* delay_provider,
-                                     SyncCycleContext* context,
-                                     Syncer* syncer,
-                                     bool ignore_auth_credentials)
+SyncSchedulerImpl::SyncSchedulerImpl(
+    const std::string& name,
+    std::unique_ptr<BackoffDelayProvider> delay_provider,
+    SyncCycleContext* context,
+    std::unique_ptr<Syncer> syncer,
+    bool ignore_auth_credentials)
     : name_(name),
       started_(false),
       syncer_poll_interval_seconds_(context->poll_interval()),
       mode_(CONFIGURATION_MODE),
-      delay_provider_(delay_provider),
-      syncer_(syncer),
+      delay_provider_(std::move(delay_provider)),
+      syncer_(std::move(syncer)),
       cycle_context_(context),
       next_sync_cycle_job_priority_(NORMAL_PRIORITY),
       ignore_auth_credentials_(ignore_auth_credentials) {}
@@ -816,7 +820,7 @@ void SyncSchedulerImpl::OnTypesThrottled(ModelTypeSet types,
                                          const TimeDelta& throttle_duration) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   SDVLOG(1) << "Throttling " << ModelTypeSetToString(types) << " for "
-            << throttle_duration.InMinutes() << " minutes.";
+            << throttle_duration.InSeconds() << " seconds.";
   nudge_tracker_.SetTypesThrottledUntil(types, throttle_duration,
                                         TimeTicks::Now());
   RestartWaiting();
@@ -825,8 +829,7 @@ void SyncSchedulerImpl::OnTypesThrottled(ModelTypeSet types,
 void SyncSchedulerImpl::OnTypesBackedOff(ModelTypeSet types) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   for (ModelType type : types) {
-    TimeDelta last_backoff_time =
-        TimeDelta::FromSeconds(kInitialBackoffRetrySeconds);
+    TimeDelta last_backoff_time = kInitialBackoffRetryTime;
     if (nudge_tracker_.GetTypeBlockingMode(type) ==
         WaitInterval::EXPONENTIAL_BACKOFF_RETRYING) {
       last_backoff_time = nudge_tracker_.GetTypeLastBackoffInterval(type);

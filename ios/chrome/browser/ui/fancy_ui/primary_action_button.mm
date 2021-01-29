@@ -5,8 +5,8 @@
 #import "ios/chrome/browser/ui/fancy_ui/primary_action_button.h"
 
 #import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
-#import "ios/chrome/common/ui/colors/UIColor+cr_semantic_colors.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/util/pointer_interaction_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -35,8 +35,12 @@
 
 - (void)updateStyling {
   self.hasOpaqueBackground = YES;
+  if (@available(iOS 13.4, *)) {
+      self.pointerInteractionEnabled = YES;
+      self.pointerStyleProvider = CreateOpaqueButtonPointerStyleProvider();
+  }
 
-  UIColor* hintColor = UIColor.cr_systemBackgroundColor;
+  UIColor* hintColor = [UIColor colorNamed:kPrimaryBackgroundColor];
   UIColor* inkColor = [UIColor colorWithWhite:1 alpha:0.2f];
   UIColor* backgroundColor = [UIColor colorNamed:kBlueColor];
   UIColor* disabledColor = [UIColor colorNamed:kDisabledTintColor];

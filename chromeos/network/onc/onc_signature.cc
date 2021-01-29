@@ -232,7 +232,6 @@ const OncFieldSignature wifi_fields[] = {
     {::onc::wifi::kAllowGatewayARPPolling, &kBoolSignature},
     {::onc::wifi::kAutoConnect, &kBoolSignature},
     {::onc::wifi::kEAP, &kEAPSignature},
-    {::onc::wifi::kFTEnabled, &kBoolSignature},
     {::onc::wifi::kHexSSID, &kStringSignature},
     {::onc::wifi::kHiddenSSID, &kBoolSignature},
     {::onc::wifi::kPassphrase, &kStringSignature},
@@ -245,7 +244,6 @@ const OncFieldSignature wifi_with_state_fields[] = {
     {::onc::wifi::kFrequency, &kIntegerSignature},
     {::onc::wifi::kFrequencyList, &kIntegerListSignature},
     {::onc::wifi::kSignalStrength, &kIntegerSignature},
-    {::onc::wifi::kTetheringState, &kStringSignature},
     {NULL}};
 
 const OncFieldSignature cellular_payment_portal_fields[] = {
@@ -288,7 +286,6 @@ const OncFieldSignature cellular_fields[] = {
     {::onc::kRecommended, &kRecommendedSignature},
     {::onc::cellular::kAPN, &kCellularApnSignature},
     {::onc::cellular::kAPNList, &kCellularApnListSignature},
-    {::onc::cellular::kCarrier, &kStringSignature},
     {::onc::cellular::kAutoConnect, &kBoolSignature},
     {NULL}};
 
@@ -302,6 +299,7 @@ const OncFieldSignature cellular_with_state_fields[] = {
     {::onc::cellular::kFoundNetworks, &kCellularFoundNetworkListSignature},
     {::onc::cellular::kHardwareRevision, &kStringSignature},
     {::onc::cellular::kHomeProvider, &kCellularProviderSignature},
+    {::onc::cellular::kEID, &kStringSignature},
     {::onc::cellular::kICCID, &kStringSignature},
     {::onc::cellular::kIMEI, &kStringSignature},
     {::onc::cellular::kIMSI, &kStringSignature},
@@ -326,9 +324,12 @@ const OncFieldSignature network_configuration_fields[] = {
     {::onc::network_config::kCellular, &kCellularSignature},
     {::onc::network_config::kEthernet, &kEthernetSignature},
     {::onc::network_config::kGUID, &kStringSignature},
-    {::onc::network_config::kIPAddressConfigType, &kStringSignature},
+    {::onc::network_config::kIPAddressConfigType, &kStringSignature,
+     []() { return base::Value(::onc::network_config::kIPConfigTypeDHCP); }},
+    {::onc::network_config::kMetered, &kBoolSignature},
     {::onc::network_config::kName, &kStringSignature},
-    {::onc::network_config::kNameServersConfigType, &kStringSignature},
+    {::onc::network_config::kNameServersConfigType, &kStringSignature,
+     []() { return base::Value(::onc::network_config::kIPConfigTypeDHCP); }},
     {::onc::network_config::kPriority, &kIntegerSignature},
     {::onc::network_config::kProxySettings, &kProxySettingsSignature},
     {::onc::kRecommended, &kRecommendedSignature},
@@ -361,7 +362,9 @@ const OncFieldSignature global_network_configuration_fields[] = {
      &kBoolSignature},
     {::onc::global_network_config::kAllowOnlyPolicyNetworksToConnectIfAvailable,
      &kBoolSignature},
-    {::onc::global_network_config::kBlacklistedHexSSIDs, &kStringListSignature},
+    {/* Deprecated */ ::onc::global_network_config::kBlacklistedHexSSIDs,
+     &kStringListSignature},
+    {::onc::global_network_config::kBlockedHexSSIDs, &kStringListSignature},
     {::onc::global_network_config::kDisableNetworkTypes, &kStringListSignature},
     {NULL}};
 

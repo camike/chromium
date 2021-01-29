@@ -7,8 +7,8 @@
 #include "ash/accelerators/accelerator_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/wm/window_state.h"
+#include "base/containers/contains.h"
 #include "base/feature_list.h"
-#include "base/stl_util.h"
 #include "media/base/media_switches.h"
 #include "ui/aura/window.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -34,6 +34,7 @@ bool IsSystemKey(ui::KeyboardCode key_code) {
     case ui::VKEY_VOLUME_UP:
     case ui::VKEY_POWER:
     case ui::VKEY_SLEEP:
+    case ui::VKEY_PRIVACY_SCREEN_TOGGLE:
       return true;
     case ui::VKEY_MEDIA_NEXT_TRACK:
     case ui::VKEY_MEDIA_PAUSE:

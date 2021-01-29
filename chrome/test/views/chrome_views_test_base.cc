@@ -6,57 +6,23 @@
 
 #include <memory>
 
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
+#include "chrome/test/views/chrome_test_widget.h"
 #include "content/public/test/browser_task_environment.h"
-#include "ui/base/theme_provider.h"
-#include "ui/gfx/color_palette.h"
-#include "ui/gfx/color_utils.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "ash/test/ash_test_helper.h"
 #include "ui/views/test/views_test_helper_aura.h"
 #endif
 
 namespace {
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 std::unique_ptr<aura::test::AuraTestHelper> MakeTestHelper() {
   return std::make_unique<ash::AshTestHelper>();
 }
 #endif
-
-class StubThemeProvider : public ui::ThemeProvider {
- public:
-  StubThemeProvider() = default;
-  ~StubThemeProvider() override = default;
-
-  // ui::ThemeProvider:
-  gfx::ImageSkia* GetImageSkiaNamed(int id) const override { return nullptr; }
-  SkColor GetColor(int id) const override { return gfx::kPlaceholderColor; }
-  color_utils::HSL GetTint(int id) const override { return color_utils::HSL(); }
-  int GetDisplayProperty(int id) const override { return -1; }
-  bool ShouldUseNativeFrame() const override { return false; }
-  bool HasCustomImage(int id) const override { return false; }
-  bool HasCustomColor(int id) const override { return false; }
-  base::RefCountedMemory* GetRawData(int id, ui::ScaleFactor scale_factor)
-      const override {
-    return nullptr;
-  }
-};
-
-class TestWidget : public views::Widget {
- public:
-  TestWidget() = default;
-  ~TestWidget() override = default;
-
-  // views::Widget:
-  const ui::ThemeProvider* GetThemeProvider() const override {
-    return &theme_provider_;
-  }
-
- private:
-  StubThemeProvider theme_provider_;
-};
 
 }  // namespace
 
@@ -69,7 +35,7 @@ ChromeViewsTestBase::ChromeViewsTestBase()
 ChromeViewsTestBase::~ChromeViewsTestBase() = default;
 
 void ChromeViewsTestBase::SetUp() {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   views::ViewsTestHelperAura::SetAuraTestHelperFactory(&MakeTestHelper);
 #endif
 
@@ -83,7 +49,7 @@ void ChromeViewsTestBase::SetUp() {
       ChromeLayoutProvider::CreateLayoutProvider());
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 void ChromeViewsTestBase::TearDown() {
   views::ViewsTestHelperAura::SetAuraTestHelperFactory(nullptr);
 
@@ -92,5 +58,5 @@ void ChromeViewsTestBase::TearDown() {
 #endif
 
 std::unique_ptr<views::Widget> ChromeViewsTestBase::AllocateTestWidget() {
-  return std::make_unique<TestWidget>();
+  return std::make_unique<ChromeTestWidget>();
 }

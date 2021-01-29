@@ -10,11 +10,11 @@
 #include <string>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/optional.h"
 #include "chrome/browser/ui/tabs/tab_renderer_data.h"
 #include "chrome/browser/ui/views/tabs/tab_slot_view.h"
+#include "components/performance_manager/public/freezing/freezing.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "ui/base/layout.h"
 #include "ui/gfx/animation/animation_delegate.h"
@@ -25,6 +25,7 @@
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/focus_ring.h"
 #include "ui/views/masked_targeter_delegate.h"
+#include "ui/views/metadata/metadata_header_macros.h"
 #include "ui/views/view_observer.h"
 
 class AlertIndicator;
@@ -49,13 +50,11 @@ class View;
 //
 ///////////////////////////////////////////////////////////////////////////////
 class Tab : public gfx::AnimationDelegate,
-            public views::ButtonListener,
             public views::MaskedTargeterDelegate,
             public views::ViewObserver,
             public TabSlotView {
  public:
-  // The Tab's class name.
-  static const char kViewClassName[];
+  METADATA_HEADER(Tab);
 
   // When the content's width of the tab shrinks to below this size we should
   // hide the close button on inactive tabs. Any smaller and they're too easy
@@ -68,21 +67,19 @@ class Tab : public gfx::AnimationDelegate,
   static void SetShowHoverCardOnMouseHoverForTesting(bool value);
 
   explicit Tab(TabController* controller);
+  Tab(const Tab&) = delete;
+  Tab& operator=(const Tab&) = delete;
   ~Tab() override;
 
   // gfx::AnimationDelegate:
   void AnimationEnded(const gfx::Animation* animation) override;
   void AnimationProgressed(const gfx::Animation* animation) override;
 
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
   // views::MaskedTargeterDelegate:
   bool GetHitTestMask(SkPath* mask) const override;
 
   // TabSlotView:
   void Layout() override;
-  const char* GetClassName() const override;
   bool OnKeyPressed(const ui::KeyEvent& event) override;
   bool OnKeyReleased(const ui::KeyEvent& event) override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
@@ -150,6 +147,11 @@ class Tab : public gfx::AnimationDelegate,
   // to the user that it needs their attention.
   void SetTabNeedsAttention(bool attention);
 
+  void SetFreezingVoteToken(
+      std::unique_ptr<performance_manager::freezing::FreezingVoteToken> token);
+  void ReleaseFreezingVoteToken();
+  bool HasFreezingVoteToken() const { return freezing_token_ ? true : false; }
+
   // Returns true if this tab became the active tab selected in
   // response to the last ui::ET_TAP_DOWN gesture dispatched to
   // this tab. Only used for collecting UMA metrics.
@@ -174,6 +176,10 @@ class Tab : public gfx::AnimationDelegate,
   // Returns an alert state to be shown among given alert states.
   static base::Optional<TabAlertState> GetAlertStateToShow(
       const std::vector<TabAlertState>& alert_states);
+
+  bool showing_close_button_for_testing() const {
+    return showing_close_button_;
+  }
 
  private:
   class TabCloseButtonObserver;
@@ -213,6 +219,8 @@ class Tab : public gfx::AnimationDelegate,
   // the mouse moving over the tab. If the tab is already hovered or mouse
   // events are disabled because of touch input, this is a no-op.
   void MaybeUpdateHoverStatus(const ui::MouseEvent& event);
+
+  void CloseButtonPressed(const ui::Event& event);
 
   // The controller, never nullptr.
   TabController* const controller_;
@@ -276,9 +284,11 @@ class Tab : public gfx::AnimationDelegate,
   std::unique_ptr<TabCloseButtonObserver> tab_close_button_observer_;
 
   // Focus ring for accessibility.
-  std::unique_ptr<views::FocusRing> focus_ring_;
+  views::FocusRing* focus_ring_;
 
-  DISALLOW_COPY_AND_ASSIGN(Tab);
+  // Freezing token held while the tab is collapsed.
+  std::unique_ptr<performance_manager::freezing::FreezingVoteToken>
+      freezing_token_;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_TABS_TAB_H_

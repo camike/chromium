@@ -11,6 +11,7 @@ import android.util.AttributeSet;
 import android.view.View;
 import android.widget.ImageView;
 
+import androidx.annotation.ColorRes;
 import androidx.annotation.DrawableRes;
 import androidx.annotation.Nullable;
 import androidx.annotation.StringRes;
@@ -40,11 +41,16 @@ public class ChromeImageViewPreference extends Preference {
     // The image resource ID to use for the ImageView widget source.
     @DrawableRes
     private int mImageRes;
+    // The color resource ID for tinting of ImageView widget.
+    @ColorRes
+    private int mColorRes;
     // The string resource ID to use for the ImageView widget content description.
     @StringRes
     private int mContentDescriptionRes;
     // Whether the ImageView should be enabled.
     private boolean mImageViewEnabled = true;
+    // The ImageView Button.
+    private ImageView mButton;
 
     /**
      * Constructor for use in Java.
@@ -61,6 +67,7 @@ public class ChromeImageViewPreference extends Preference {
 
         setWidgetLayoutResource(R.layout.preference_chrome_image_view);
         setSingleLineTitle(false);
+        setImageColor(R.color.default_icon_color);
     }
 
     /**
@@ -75,24 +82,13 @@ public class ChromeImageViewPreference extends Preference {
     public void onBindViewHolder(PreferenceViewHolder holder) {
         super.onBindViewHolder(holder);
 
-        ImageView button = (ImageView) holder.findViewById(R.id.image_view_widget);
-        View view = holder.itemView;
+        mButton = (ImageView) holder.findViewById(R.id.image_view_widget);
+        mButton.setBackgroundColor(Color.TRANSPARENT);
+        mButton.setVisibility(View.VISIBLE);
 
-        if (mImageRes != 0) {
-            Drawable buttonImg = SettingsUtils.getTintedIcon(getContext(), mImageRes);
-
-            button.setImageDrawable(buttonImg);
-            button.setBackgroundColor(Color.TRANSPARENT);
-            button.setVisibility(View.VISIBLE);
-            button.setEnabled(mImageViewEnabled);
-            if (mImageViewEnabled) button.setOnClickListener(mListener);
-
-            if (mContentDescriptionRes != 0) {
-                button.setContentDescription(view.getResources().getString(mContentDescriptionRes));
-            }
-        }
-
-        ManagedPreferencesUtils.onBindViewToImageViewPreference(mManagedPrefDelegate, this, view);
+        configureImageView();
+        ManagedPreferencesUtils.onBindViewToImageViewPreference(
+                mManagedPrefDelegate, this, holder.itemView);
     }
 
     @Override
@@ -110,14 +106,29 @@ public class ChromeImageViewPreference extends Preference {
         mImageRes = imageRes;
         mContentDescriptionRes = contentDescriptionRes;
         mListener = listener;
+        configureImageView();
         notifyChanged();
+    }
+
+    /**
+     * Sets the Color resource ID which will be used to set the color of the image.
+     * @param colorRes
+     */
+    public void setImageColor(@ColorRes int colorRes) {
+        if (mColorRes == colorRes) return;
+
+        mColorRes = colorRes;
+        configureImageView();
     }
 
     /**
      * Enables/Disables the ImageView, allowing for clicks to pass through (when disabled).
      */
     public void setImageViewEnabled(boolean enabled) {
+        if (mImageViewEnabled == enabled) return;
+
         mImageViewEnabled = enabled;
+        configureImageView();
     }
 
     /**
@@ -129,5 +140,19 @@ public class ChromeImageViewPreference extends Preference {
 
         return mManagedPrefDelegate.isPreferenceControlledByPolicy(this)
                 || mManagedPrefDelegate.isPreferenceControlledByCustodian(this);
+    }
+
+    private void configureImageView() {
+        if (mImageRes == 0 || mButton == null) return;
+
+        Drawable buttonImg = SettingsUtils.getTintedIcon(getContext(), mImageRes, mColorRes);
+        mButton.setImageDrawable(buttonImg);
+        mButton.setEnabled(mImageViewEnabled);
+
+        if (mImageViewEnabled) mButton.setOnClickListener(mListener);
+
+        if (mContentDescriptionRes != 0) {
+            mButton.setContentDescription(mButton.getResources().getString(mContentDescriptionRes));
+        }
     }
 }

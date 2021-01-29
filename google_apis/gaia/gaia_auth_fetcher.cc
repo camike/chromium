@@ -803,7 +803,7 @@ void GaiaAuthFetcher::StartOAuthMultilogin(
 
   std::string source_string = net::EscapeUrlEncodedData(source_, true);
   std::string parameters = base::StringPrintf(
-      "?source=%s&mlreuse=%i", source_string.c_str(),
+      "?source=%s&reuseCookies=%i", source_string.c_str(),
       mode == gaia::MultiloginMode::MULTILOGIN_PRESERVE_COOKIE_ACCOUNTS_ORDER
           ? 1
           : 0);
@@ -983,6 +983,10 @@ void GaiaAuthFetcher::StartGetCheckConnectionInfo() {
 GoogleServiceAuthError GaiaAuthFetcher::GenerateAuthError(
     const std::string& data,
     net::Error net_error) {
+  VLOG(1) << "Got authentication error";
+  VLOG(1) << "net_error: " << net::ErrorToString(net_error);
+  VLOG(1) << "response body: " << data;
+
   if (net_error != net::OK) {
     if (net_error == net::ERR_ABORTED) {
       return GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED);

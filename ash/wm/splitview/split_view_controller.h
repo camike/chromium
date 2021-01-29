@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ASH_WM_SPLITSVIEW_SPLIT_VIEW_CONTROLLER_H_
-#define ASH_WM_SPLITSVIEW_SPLIT_VIEW_CONTROLLER_H_
+#ifndef ASH_WM_SPLITVIEW_SPLIT_VIEW_CONTROLLER_H_
+#define ASH_WM_SPLITVIEW_SPLIT_VIEW_CONTROLLER_H_
 
 #include <limits>
 #include <memory>
@@ -23,7 +23,6 @@
 #include "ui/display/display.h"
 #include "ui/display/display_observer.h"
 #include "ui/gfx/geometry/point.h"
-#include "ui/wm/public/activation_change_observer.h"
 
 namespace ui {
 class Layer;
@@ -43,7 +42,6 @@ class SplitViewOverviewSessionTest;
 // TODO(xdai): Make it work for multi-display non mirror environment.
 class ASH_EXPORT SplitViewController : public aura::WindowObserver,
                                        public WindowStateObserver,
-                                       public wm::ActivationChangeObserver,
                                        public ShellObserver,
                                        public OverviewObserver,
                                        public display::DisplayObserver,
@@ -204,6 +202,13 @@ class ASH_EXPORT SplitViewController : public aura::WindowObserver,
   // on the middle split position).
   void InitDividerPositionForTransition(int divider_position);
 
+  // Returns true if |window| is in a transitinal state which means that
+  // |SplitViewController| has already changed its internal snapped state for
+  // |window| but the snapped state has not been applied to |window|'s window
+  // state yet. The transional state can be happen in some clients (e.g. ARC
+  // app) which handle window states asynchronously.
+  bool IsWindowInTransitionalState(const aura::Window* window) const;
+
   // Called when the overview button tray has been long pressed. Enters
   // splitview mode if the active window is snappable. Also enters overview mode
   // if device is not currently in overview mode.
@@ -234,12 +239,7 @@ class ASH_EXPORT SplitViewController : public aura::WindowObserver,
 
   // WindowStateObserver:
   void OnPostWindowStateTypeChange(WindowState* window_state,
-                                   WindowStateType old_type) override;
-
-  // wm::ActivationChangeObserver:
-  void OnWindowActivated(ActivationReason reason,
-                         aura::Window* gained_active,
-                         aura::Window* lost_active) override;
+                                   chromeos::WindowStateType old_type) override;
 
   // ShellObserver:
   void OnPinnedStateChanged(aura::Window* pinned_window) override;
@@ -247,6 +247,7 @@ class ASH_EXPORT SplitViewController : public aura::WindowObserver,
   // OverviewObserver:
   void OnOverviewModeStarting() override;
   void OnOverviewModeEnding(OverviewSession* overview_session) override;
+  void OnOverviewModeEnded() override;
 
   // display::DisplayObserver:
   void OnDisplayRemoved(const display::Display& old_display) override;
@@ -258,7 +259,6 @@ class ASH_EXPORT SplitViewController : public aura::WindowObserver,
   void OnTabletModeStarted() override;
   void OnTabletModeEnding() override;
   void OnTabletModeEnded() override;
-  void OnTabletControllerDestroyed() override;
 
   // AccessibilityObserver:
   void OnAccessibilityStatusChanged() override;
@@ -279,6 +279,14 @@ class ASH_EXPORT SplitViewController : public aura::WindowObserver,
   friend class SplitViewOverviewSessionTest;
   class TabDraggedWindowObserver;
   class DividerSnapAnimation;
+  class AutoSnapController;
+
+  // Reason that a snapped window is detached from the splitview.
+  enum class WindowDetachedReason {
+    kWindowMinimized,
+    kWindowDestroyed,
+    kWindowDragged,
+  };
 
   // These functions return |left_window_| and |right_window_|, swapped in
   // nonprimary screen orientations. Note that they may return null.
@@ -344,11 +352,12 @@ class ASH_EXPORT SplitViewController : public aura::WindowObserver,
   // If there are two snapped windows, closing/minimizing/tab-dragging one of
   // them will open overview window grid on the closed/minimized/tab-dragged
   // window side of the screen. If there is only one snapped windows, closing/
-  // minimizing/tab-dragging the sanpped window will end split view mode and
+  // minimizing/tab-dragging the snapped window will end split view mode and
   // adjust the overview window grid bounds if the overview mode is active at
-  // that moment. |window_drag| is true if the window was detached as a result
-  // of dragging.
-  void OnSnappedWindowDetached(aura::Window* window, bool window_drag);
+  // that moment. |reason| specifies the reason that the snapped window is
+  // detached from splitview.
+  void OnSnappedWindowDetached(aura::Window* window,
+                               WindowDetachedReason reason);
 
   // Returns the closest position ratio based on |distance| and |length|.
   float FindClosestPositionRatio(float distance, float length);
@@ -501,15 +510,15 @@ class ASH_EXPORT SplitViewController : public aura::WindowObserver,
 
   base::ObserverList<SplitViewObserver>::Unchecked observers_;
 
-  ScopedObserver<TabletModeController, TabletModeObserver>
-      tablet_mode_observer_{this};
-
   // Records the presentation time of resize operation in split view mode.
   std::unique_ptr<PresentationTimeRecorder> presentation_time_recorder_;
+
+  // Observes windows and performs auto snapping if needed.
+  std::unique_ptr<AutoSnapController> auto_snap_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(SplitViewController);
 };
 
 }  // namespace ash
 
-#endif  // ASH_WM_SPLITSVIEW_SPLIT_VIEW_CONTROLLER_H_
+#endif  // ASH_WM_SPLITVIEW_SPLIT_VIEW_CONTROLLER_H_

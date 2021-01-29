@@ -46,8 +46,9 @@ void SetShouldUse24HourClock(bool use_24_hour_clock) {
 
 SystemClock::SystemClock() {
   device_settings_observer_ = CrosSettings::Get()->AddSettingsObserver(
-      kSystemUse24HourClock, base::Bind(&SystemClock::OnSystemPrefChanged,
-                                        weak_ptr_factory_.GetWeakPtr()));
+      kSystemUse24HourClock,
+      base::BindRepeating(&SystemClock::OnSystemPrefChanged,
+                          weak_ptr_factory_.GetWeakPtr()));
 
   if (LoginState::IsInitialized())
     LoginState::Get()->AddObserver(this);
@@ -106,28 +107,53 @@ void SystemClock::SetProfile(Profile* profile) {
   PrefService* prefs = profile->GetPrefs();
   user_pref_registrar_.reset(new PrefChangeRegistrar);
   user_pref_registrar_->Init(prefs);
-  user_pref_registrar_->Add(
-      prefs::kUse24HourClock,
-      base::Bind(&SystemClock::UpdateClockType, base::Unretained(this)));
+  user_pref_registrar_->Add(prefs::kUse24HourClock,
+                            base::BindRepeating(&SystemClock::UpdateClockType,
+                                                base::Unretained(this)));
   UpdateClockType();
 }
 
-void SystemClock::SetLastFocusedPodHourClockType(
+SystemClock::ScopedHourClockType::ScopedHourClockType(
+    base::WeakPtr<SystemClock> system_clock)
+    : system_clock_(std::move(system_clock)) {}
+
+SystemClock::ScopedHourClockType::~ScopedHourClockType() {
+  if (!system_clock_)
+    return;
+  system_clock_->scoped_hour_clock_type_.reset();
+  system_clock_->UpdateClockType();
+}
+
+SystemClock::ScopedHourClockType::ScopedHourClockType(
+    ScopedHourClockType&& other) = default;
+
+SystemClock::ScopedHourClockType& SystemClock::ScopedHourClockType::operator=(
+    ScopedHourClockType&& other) = default;
+
+void SystemClock::ScopedHourClockType::UpdateClockType(
+    base::HourClockType clock_type) {
+  if (!system_clock_)
+    return;
+  system_clock_->scoped_hour_clock_type_ = clock_type;
+  system_clock_->UpdateClockType();
+}
+
+SystemClock::ScopedHourClockType SystemClock::CreateScopedHourClockType(
     base::HourClockType hour_clock_type) {
-  user_pod_was_focused_ = true;
-  last_focused_pod_hour_clock_type_ = hour_clock_type;
+  DCHECK(!scoped_hour_clock_type_.has_value());
+  scoped_hour_clock_type_ = hour_clock_type;
   UpdateClockType();
+  return ScopedHourClockType(weak_ptr_factory_.GetWeakPtr());
 }
 
 bool SystemClock::ShouldUse24HourClock() const {
+  if (scoped_hour_clock_type_.has_value())
+    return scoped_hour_clock_type_ == base::k24HourClock;
   // default is used for kUse24HourClock preference on login screen and whenever
   // set so in user's preference
   const chromeos::LoginState::LoggedInUserType status =
       LoginState::IsInitialized() ? LoginState::Get()->GetLoggedInUserType()
                                   : LoginState::LOGGED_IN_USER_NONE;
-
-  if (status == LoginState::LOGGED_IN_USER_NONE && user_pod_was_focused_)
-    return last_focused_pod_hour_clock_type_ == base::k24HourClock;
 
   const CrosSettings* const cros_settings = CrosSettings::Get();
   bool system_use_24_hour_clock = true;

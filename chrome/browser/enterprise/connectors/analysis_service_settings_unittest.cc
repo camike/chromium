@@ -5,6 +5,8 @@
 #include "chrome/browser/enterprise/connectors/analysis_service_settings.h"
 #include "base/json/json_reader.h"
 #include "base/no_destructor.h"
+#include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/enterprise/connectors/connectors_service.h"
 #include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -26,7 +28,7 @@ struct TestParam {
 };
 
 constexpr char kNormalSettings[] = R"({
-  "service_provider": "Google",
+  "service_provider": "google",
   "enable": [
     {"url_list": ["*"], "tags": ["dlp", "malware"]},
   ],
@@ -40,12 +42,13 @@ constexpr char kNormalSettings[] = R"({
   "block_password_protected": true,
   "block_large_files": true,
   "block_unsupported_file_types": true,
+  "minimum_data_size": 123,
 })";
 
 constexpr char kOnlyEnabledPatternsSettings[] = R"({
-  "service_provider": "Google",
+  "service_provider": "google",
   "enable": [
-    {"url_list": ["scan1.com", "scan2.com"], "tags": ["enabled"]},
+    {"url_list": ["scan1.com", "scan2.com"], "tags": ["dlp"]},
   ],
 })";
 
@@ -63,10 +66,11 @@ constexpr char kNoProviderSettings[] = R"({
   "block_password_protected": true,
   "block_large_files": true,
   "block_unsupported_file_types": true,
+  "minimum_data_size": 123,
 })";
 
 constexpr char kNoEnabledPatternsSettings[] = R"({
-  "service_provider": "Google",
+  "service_provider": "google",
   "disable": [
     {"url_list": ["no.dlp.com", "no.dlp.or.malware.ca"], "tags": ["dlp"]},
     {"url_list": ["no.malware.com", "no.dlp.or.malware.ca"],
@@ -79,6 +83,27 @@ constexpr char kNoEnabledPatternsSettings[] = R"({
   "block_unsupported_file_types": true,
 })";
 
+constexpr char kNormalSettingsWithCustomMessage[] = R"({
+  "service_provider": "google",
+  "enable": [
+    {"url_list": ["*"], "tags": ["dlp", "malware"]},
+  ],
+  "disable": [
+    {"url_list": ["no.dlp.com", "no.dlp.or.malware.ca"], "tags": ["dlp"]},
+    {"url_list": ["no.malware.com", "no.dlp.or.malware.ca"],
+         "tags": ["malware"]},
+    {"url_list": ["scan2.com"], "tags": ["dlp", "malware"]},
+  ],
+  "block_until_verdict": 1,
+  "block_password_protected": true,
+  "block_large_files": true,
+  "block_unsupported_file_types": true,
+  "minimum_data_size": 123,
+  "custom_messages": [
+    {"message": "abcèéç"},
+  ],
+})";
+
 constexpr char kScan1DotCom[] = "https://scan1.com";
 constexpr char kScan2DotCom[] = "https://scan2.com";
 constexpr char kNoDlpDotCom[] = "https://no.dlp.com";
@@ -88,7 +113,7 @@ constexpr char kNoDlpOrMalwareDotCa[] = "https://no.dlp.or.malware.ca";
 AnalysisSettings* OnlyEnabledSettings() {
   static base::NoDestructor<AnalysisSettings> settings([]() {
     AnalysisSettings settings;
-    settings.tags = {"enabled"};
+    settings.tags = {"dlp"};
     return settings;
   }());
   return settings.get();
@@ -101,6 +126,7 @@ AnalysisSettings NormalSettingsWithTags(std::set<std::string> tags) {
   settings.block_password_protected_files = true;
   settings.block_large_files = true;
   settings.block_unsupported_file_types = true;
+  settings.minimum_data_size = 123;
   return settings;
 }
 
@@ -122,6 +148,15 @@ AnalysisSettings* NormalDlpAndMalwareSettings() {
   return settings.get();
 }
 
+AnalysisSettings* NormalSettingsWithCustomMessage() {
+  static base::NoDestructor<AnalysisSettings> settings([]() {
+    AnalysisSettings settings = NormalSettingsWithTags({"dlp", "malware"});
+    settings.custom_message_text = base::UTF8ToUTF16("abcèéç");
+    return settings;
+  }());
+  return settings.get();
+}
+
 AnalysisSettings* NoSettings() {
   return nullptr;
 }
@@ -133,6 +168,12 @@ class AnalysisServiceSettingsTest : public testing::TestWithParam<TestParam> {
   GURL url() const { return GURL(GetParam().url); }
   const char* settings_value() const { return GetParam().settings_value; }
   AnalysisSettings* expected_settings() const {
+    // Set the GURL field dynamically to avoid static initialization issues.
+    if (GetParam().expected_settings != NoSettings() &&
+        !GetParam().expected_settings->analysis_url.is_valid()) {
+      GetParam().expected_settings->analysis_url =
+          GURL("https://safebrowsing.google.com/safebrowsing/uploads/scan");
+    }
     return GetParam().expected_settings;
   }
 
@@ -141,12 +182,12 @@ class AnalysisServiceSettingsTest : public testing::TestWithParam<TestParam> {
 };
 
 TEST_P(AnalysisServiceSettingsTest, Test) {
-  // auto value = base::Value::AsDictionaryValue(base::Value(pref_value()));
   auto settings = base::JSONReader::Read(settings_value(),
                                          base::JSON_ALLOW_TRAILING_COMMAS);
   ASSERT_TRUE(settings.has_value());
 
-  AnalysisServiceSettings service_settings(settings.value());
+  ServiceProviderConfig config(kServiceProviderConfig);
+  AnalysisServiceSettings service_settings(settings.value(), config);
 
   auto analysis_settings = service_settings.GetAnalysisSettings(url());
   ASSERT_EQ((expected_settings() != nullptr), analysis_settings.has_value());
@@ -160,6 +201,10 @@ TEST_P(AnalysisServiceSettingsTest, Test) {
               expected_settings()->block_large_files);
     ASSERT_EQ(analysis_settings.value().block_unsupported_file_types,
               expected_settings()->block_unsupported_file_types);
+    ASSERT_EQ(analysis_settings.value().analysis_url,
+              expected_settings()->analysis_url);
+    ASSERT_EQ(analysis_settings.value().minimum_data_size,
+              expected_settings()->minimum_data_size);
   }
 }
 
@@ -201,6 +246,9 @@ INSTANTIATE_TEST_CASE_P(
         TestParam(kNoMalwareDotCom, kNoEnabledPatternsSettings, NoSettings()),
         TestParam(kNoDlpOrMalwareDotCa,
                   kNoEnabledPatternsSettings,
-                  NoSettings())));
+                  NoSettings()),
+        TestParam(kScan1DotCom,
+                  kNormalSettingsWithCustomMessage,
+                  NormalSettingsWithCustomMessage())));
 
 }  // namespace enterprise_connectors

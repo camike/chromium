@@ -14,11 +14,13 @@
 #include "base/containers/mru_cache.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
 #include "base/sequence_checker.h"
 #include "base/time/clock.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/optimization_guide/optimization_guide_session_statistic.h"
-#include "components/optimization_guide/optimization_guide_enums.h"
+#include "chrome/browser/optimization_guide/prediction/prediction_model_download_observer.h"
+#include "components/optimization_guide/core/optimization_guide_enums.h"
+#include "components/optimization_guide/core/optimization_guide_session_statistic.h"
 #include "components/optimization_guide/proto/models.pb.h"
 #include "services/network/public/cpp/network_quality_tracker.h"
 #include "url/origin.h"
@@ -31,10 +33,6 @@ namespace content {
 class NavigationHandle;
 }  // namespace content
 
-namespace leveldb_proto {
-class ProtoDatabaseProvider;
-}  // namespace leveldb_proto
-
 namespace network {
 class SharedURLLoaderFactory;
 }  // namespace network
@@ -46,33 +44,31 @@ namespace optimization_guide {
 
 enum class OptimizationGuideDecision;
 class OptimizationGuideStore;
+class OptimizationTargetModelObserver;
 class PredictionModel;
+class PredictionModelDownloadManager;
 class PredictionModelFetcher;
+class PredictionModelFile;
 class TopHostProvider;
 
 using HostModelFeaturesMRUCache =
     base::HashingMRUCache<std::string, base::flat_map<std::string, float>>;
 
+using OptimizationTargetDecisionCallback =
+    base::OnceCallback<void(optimization_guide::OptimizationTargetDecision)>;
+
+using PostModelLoadCallback =
+    base::OnceCallback<void(std::unique_ptr<proto::PredictionModel>, bool)>;
+
 // A PredictionManager supported by the optimization guide that makes an
 // OptimizationTargetDecision by evaluating the corresponding prediction model
 // for an OptimizationTarget.
 class PredictionManager
-    : public network::NetworkQualityTracker::EffectiveConnectionTypeObserver {
+    : public network::NetworkQualityTracker::EffectiveConnectionTypeObserver,
+      public PredictionModelDownloadObserver {
  public:
   PredictionManager(
-      const std::vector<optimization_guide::proto::OptimizationTarget>&
-          optimization_targets_at_initialization,
-      const base::FilePath& profile_path,
-      leveldb_proto::ProtoDatabaseProvider* database_provider,
-      TopHostProvider* top_host_provider,
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-      PrefService* pref_service,
-      Profile* profile);
-
-  PredictionManager(
-      const std::vector<optimization_guide::proto::OptimizationTarget>&
-          optimization_targets_at_initialization,
-      std::unique_ptr<OptimizationGuideStore> model_and_features_store,
+      OptimizationGuideStore* model_and_features_store,
       TopHostProvider* top_host_provider,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       PrefService* pref_service,
@@ -80,18 +76,44 @@ class PredictionManager
 
   ~PredictionManager() override;
 
-  // Register the optimization targets that may have ShouldTargetNavigtation
+  // Register the optimization targets that may have ShouldTargetNavigation
   // requested by consumers of the Optimization Guide.
   void RegisterOptimizationTargets(
       const std::vector<proto::OptimizationTarget>& optimization_targets);
 
-  // Determine if the navigation matches the critieria for
+  // Adds an observer for updates to the model for |optimization_target|.
+  //
+  // It is assumed that any model retrieved this way will be passed to the
+  // Machine Learning Service for inference.
+  void AddObserverForOptimizationTargetModel(
+      proto::OptimizationTarget optimization_target,
+      OptimizationTargetModelObserver* observer);
+
+  // Removes an observer for updates to the model for |optimization_target|.
+  //
+  // If |observer| is registered for multiple targets, |observer| must be
+  // removed for all observed targets for in order for it to be fully
+  // removed from receiving any calls.
+  void RemoveObserverForOptimizationTargetModel(
+      proto::OptimizationTarget optimization_target,
+      OptimizationTargetModelObserver* observer);
+
+  // Determine if the navigation matches the criteria for
   // |optimization_target|. Return kUnknown if a PredictionModel for the
   // optimization target is not registered and kModelNotAvailableOnClient if the
-  // if model for the optimization target is not currently on the client.
+  // model for the optimization target is not currently on the client.
+  // If the model for the optimization target requires a client model feature
+  // that is present in |override_client_model_feature_values|, the value from
+  // |override_client_model_feature_values| will be used. The client will
+  // calculate the value for any required client model features not present in
+  // |override_client_model_feature_values| and inject any host model features
+  // it received from the server and send that complete feature map for
+  // evaluation.
   OptimizationTargetDecision ShouldTargetNavigation(
       content::NavigationHandle* navigation_handle,
-      proto::OptimizationTarget optimization_target);
+      proto::OptimizationTarget optimization_target,
+      const base::flat_map<proto::ClientModelFeature, float>&
+          override_client_model_feature_values);
 
   // Update |session_fcp_| and |previous_fcp_| with |fcp|.
   void UpdateFCPSessionStatistics(base::TimeDelta fcp);
@@ -113,13 +135,23 @@ class PredictionManager
     return prediction_model_fetcher_.get();
   }
 
-  OptimizationGuideStore* model_and_features_store() const {
-    return model_and_features_store_.get();
+  // Set the prediction model download manager for testing.
+  void SetPredictionModelDownloadManagerForTesting(
+      std::unique_ptr<PredictionModelDownloadManager>
+          prediction_model_download_manager);
+
+  PredictionModelDownloadManager* prediction_model_download_manager() const {
+    return prediction_model_download_manager_.get();
   }
 
-  // Return whether there have been any optimization targets registered.
-  bool HasRegisteredOptimizationTargets() const {
-    return !registered_optimization_targets_.empty();
+  OptimizationGuideStore* model_and_features_store() const {
+    return model_and_features_store_;
+  }
+
+  // Return the optimization targets that are registered.
+  base::flat_set<optimization_guide::proto::OptimizationTarget>
+  registered_optimization_targets() const {
+    return registered_optimization_targets_;
   }
 
   // Override |clock_| for testing.
@@ -128,6 +160,21 @@ class PredictionManager
   // Clear host model features from the in memory host model features map and
   // from the models and features store.
   void ClearHostModelFeatures();
+
+  // Override the decision returned by |ShouldTargetNavigation|
+  // for |optimization_target|. For testing purposes only.
+  void OverrideTargetDecisionForTesting(
+      proto::OptimizationTarget optimization_target,
+      OptimizationGuideDecision optimization_guide_decision);
+
+  // Override the model file returned to observers for |optimization_target|.
+  // For testing purposes only.
+  void OverrideTargetModelFileForTesting(
+      proto::OptimizationTarget optimization_target,
+      const base::FilePath& file_path);
+
+  // PredictionModelDownloadObserver:
+  void OnModelReady(const proto::PredictionModel& model) override;
 
  protected:
   // Return the prediction model for the optimization target used by this
@@ -166,25 +213,30 @@ class PredictionManager
           prediction_models);
 
  private:
-  // Called on construction to register optimization targets, initialize the
-  // prediction model and host model features store, and register as an observer
-  // to the network quality tracker.
-  void Initialize(const std::vector<proto::OptimizationTarget>&
-                      optimization_targets_at_intialization);
+  // Called on construction to initialize the prediction model and host model
+  // features store, and register as an observer to the network quality tracker.
+  void Initialize();
 
   // Construct and return a map containing the current feature values for the
   // requested set of model features. The host model features cache is updated
   // based on if host model features were used.
   base::flat_map<std::string, float> BuildFeatureMap(
       content::NavigationHandle* navigation_handle,
-      const base::flat_set<std::string>& model_features);
+      const base::flat_set<std::string>& model_features,
+      const base::flat_map<proto::ClientModelFeature, float>&
+          override_client_model_feature_values);
 
   // Calculate and return the current value for the client feature specified
-  // by |model_feature|. Return nullopt if the client does not support the
+  // by |model_feature|. If |model_feature| is in
+  // |override_client_model_feature_values|, the value from
+  // |client_model_feature_values| will be used. Otherwise, the client will
+  // calculate the value or return nullopt if the client does not support the
   // model feature.
   base::Optional<float> GetValueForClientFeature(
       const std::string& model_feature,
-      content::NavigationHandle* navigation_handle) const;
+      content::NavigationHandle* navigation_handle,
+      const base::flat_map<proto::ClientModelFeature, float>&
+          override_client_model_feature_values) const;
 
   // Called to make a request to fetch models and host model features from the
   // remote Optimization Guide Service. Used to fetch models for the registered
@@ -243,10 +295,30 @@ class PredictionManager
   void OnLoadPredictionModel(
       std::unique_ptr<proto::PredictionModel> prediction_model);
 
-  // Process |model| into a PredictionModel object and store it in the
-  // |optimization_target_prediction_model_map_|. Return true if a prediction
+  // Process loaded |model| into memory. Return true if a prediction
   // model object was created and successfully stored, otherwise false.
-  bool ProcessAndStorePredictionModel(const proto::PredictionModel& model);
+  bool ProcessAndStoreLoadedModel(const proto::PredictionModel& model);
+
+  // Return whether the model stored in memory for |optimization_target| should
+  // be updated based on what's currently stored and |new_version|.
+  bool ShouldUpdateStoredModelForTarget(
+      proto::OptimizationTarget optimization_target,
+      int64_t new_version) const;
+
+  // Updates the in-memory model file for |optimization_target| to
+  // |prediction_model_file|.
+  void StoreLoadedPredictionModelFile(
+      proto::OptimizationTarget optimization_target,
+      std::unique_ptr<PredictionModelFile> prediction_model_file);
+
+  // Updates the in-memory model for |optimization_target| to
+  // |prediction_model|.
+  void StoreLoadedPredictionModel(
+      proto::OptimizationTarget optimization_target,
+      std::unique_ptr<PredictionModel> prediction_model);
+
+  // Post-processing callback invoked after processing |model|.
+  void OnProcessLoadedModel(const proto::PredictionModel& model, bool success);
 
   // Process |host_model_features| from the into host model features
   // usable by the PredictionManager. The processed host model features are
@@ -272,14 +344,32 @@ class PredictionManager
   // 2. The last time a fetch attempt was made.
   void ScheduleModelsAndHostModelFeaturesFetch();
 
+  // Notifies observers of |optimization_target| that the model file has been
+  // updated to |file_path|.
+  void NotifyObserversOfNewModelPath(
+      proto::OptimizationTarget optimization_target,
+      const base::FilePath& file_path) const;
+
   // A map of optimization target to the prediction model capable of making
   // an optimization target decision for it.
   base::flat_map<proto::OptimizationTarget, std::unique_ptr<PredictionModel>>
       optimization_target_prediction_model_map_;
 
+  // A map of optimization target to the model file containing the model for the
+  // target.
+  base::flat_map<proto::OptimizationTarget,
+                 std::unique_ptr<PredictionModelFile>>
+      optimization_target_prediction_model_file_map_;
+
   // The set of optimization targets that have been registered with the
   // prediction manager.
   base::flat_set<proto::OptimizationTarget> registered_optimization_targets_;
+
+  // The map from optimization target to observers that have been registered to
+  // receive model updates from the prediction manager.
+  std::map<proto::OptimizationTarget,
+           base::ObserverList<OptimizationTargetModelObserver>>
+      registered_observers_for_optimization_targets_;
 
   // A MRU cache of host to host model features known to the prediction manager.
   HostModelFeaturesMRUCache host_model_features_cache_;
@@ -292,16 +382,22 @@ class PredictionManager
   // load of a session).
   base::Optional<float> previous_load_fcp_ms_;
 
-  // The fetcher than handles making requests to update the models and host
+  // The fetcher that handles making requests to update the models and host
   // model features from the remote Optimization Guide Service.
   std::unique_ptr<PredictionModelFetcher> prediction_model_fetcher_;
+
+  // The downloader that handles making requests to download the prediction
+  // models. Can be null if model downloading is disabled.
+  std::unique_ptr<PredictionModelDownloadManager>
+      prediction_model_download_manager_;
 
   // The top host provider that can be queried. Not owned.
   TopHostProvider* top_host_provider_ = nullptr;
 
   // The optimization guide store that contains prediction models and host
-  // model features from the remote Optimization Guide Service.
-  std::unique_ptr<OptimizationGuideStore> model_and_features_store_;
+  // model features from the remote Optimization Guide Service. Not owned and
+  // guaranteed to outlive |this|.
+  OptimizationGuideStore* model_and_features_store_ = nullptr;
 
   // A stored response from a model and host model features fetch used to hold
   // models to be stored once host model features are processed and stored.

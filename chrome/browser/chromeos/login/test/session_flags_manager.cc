@@ -10,12 +10,12 @@
 
 #include "base/base64.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/common/chrome_paths.h"
@@ -167,7 +167,7 @@ void SessionFlagsManager::StoreStateToBackingFile() {
   // If a user session is not active, clear the backing file so default flags
   // are used next time.
   if (!session_active && !has_restart_job) {
-    base::DeleteFile(backing_file_, false /*recursive*/);
+    base::DeleteFile(backing_file_);
     return;
   }
 

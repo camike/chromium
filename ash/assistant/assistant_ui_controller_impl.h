@@ -13,6 +13,7 @@
 #include "ash/assistant/model/assistant_interaction_model_observer.h"
 #include "ash/assistant/model/assistant_ui_model.h"
 #include "ash/assistant/model/assistant_ui_model_observer.h"
+#include "ash/assistant/ui/assistant_view_delegate.h"
 #include "ash/highlighter/highlighter_controller.h"
 #include "ash/public/cpp/assistant/controller/assistant_controller.h"
 #include "ash/public/cpp/assistant/controller/assistant_controller_observer.h"
@@ -21,7 +22,9 @@
 #include "ash/wm/overview/overview_observer.h"
 #include "base/macros.h"
 #include "base/optional.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
+
+class PrefRegistrySimple;
 
 namespace chromeos {
 namespace assistant {
@@ -33,24 +36,30 @@ class Assistant;
 
 namespace ash {
 
+class AssistantControllerImpl;
+
 class ASH_EXPORT AssistantUiControllerImpl
     : public AssistantUiController,
       public AssistantControllerObserver,
       public AssistantInteractionModelObserver,
       public AssistantUiModelObserver,
+      public AssistantViewDelegateObserver,
       public HighlighterController::Observer,
       public OverviewObserver {
  public:
-  AssistantUiControllerImpl();
+  explicit AssistantUiControllerImpl(
+      AssistantControllerImpl* assistant_controller);
   ~AssistantUiControllerImpl() override;
 
-  // Provides a pointer to the |assistant| owned by AssistantController.
-  void SetAssistant(chromeos::assistant::mojom::Assistant* assistant);
+  static void RegisterProfilePrefs(PrefRegistrySimple* registry);
+
+  // Provides a pointer to the |assistant| owned by AssistantService.
+  void SetAssistant(chromeos::assistant::Assistant* assistant);
 
   // AssistantUiController:
   const AssistantUiModel* GetModel() const override;
-  void AddModelObserver(AssistantUiModelObserver* observer) override;
-  void RemoveModelObserver(AssistantUiModelObserver* observer) override;
+  int GetNumberOfSessionsWhereOnboardingShown() const override;
+  bool HasShownOnboarding() const override;
   void ShowUi(AssistantEntryPoint entry_point) override;
   void CloseUi(AssistantExitPoint exit_point) override;
   void ToggleUi(base::Optional<AssistantEntryPoint> entry_point,
@@ -60,9 +69,6 @@ class ASH_EXPORT AssistantUiControllerImpl
   void OnInputModalityChanged(InputModality input_modality) override;
   void OnInteractionStateChanged(InteractionState interaction_state) override;
   void OnMicStateChanged(MicState mic_state) override;
-
-  // HighlighterController::Observer:
-  void OnHighlighterEnabledChanged(HighlighterEnabledState state) override;
 
   // AssistantControllerObserver:
   void OnAssistantControllerConstructed() override;
@@ -78,6 +84,12 @@ class ASH_EXPORT AssistantUiControllerImpl
       base::Optional<AssistantEntryPoint> entry_point,
       base::Optional<AssistantExitPoint> exit_point) override;
 
+  // AssistantViewDelegateObserver:
+  void OnOnboardingShown() override;
+
+  // HighlighterController::Observer:
+  void OnHighlighterEnabledChanged(HighlighterEnabledState state) override;
+
   // OverviewObserver:
   void OnOverviewModeWillStart() override;
 
@@ -88,19 +100,22 @@ class ASH_EXPORT AssistantUiControllerImpl
   void UpdateUiMode(base::Optional<AssistantUiMode> ui_mode = base::nullopt,
                     bool due_to_interaction = false);
 
-  // Owned by AssistantController.
-  chromeos::assistant::mojom::Assistant* assistant_ = nullptr;
-
+  AssistantControllerImpl* const assistant_controller_;  // Owned by Shell.
   AssistantUiModel model_;
+  bool has_shown_onboarding_ = false;
 
-  ScopedObserver<AssistantController, AssistantControllerObserver>
-      assistant_controller_observer_{this};
+  // Owned by AssistantService.
+  chromeos::assistant::Assistant* assistant_ = nullptr;
 
-  ScopedObserver<HighlighterController, HighlighterController::Observer>
-      highlighter_controller_observer_{this};
+  base::ScopedObservation<AssistantController, AssistantControllerObserver>
+      assistant_controller_observation_{this};
 
-  ScopedObserver<OverviewController, OverviewObserver>
-      overview_controller_observer_{this};
+  base::ScopedObservation<HighlighterController,
+                          HighlighterController::Observer>
+      highlighter_controller_observation_{this};
+
+  base::ScopedObservation<OverviewController, OverviewObserver>
+      overview_controller_observation_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AssistantUiControllerImpl);
 };

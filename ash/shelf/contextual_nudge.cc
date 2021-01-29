@@ -40,16 +40,18 @@ ContextualNudge::ContextualNudge(views::View* anchor,
                                  const base::RepeatingClosure& tap_callback)
     : views::BubbleDialogDelegateView(anchor,
                                       GetArrowForPosition(position),
-                                      views::BubbleBorder::NO_ASSETS),
+                                      views::BubbleBorder::NO_SHADOW),
       tap_callback_(tap_callback) {
+  // Bubbles that use transparent colors should not paint their ClientViews to a
+  // layer as doing so could result in visual artifacts.
+  SetPaintClientToLayer(false);
   set_color(SK_ColorTRANSPARENT);
   set_close_on_deactivate(false);
   set_margins(gfx::Insets());
   set_accept_events(!tap_callback.is_null());
   SetCanActivate(false);
-  set_adjust_if_offscreen(false);
-  set_shadow(views::BubbleBorder::NO_ASSETS);
-  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_NONE);
+  set_shadow(views::BubbleBorder::NO_SHADOW);
+  SetButtons(ui::DIALOG_BUTTON_NONE);
 
   if (parent_window) {
     set_parent_window(parent_window);
@@ -70,6 +72,12 @@ ContextualNudge::ContextualNudge(views::View* anchor,
   label_->SetBorder(views::CreateEmptyBorder(margins));
 
   views::BubbleDialogDelegateView::CreateBubble(this);
+
+  // TODO(sanchit.abrol@microsoft.com): Move back among the other setters after
+  // the platform default setting is moved from
+  // |BubbleDialogDelegateView::CreateBubble| to being the default value at
+  // bubble construction.
+  set_adjust_if_offscreen(false);
 
   // Text box for shelf nudge should be ignored for collision detection.
   CollisionDetectionUtils::IgnoreWindowForCollisionDetection(

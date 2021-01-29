@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/callback.h"
 #include "base/files/file_path.h"
 #include "chromeos/dbus/concierge/concierge_service.pb.h"
 
@@ -17,11 +18,14 @@
 namespace crostini {
 
 // Result types for various callbacks etc.
-
+//
 // WARNING: Do not remove or re-order these values, as they are used in user
 // visible error messages and logs. New entries should only be added to the end.
 // This message was added during development of M74, error codes from prior
 // versions may differ from the numbering here.
+// If you add anything here make sure to also update enums.xml and the plx
+// scripts in
+// https://plx.corp.google.com/home2/home/collections/c16e3c1474497b821
 enum class CrostiniResult {
   SUCCESS = 0,
   // DBUS_ERROR = 1,
@@ -74,8 +78,24 @@ enum class CrostiniResult {
   LOAD_COMPONENT_UPDATE_IN_PROGRESS = 48,
   NEVER_FINISHED = 49,
   CONTAINER_SETUP_FAILED = 50,
-  kMaxValue = CONTAINER_SETUP_FAILED,
+  START_LXD_FAILED = 51,
+  INSTALL_IMAGE_LOADER_TIMED_OUT = 52,
+  CREATE_DISK_IMAGE_TIMED_OUT = 53,
+  START_TERMINA_VM_TIMED_OUT = 54,
+  START_LXD_TIMED_OUT = 55,
+  CREATE_CONTAINER_TIMED_OUT = 56,
+  SETUP_CONTAINER_TIMED_OUT = 57,
+  START_CONTAINER_TIMED_OUT = 58,
+  FETCH_SSH_KEYS_TIMED_OUT = 59,
+  MOUNT_CONTAINER_TIMED_OUT = 60,
+  UNKNOWN_STATE_TIMED_OUT = 61,
+  kMaxValue = UNKNOWN_STATE_TIMED_OUT,
+  // When adding a new value, check you've followed the steps in the comment at
+  // the top of this enum.
 };
+
+using CrostiniSuccessCallback =
+    base::OnceCallback<void(bool success, const std::string& failure_reason)>;
 
 enum class InstallLinuxPackageProgressStatus {
   SUCCEEDED,
@@ -127,7 +147,6 @@ enum class ContainerVersion {
 struct VmInfo {
   VmState state;
   vm_tools::concierge::VmInfo info;
-  bool usb_devices_shared = false;
 };
 
 struct StreamingExportStatus {
@@ -185,8 +204,6 @@ struct LinuxPackageInfo {
   std::string description;
 };
 
-constexpr char kCrostiniCorruptionHistogram[] = "Crostini.FilesystemCorruption";
-
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
 enum class CorruptionStates {
@@ -203,8 +220,6 @@ enum class DialogType {
   REMOVER,
 };
 
-constexpr char kUpgradeDialogEventHistogram[] = "Crostini.UpgradeDialogEvent";
-
 enum class UpgradeDialogEvent {
   kDialogShown = 0,
   kUpgradeSuccess = 1,
@@ -218,6 +233,16 @@ enum class UpgradeDialogEvent {
   kRestoreSucceeded = 9,
   kRestoreFailed = 10,
   kMaxValue = kRestoreFailed,
+};
+
+// Keep this in sync with CrostiniDiskImageType in enums.xml
+enum class CrostiniDiskImageType {
+  kUnknown = 0,
+  kQCow2Sparse = 1,
+  kRawSparse = 2,
+  kRawPreallocated = 3,
+  kMultiDisk = 4,
+  kMaxValue = kMultiDisk,
 };
 
 }  // namespace crostini

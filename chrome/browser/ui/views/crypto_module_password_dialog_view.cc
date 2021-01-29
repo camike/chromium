@@ -23,18 +23,23 @@ CryptoModulePasswordDialogView::CryptoModulePasswordDialogView(
     const std::string& slot_name,
     CryptoModulePasswordReason reason,
     const std::string& hostname,
-    const CryptoModulePasswordCallback& callback)
-    : callback_(callback) {
-  DialogDelegate::SetButtonLabel(
+    CryptoModulePasswordCallback callback)
+    : callback_(std::move(callback)) {
+  SetButtonLabel(
       ui::DIALOG_BUTTON_OK,
       l10n_util::GetStringUTF16(IDS_CRYPTO_MODULE_AUTH_DIALOG_OK_BUTTON_LABEL));
-  DialogDelegate::SetAcceptCallback(base::BindOnce(
+  SetAcceptCallback(base::BindOnce(
       [](CryptoModulePasswordDialogView* dialog) {
-        dialog->callback_.Run(
-            base::UTF16ToUTF8(dialog->password_entry_->GetText()));
+        std::move(dialog->callback_)
+            .Run(base::UTF16ToUTF8(dialog->password_entry_->GetText()));
       },
       base::Unretained(this)));
-  DialogDelegate::SetCancelCallback(base::BindOnce(callback_, std::string()));
+  SetCancelCallback(base::BindOnce(
+      [](CryptoModulePasswordDialogView* dialog) {
+        std::move(dialog->callback_).Run(std::string());
+      },
+      base::Unretained(this)));
+  SetModalType(ui::MODAL_TYPE_WINDOW);
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::CONTROL));
   Init(hostname, slot_name, reason);
@@ -49,10 +54,6 @@ CryptoModulePasswordDialogView::~CryptoModulePasswordDialogView() {
 
 views::View* CryptoModulePasswordDialogView::GetInitiallyFocusedView() {
   return password_entry_;
-}
-
-ui::ModalType CryptoModulePasswordDialogView::GetModalType() const {
-  return ui::MODAL_TYPE_WINDOW;
 }
 
 base::string16 CryptoModulePasswordDialogView::GetWindowTitle() const {
@@ -119,19 +120,19 @@ void CryptoModulePasswordDialogView::Init(const std::string& hostname,
       SetLayoutManager(std::make_unique<views::GridLayout>());
 
   views::ColumnSet* reason_column_set = layout->AddColumnSet(0);
-  reason_column_set->AddColumn(views::GridLayout::LEADING,
-                               views::GridLayout::LEADING, 1.0,
-                               views::GridLayout::USE_PREF, 0, 0);
+  reason_column_set->AddColumn(
+      views::GridLayout::LEADING, views::GridLayout::LEADING, 1.0,
+      views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
 
   views::ColumnSet* column_set = layout->AddColumnSet(1);
   column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::LEADING,
                         views::GridLayout::kFixedSize,
-                        views::GridLayout::USE_PREF, 0, 0);
+                        views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
   column_set->AddPaddingColumn(
       views::GridLayout::kFixedSize,
       provider->GetDistanceMetric(DISTANCE_UNRELATED_CONTROL_HORIZONTAL_LARGE));
   column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1.0,
-                        views::GridLayout::USE_PREF, 0, 0);
+                        views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
 
   layout->StartRow(views::GridLayout::kFixedSize, 0);
   reason_label_ = layout->AddView(std::move(reason_label));
@@ -144,14 +145,13 @@ void CryptoModulePasswordDialogView::Init(const std::string& hostname,
   password_entry_ = layout->AddView(std::move(password_entry));
 }
 
-void ShowCryptoModulePasswordDialog(
-    const std::string& slot_name,
-    bool retry,
-    CryptoModulePasswordReason reason,
-    const std::string& hostname,
-    gfx::NativeWindow parent,
-    const CryptoModulePasswordCallback& callback) {
-  CryptoModulePasswordDialogView* dialog =
-      new CryptoModulePasswordDialogView(slot_name, reason, hostname, callback);
-  views::DialogDelegate::CreateDialogWidget(dialog, NULL, parent)->Show();
+void ShowCryptoModulePasswordDialog(const std::string& slot_name,
+                                    bool retry,
+                                    CryptoModulePasswordReason reason,
+                                    const std::string& hostname,
+                                    gfx::NativeWindow parent,
+                                    CryptoModulePasswordCallback callback) {
+  CryptoModulePasswordDialogView* dialog = new CryptoModulePasswordDialogView(
+      slot_name, reason, hostname, std::move(callback));
+  views::DialogDelegate::CreateDialogWidget(dialog, nullptr, parent)->Show();
 }

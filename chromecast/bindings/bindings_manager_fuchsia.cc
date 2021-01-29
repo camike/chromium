@@ -9,8 +9,8 @@
 
 #include "base/check.h"
 #include "base/fuchsia/fuchsia_logging.h"
+#include "components/cast/message_port/message_port_fuchsia.h"
 #include "fuchsia/base/mem_buffer_util.h"
-#include "fuchsia/base/message_port.h"
 
 namespace chromecast {
 namespace bindings {
@@ -42,8 +42,9 @@ void BindingsManagerFuchsia::GetAll(GetAllCallback callback) {
 void BindingsManagerFuchsia::Connect(
     std::string port_name,
     fidl::InterfaceHandle<::fuchsia::web::MessagePort> message_port) {
-  OnPortConnected(
-      port_name, cr_fuchsia::BlinkMessagePortFromFidl(std::move(message_port)));
+  OnPortConnected(port_name, std::unique_ptr<cast_api_bindings::MessagePort>(
+                                 cast_api_bindings::MessagePortFuchsia::Create(
+                                     std::move(message_port))));
 }
 
 }  // namespace bindings

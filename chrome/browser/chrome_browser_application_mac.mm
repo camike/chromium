@@ -4,8 +4,10 @@
 
 #import "chrome/browser/chrome_browser_application_mac.h"
 
+#include <dispatch/dispatch.h>
+
+#include "base/check.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/mac/call_with_eh_frame.h"
 #include "base/observer_list.h"
 #include "base/strings/stringprintf.h"
@@ -58,14 +60,24 @@ std::string DescriptionForNSEvent(NSEvent* event) {
     case NSEventTypeKeyDown:
     case NSEventTypeKeyUp: {
       // Some NSEvents return a string with NUL in event.characters, see
-      // <https://crbug.com/826908>.
-      std::string characters = base::SysNSStringToUTF8([event.characters
-          stringByReplacingOccurrencesOfString:@"\0"
-                                    withString:@"\\x00"]);
-      std::string unmodified_characters =
-          base::SysNSStringToUTF8([event.charactersIgnoringModifiers
-              stringByReplacingOccurrencesOfString:@"\0"
-                                        withString:@"\\x00"]);
+      // <https://crbug.com/826908>. To make matters worse, in rare cases,
+      // NSEvent.characters or NSEvent.charactersIgnoringModifiers can throw an
+      // NSException complaining that "TSMProcessRawKeyCode failed". Since we're
+      // trying to gather a crash key here, if that exception happens, just
+      // remark that it happened and continue rather than crashing the browser.
+      std::string characters, unmodified_characters;
+      @try {
+        characters = base::SysNSStringToUTF8([event.characters
+            stringByReplacingOccurrencesOfString:@"\0"
+                                      withString:@"\\x00"]);
+        unmodified_characters =
+            base::SysNSStringToUTF8([event.charactersIgnoringModifiers
+                stringByReplacingOccurrencesOfString:@"\0"
+                                          withString:@"\\x00"]);
+      } @catch (id exception) {
+        characters = "(exception)";
+        unmodified_characters = "(exception)";
+      }
       desc += base::StringPrintf(
           " keyCode=0x%d ARepeat=%d characters='%s' unmodifiedCharacters='%s'",
           event.keyCode, event.ARepeat, characters.c_str(),
@@ -298,32 +310,31 @@ std::string DescriptionForNSEvent(NSEvent* event) {
 - (void)sendEvent:(NSEvent*)event {
   TRACE_EVENT0("toplevel", "BrowserCrApplication::sendEvent");
 
+  // TODO(bokan): Tracing added temporarily to diagnose crbug.com/1039833.
+  TRACE_EVENT_INSTANT1("toplevel", "KeyWindow", TRACE_EVENT_SCOPE_THREAD,
+                       "KeyWin", [[NSApp keyWindow] windowNumber]);
+
   static crash_reporter::CrashKeyString<256> nseventKey("nsevent");
   crash_reporter::ScopedCrashKeyString scopedKey(&nseventKey,
                                                  DescriptionForNSEvent(event));
 
   base::mac::CallWithEHFrame(^{
-    switch (event.type) {
-      case NSLeftMouseDown:
-      case NSRightMouseDown: {
-        // In kiosk mode, we want to prevent context menus from appearing,
-        // so simply discard menu-generating events instead of passing them
-        // along.
-        bool kioskMode = base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kKioskMode);
-        bool ctrlDown = [event modifierFlags] & NSControlKeyMask;
-        if (kioskMode && ([event type] == NSRightMouseDown || ctrlDown))
-          break;
-        FALLTHROUGH;  // Not menu-generating, so pass on the event.
-      }
-
-      default: {
-        base::mac::ScopedSendingEvent sendingEventScoper;
-        content::ScopedNotifyNativeEventProcessorObserver
-            scopedObserverNotifier(&_observers, event);
-        [super sendEvent:event];
-      }
+    static const bool kKioskMode =
+        base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode);
+    if (kKioskMode) {
+      // In kiosk mode, we want to prevent context menus from appearing,
+      // so simply discard menu-generating events instead of passing them
+      // along.
+      BOOL couldTriggerContextMenu = event.type == NSRightMouseDown ||
+                                     (event.type == NSLeftMouseDown &&
+                                      (event.modifierFlags & NSControlKeyMask));
+      if (couldTriggerContextMenu)
+        return;
     }
+    base::mac::ScopedSendingEvent sendingEventScoper;
+    content::ScopedNotifyNativeEventProcessorObserver scopedObserverNotifier(
+        &_observers, event);
+    [super sendEvent:event];
   });
 }
 
@@ -334,8 +345,6 @@ std::string DescriptionForNSEvent(NSEvent* event) {
         content::BrowserAccessibilityState::GetInstance();
     if ([value intValue] == 1)
       accessibility_state->OnScreenReaderDetected();
-    else
-      accessibility_state->DisableAccessibility();
   }
   return [super accessibilitySetValue:value forAttribute:attribute];
 }
@@ -354,6 +363,21 @@ std::string DescriptionForNSEvent(NSEvent* event) {
 - (void)removeNativeEventProcessorObserver:
     (content::NativeEventProcessorObserver*)observer {
   _observers.RemoveObserver(observer);
+}
+
+- (NSAccessibilityRole)accessibilityRole {
+  // Our previous method of enabling a11y when the 'AXEnhancedUserInterface'
+  // attribute was set didn't work for the new VoiceControl system.  After
+  // discussions with Apple, they recommended that we turn on a11y when an AT
+  // accesses the 'accessibilityRole' property.  This works with VoiceControl,
+  // and should work with any other new ATs in the future.
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    content::BrowserAccessibilityState* accessibility_state =
+        content::BrowserAccessibilityState::GetInstance();
+    accessibility_state->OnScreenReaderDetected();
+  });
+  return [super accessibilityRole];
 }
 
 @end

@@ -6,7 +6,9 @@
 
 // Polymer BrowserTest fixture.
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
+
 GEN('#include "chrome/common/chrome_features.h"');
+GEN('#include "content/public/test/browser_test.h"');
 
 /**
  * @constructor
@@ -15,14 +17,14 @@ GEN('#include "chrome/common/chrome_features.h"');
 function UserManagerBrowserTest() {}
 
 UserManagerBrowserTest.prototype = {
-  __proto__: PolymerTest.prototype,
+  __proto__: Polymer2DeprecatedTest.prototype,
 
   /** @override */
   browsePreload: 'chrome://md-user-manager/',
 
   /** @override */
   extraLibraries: [
-    ...PolymerTest.prototype.extraLibraries,
+    ...Polymer2DeprecatedTest.prototype.extraLibraries,
     '../test_browser_proxy.js',
     'control_bar_tests.js',
     'create_profile_tests.js',

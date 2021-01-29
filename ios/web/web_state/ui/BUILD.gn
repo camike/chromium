@@ -15,9 +15,11 @@ source_set("ui") {
     "//ios/web:core",
     "//ios/web/browsing_data",
     "//ios/web/common",
+    "//ios/web/common:uikit",
     "//ios/web/favicon",
     "//ios/web/find_in_page",
     "//ios/web/js_messaging",
+    "//ios/web/js_messaging:web_frames_manager_impl_header",
     "//ios/web/navigation",
     "//ios/web/navigation:core",
     "//ios/web/navigation:navigation_manager_util",
@@ -47,6 +49,8 @@ source_set("ui") {
   ]
 
   sources = [
+    "cookie_blocking_error_logger.h",
+    "cookie_blocking_error_logger.mm",
     "crw_swipe_recognizer_provider.h",
     "crw_touch_tracking_recognizer.h",
     "crw_touch_tracking_recognizer.mm",
@@ -94,37 +98,52 @@ source_set("crw_context_menu_controller") {
     "//base",
     "//ios/web/js_messaging",
     "//ios/web/public",
-    "//ios/web/public/deprecated",
+    "//ios/web/public/js_messaging",
     "//ios/web/web_state:context_menu",
+    "//ios/web/web_state:web_state_impl_header",
     "//ios/web/web_state/ui:wk_web_view_configuration_provider",
-    "//ui/base",
   ]
 
   sources = [
     "crw_context_menu_controller.h",
     "crw_context_menu_controller.mm",
-    "crw_context_menu_delegate.h",
-    "html_element_fetch_request.h",
-    "html_element_fetch_request.mm",
+    "crw_context_menu_element_fetcher.h",
+    "crw_context_menu_element_fetcher.mm",
+    "crw_html_element_fetch_request.h",
+    "crw_html_element_fetch_request.mm",
+    "crw_legacy_context_menu_controller.h",
+    "crw_legacy_context_menu_controller.mm",
   ]
 
   configs += [ "//build/config/compiler:enable_arc" ]
 }
 
+source_set("wk_web_view_configuration_provider_header") {
+  deps = [ "//base" ]
+  sources = [ "wk_web_view_configuration_provider.h" ]
+  configs += [ "//build/config/compiler:enable_arc" ]
+}
+
 source_set("wk_web_view_configuration_provider") {
+  public_deps = [ ":wk_web_view_configuration_provider_header" ]
   deps = [
     "//base",
     "//components/safe_browsing/core:features",
     "//ios/third_party/webkit",
     "//ios/web/common",
     "//ios/web/js_messaging",
+    "//ios/web/js_messaging:java_script_feature",
+    "//ios/web/js_messaging:java_script_feature_util",
     "//ios/web/public",
     "//ios/web/web_state/js",
     "//ios/web/webui",
   ]
 
   sources = [
-    "wk_web_view_configuration_provider.h",
+    "wk_content_rule_list_provider.h",
+    "wk_content_rule_list_provider.mm",
+    "wk_content_rule_list_util.h",
+    "wk_content_rule_list_util.mm",
     "wk_web_view_configuration_provider.mm",
     "wk_web_view_configuration_provider_observer.h",
   ]

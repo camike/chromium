@@ -8,41 +8,23 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/version.h"
+#include "components/media_router/common/providers/cast/cast_media_source.h"
+#include "components/ukm/content/source_url_recorder.h"
 #include "components/version_info/version_info.h"
 #include "extensions/common/extension.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
+#include "services/metrics/public/cpp/ukm_recorder.h"
 
 namespace media_router {
 
 namespace {
 
-constexpr char kHistogramProviderCreateRouteResult[] =
-    "MediaRouter.Provider.CreateRoute.Result";
-constexpr char kHistogramProviderJoinRouteResult[] =
-    "MediaRouter.Provider.JoinRoute.Result";
 constexpr char kHistogramProviderRouteControllerCreationOutcome[] =
     "MediaRouter.Provider.RouteControllerCreationOutcome";
-constexpr char kHistogramProviderTerminateRouteResult[] =
-    "MediaRouter.Provider.TerminateRoute.Result";
 constexpr char kHistogramProviderVersion[] = "MediaRouter.Provider.Version";
 constexpr char kHistogramProviderWakeReason[] =
     "MediaRouter.Provider.WakeReason";
 constexpr char kHistogramProviderWakeup[] = "MediaRouter.Provider.Wakeup";
-
-std::string GetHistogramNameForProvider(const std::string& base_name,
-                                        MediaRouteProviderId provider_id) {
-  switch (provider_id) {
-    case MediaRouteProviderId::CAST:
-      return base_name + ".Cast";
-    case MediaRouteProviderId::DIAL:
-      return base_name + ".DIAL";
-    case MediaRouteProviderId::WIRED_DISPLAY:
-      return base_name + ".WiredDisplay";
-    // |EXTENSION| and |UNKNOWN| use the base histogram name.
-    case MediaRouteProviderId::EXTENSION:
-    case MediaRouteProviderId::UNKNOWN:
-      return base_name;
-  }
-}
 
 }  // namespace
 
@@ -78,43 +60,41 @@ void MediaRouterMojoMetrics::RecordMediaRouteProviderWakeup(
 }
 
 // static
-void MediaRouterMojoMetrics::RecordCreateRouteResultCode(
-    MediaRouteProviderId provider_id,
-    RouteRequestResult::ResultCode result_code) {
-  DCHECK_LT(result_code, RouteRequestResult::TOTAL_COUNT);
-  base::UmaHistogramEnumeration(
-      GetHistogramNameForProvider(kHistogramProviderCreateRouteResult,
-                                  provider_id),
-      result_code, RouteRequestResult::TOTAL_COUNT);
-}
-
-// static
-void MediaRouterMojoMetrics::RecordJoinRouteResultCode(
-    MediaRouteProviderId provider_id,
-    RouteRequestResult::ResultCode result_code) {
-  DCHECK_LT(result_code, RouteRequestResult::ResultCode::TOTAL_COUNT);
-  base::UmaHistogramEnumeration(
-      GetHistogramNameForProvider(kHistogramProviderJoinRouteResult,
-                                  provider_id),
-      result_code, RouteRequestResult::TOTAL_COUNT);
-}
-
-// static
-void MediaRouterMojoMetrics::RecordMediaRouteProviderTerminateRoute(
-    MediaRouteProviderId provider_id,
-    RouteRequestResult::ResultCode result_code) {
-  DCHECK_LT(result_code, RouteRequestResult::ResultCode::TOTAL_COUNT);
-  base::UmaHistogramEnumeration(
-      GetHistogramNameForProvider(kHistogramProviderTerminateRouteResult,
-                                  provider_id),
-      result_code, RouteRequestResult::TOTAL_COUNT);
-}
-
-// static
 void MediaRouterMojoMetrics::RecordMediaRouteControllerCreationResult(
     bool success) {
   base::UmaHistogramBoolean(kHistogramProviderRouteControllerCreationOutcome,
                             success);
+}
+
+// static
+void MediaRouterMojoMetrics::RecordTabMirroringMetrics(
+    content::WebContents* web_contents) {
+  ukm::SourceId source_id =
+      ukm::GetSourceIdForWebContentsDocument(web_contents);
+  WebContentsAudioState audio_state = WebContentsAudioState::kWasNeverAudible;
+  if (web_contents->IsCurrentlyAudible()) {
+    audio_state = WebContentsAudioState::kIsCurrentlyAudible;
+  } else if (web_contents->WasEverAudible()) {
+    audio_state = WebContentsAudioState::kWasPreviouslyAudible;
+  }
+
+  ukm::builders::MediaRouter_TabMirroringStarted(source_id)
+      .SetAudioState(static_cast<int>(audio_state))
+      .Record(ukm::UkmRecorder::Get());
+}
+
+// static
+void MediaRouterMojoMetrics::RecordSiteInitiatedMirroringStarted(
+    content::WebContents* web_contents,
+    const MediaSource& media_source) {
+  ukm::SourceId source_id =
+      ukm::GetSourceIdForWebContentsDocument(web_contents);
+  auto cast_source = CastMediaSource::FromMediaSource(media_source);
+  if (cast_source) {
+    ukm::builders::MediaRouter_SiteInitiatedMirroringStarted(source_id)
+        .SetAllowAudioCapture(cast_source->site_requested_audio_capture())
+        .Record(ukm::UkmRecorder::Get());
+  }
 }
 
 // static

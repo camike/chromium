@@ -10,9 +10,12 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 #include "url/origin.h"
+#include "url/origin_abstract_tests.h"
 #include "url/url_util.h"
 
 namespace url {
+
+namespace {
 
 void ExpectParsedUrlsEqual(const GURL& a, const GURL& b) {
   EXPECT_EQ(a, b);
@@ -35,6 +38,8 @@ void ExpectParsedUrlsEqual(const GURL& a, const GURL& b) {
   EXPECT_EQ(a_parsed.ref.begin, b_parsed.ref.begin);
   EXPECT_EQ(a_parsed.ref.len, b_parsed.ref.len);
 }
+
+}  // namespace
 
 class OriginTest : public ::testing::Test {
  public:
@@ -107,6 +112,11 @@ class OriginTest : public ::testing::Test {
 
   base::Optional<std::string> SerializeWithNonce(const Origin& origin) {
     return origin.SerializeWithNonce();
+  }
+
+  base::Optional<std::string> SerializeWithNonceAndInitIfNeeded(
+      Origin& origin) {
+    return origin.SerializeWithNonceAndInitIfNeeded();
   }
 
   base::Optional<Origin> Deserialize(const std::string& value) {
@@ -219,8 +229,14 @@ TEST_F(OriginTest, OpaqueOriginComparison) {
       "local-but-nonstandar:foo",  // Prefix of registered scheme.
       "but-nonstandard:foo",       // Suffix of registered scheme.
       "local-and-standard:",       // Standard scheme needs a hostname.
-      "standard-but-noaccess:",    // Standard scheme needs a hostname.
       "blob:blob:http://www.example.com/guid-goes-here",  // Double blob.
+
+      // Scheme (registered in SetUp()) that's standard but marked as noaccess.
+      // See also SecurityOriginTest.StandardNoAccessScheme and
+      // NavigationUrlRewriteBrowserTest.RewriteToNoAccess.
+      "standard-but-noaccess:",     // Standard scheme needs a hostname.
+      "standard-but-noaccess:foo",  // Standard scheme needs a hostname.
+      "standard-but-noaccess://bar",
   };
 
   for (auto* test_url : urls) {
@@ -246,8 +262,6 @@ TEST_F(OriginTest, OpaqueOriginComparison) {
       EXPECT_EQ(0, origin_copy.port());
       EXPECT_TRUE(origin_copy.opaque());
       EXPECT_EQ(origin, origin_copy);
-      // And it should always be cross-origin to another opaque Origin.
-      EXPECT_NE(origin, opaque_origin);
       // Re-creating from the URL should also be cross-origin.
       EXPECT_NE(origin, Origin::Create(url));
 
@@ -338,12 +352,6 @@ TEST_F(OriginTest, ConstructFromGURL) {
       {"local-but-nonstandard:foo", "local-but-nonstandard", "", 0},
       {"local-but-nonstandard://bar", "local-but-nonstandard", "", 0},
       {"also-local-but-nonstandard://bar", "also-local-but-nonstandard", "", 0},
-
-      // Scheme (registered in SetUp()) that's standard but marked as noaccess.
-      // url::Origin doesn't currently take the noaccess property into account,
-      // so these aren't expected to result in opaque origins.
-      {"standard-but-noaccess:foo", "standard-but-noaccess", "foo", 0},
-      {"standard-but-noaccess://bar", "standard-but-noaccess", "bar", 0},
 
       // file: URLs
       {"file:///etc/passwd", "file", "", 0},
@@ -661,20 +669,6 @@ TEST_F(OriginTest, DebugAlias) {
   EXPECT_STREQ("https://foo.com", origin1_debug_alias);
 }
 
-TEST_F(OriginTest, NonStandardScheme) {
-  Origin origin = Origin::Create(GURL("cow://"));
-  EXPECT_TRUE(origin.opaque());
-}
-
-TEST_F(OriginTest, NonStandardSchemeWithAndroidWebViewHack) {
-  EnableNonStandardSchemesForAndroidWebView();
-  Origin origin = Origin::Create(GURL("cow://"));
-  EXPECT_FALSE(origin.opaque());
-  EXPECT_EQ("cow", origin.scheme());
-  EXPECT_EQ("", origin.host());
-  EXPECT_EQ(0, origin.port());
-}
-
 TEST_F(OriginTest, CanBeDerivedFrom) {
   AddStandardScheme("new-standard", SchemeType::SCHEME_WITH_HOST);
   Origin opaque_unique_origin = Origin();
@@ -813,10 +807,10 @@ TEST_F(OriginTest, CanBeDerivedFrom) {
       {"standard-but-noaccess://a.com/foo", &regular_origin, false},
       {"standard-but-noaccess://a.com/foo", &opaque_precursor_origin, false},
       {"standard-but-noaccess://a.com/foo", &opaque_unique_origin, true},
-      {"standard-but-noaccess://a.com/foo", &no_access_origin, false},
+      {"standard-but-noaccess://a.com/foo", &no_access_origin, true},
       {"standard-but-noaccess://a.com/foo", &no_access_opaque_precursor_origin,
-       false},
-      {"standard-but-noaccess://b.com/foo", &no_access_origin, false},
+       true},
+      {"standard-but-noaccess://b.com/foo", &no_access_origin, true},
       {"standard-but-noaccess://b.com/foo", &no_access_opaque_precursor_origin,
        true},
 
@@ -846,6 +840,10 @@ TEST_F(OriginTest, GetDebugString) {
       http_opaque_origin.GetDebugString().c_str(),
       ::testing::MatchesRegex(
           "null \\[internally: \\(\\w*\\) derived from http://192.168.9.1\\]"));
+  EXPECT_THAT(
+      http_opaque_origin.GetDebugString(false /* include_nonce */).c_str(),
+      ::testing::MatchesRegex(
+          "null \\[internally: derived from http://192.168.9.1\\]"));
 
   Origin data_origin = Origin::Create(GURL("data:"));
   EXPECT_STREQ(data_origin.GetDebugString().c_str(),
@@ -857,6 +855,9 @@ TEST_F(OriginTest, GetDebugString) {
   EXPECT_THAT(
       data_derived_origin.GetDebugString().c_str(),
       ::testing::MatchesRegex("null \\[internally: \\(\\w*\\) anonymous\\]"));
+  EXPECT_THAT(
+      data_derived_origin.GetDebugString(false /* include_nonce */).c_str(),
+      ::testing::MatchesRegex("null \\[internally: anonymous\\]"));
 
   Origin file_origin = Origin::Create(GURL("file:///etc/passwd"));
   EXPECT_STREQ(file_origin.GetDebugString().c_str(),
@@ -926,6 +927,19 @@ TEST_F(OriginTest, SerializeTBDNonce) {
   // Can't use DoEqualityComparisons here since empty nonces are never == unless
   // they are the same object.
   EXPECT_EQ(opaque.GetDebugString(), deserialized.value().GetDebugString());
+
+  // Now force initialization of the nonce prior to serialization.
+  for (const GURL& url : invalid_urls) {
+    SCOPED_TRACE(url.spec());
+    Origin origin = Origin::Create(url);
+    base::Optional<std::string> serialized =
+        SerializeWithNonceAndInitIfNeeded(origin);
+    base::Optional<Origin> deserialized = Deserialize(std::move(*serialized));
+    ASSERT_TRUE(deserialized.has_value());
+
+    // The nonce should have been initialized prior to Serialization().
+    EXPECT_EQ(origin, deserialized.value());
+  }
 }
 
 TEST_F(OriginTest, DeserializeValidNonce) {
@@ -941,5 +955,9 @@ TEST_F(OriginTest, DeserializeValidNonce) {
   EXPECT_TRUE(DoEqualityComparisons(opaque, deserialized.value(), true));
   EXPECT_EQ(opaque.GetDebugString(), deserialized.value().GetDebugString());
 }
+
+INSTANTIATE_TYPED_TEST_SUITE_P(UrlOrigin,
+                               AbstractOriginTest,
+                               UrlOriginTestTraits);
 
 }  // namespace url

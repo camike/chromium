@@ -7,9 +7,11 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
+#include "base/containers/flat_map.h"
 #include "chrome/browser/chromeos/arc/accessibility/accessibility_info_data_wrapper.h"
 #include "components/arc/mojom/accessibility_helper.mojom-forward.h"
 #include "extensions/browser/api/automation_internal/automation_event_router.h"
@@ -41,9 +43,33 @@ class AXTreeSourceArc : public ui::AXTreeSource<AccessibilityInfoDataWrapper*,
   class Delegate {
    public:
     virtual void OnAction(const ui::AXActionData& data) const = 0;
+    virtual bool UseFullFocusMode() const = 0;
   };
 
-  AXTreeSourceArc(Delegate* delegate, float device_scale_factor);
+  // The interface to hook the event handling and the node serialization.
+  class Hook {
+   public:
+    Hook() = default;
+    virtual ~Hook() = default;
+
+    // Called prior to accessibility event dispatch.
+    // Hook implementations can update the internal state if necessary so that
+    // hooks can update the serialization state in PostSerializeNode().
+    // Return true if re-serialization of attaching node is needed.
+    virtual bool PreDispatchEvent(
+        AXTreeSourceArc* tree_source,
+        const mojom::AccessibilityEventData& event_data) = 0;
+
+    // Called after the default serialization of the attaching node.
+    // Hook implementations can modify the serialization of given |out_data|.
+    // Note that serialization is executed only when ui::AXTreeSerializer calls
+    // SerializeNode() from AXTreeSerializer.SerializeChanges().
+    // To ensure the node re-serialized, the class must return |true| on
+    // PreDispatchEvent() if the event is NOT coming from its ancestry.
+    virtual void PostSerializeNode(ui::AXNodeData* out_data) const = 0;
+  };
+
+  explicit AXTreeSourceArc(Delegate* delegate);
   ~AXTreeSourceArc() override;
 
   // Notify automation of an accessibility event.
@@ -56,15 +82,23 @@ class AXTreeSourceArc : public ui::AXTreeSource<AccessibilityInfoDataWrapper*,
   void NotifyGetTextLocationDataResult(const ui::AXActionData& data,
                                        const base::Optional<gfx::Rect>& rect);
 
-  // Update Chrome's accessibility focused node by id.
-  void UpdateAccessibilityFocusLocation(int32_t id);
-
   // Invalidates the tree serializer.
   void InvalidateTree();
 
+  // When it is enabled, this class exposes an accessibility tree optimized for
+  // screen readers such as ChromeVox and SwitchAccess. This intends to have the
+  // navigation order and focusabilities similar to TalkBack.
+  // Also, when it is enabled, the accessibility focus in Android is exposed as
+  // the focus of this tree.
+  bool UseFullFocusMode() const;
+
   // Returns true if the node id is the root of the node tree (which can have a
   // parent window).
-  bool IsRootOfNodeTree(int32_t id) const;
+  // virtual for testing.
+  virtual bool IsRootOfNodeTree(int32_t id) const;
+
+  AccessibilityInfoDataWrapper* GetFirstImportantAncestor(
+      AccessibilityInfoDataWrapper* info_data) const;
 
   // AXTreeSource:
   bool GetTreeData(ui::AXTreeData* data) const override;
@@ -75,8 +109,7 @@ class AXTreeSourceArc : public ui::AXTreeSource<AccessibilityInfoDataWrapper*,
   void SerializeNode(AccessibilityInfoDataWrapper* info_data,
                      ui::AXNodeData* out_data) const override;
 
-  float device_scale_factor() const { return device_scale_factor_; }
-  void set_device_scale_factor(float dsf) { device_scale_factor_ = dsf; }
+  aura::Window* GetWindow() const;
 
   bool is_notification() { return is_notification_; }
 
@@ -87,6 +120,10 @@ class AXTreeSourceArc : public ui::AXTreeSource<AccessibilityInfoDataWrapper*,
 
  private:
   friend class arc::AXTreeSourceArcTest;
+
+  // Actual implementation of NotifyAccessibilityEvent.
+  void NotifyAccessibilityEventInternal(
+      const mojom::AccessibilityEventData& event_data);
 
   // virtual for testing.
   virtual extensions::AutomationEventRouterInterface* GetAutomationEventRouter()
@@ -100,44 +137,30 @@ class AXTreeSourceArc : public ui::AXTreeSource<AccessibilityInfoDataWrapper*,
   // Helper to recursively compute bounds for |info_data|. Returns true if
   // non-empty bounds were encountered.
   void ComputeEnclosingBoundsInternal(AccessibilityInfoDataWrapper* info_data,
-                                      gfx::Rect& computed_bounds) const;
+                                      gfx::Rect* computed_bounds) const;
 
-  // Computes if the node is clickable and has no clickable descendants.
-  bool ComputeIsClickableLeaf(
-      const std::vector<mojom::AccessibilityNodeInfoDataPtr>& nodes,
-      int32_t node_index,
-      const std::map<int32_t, int32_t>& node_id_to_nodes_index) const;
-
-  // Builds a mapping from index in |nodes| to whether ignored state should be
-  // applied to the node in chrome accessibility.
-  void BuildImportanceTable(
-      mojom::AccessibilityEventData* event_data,
-      const std::map<int32_t, int32_t>& node_id_to_nodes_index,
-      std::vector<bool>& out_node) const;
-
-  bool BuildHasImportantProperty(
-      int32_t nodes_index,
-      const std::vector<mojom::AccessibilityNodeInfoDataPtr>& nodes,
-      const std::map<int32_t, int32_t>& node_id_to_nodes_index,
-      std::vector<bool>& has_important_prop_cache) const;
-
-  // Find the most top-left focusable node under the given node.
-  AccessibilityInfoDataWrapper* FindFirstFocusableNode(
+  // Find the most top-left focusable node under the given node in full focus mode.
+  AccessibilityInfoDataWrapper* FindFirstFocusableNodeInFullFocusMode(
       AccessibilityInfoDataWrapper* info_data) const;
 
-  AccessibilityInfoDataWrapper* GetSelectedNodeInfoFromAdapterView(
-      mojom::AccessibilityEventData* event_data) const;
+  // Updates android_focused_id_ from given AccessibilityEventData.
+  // Having this method, |android_focused_id_| is one of these:
+  // - input focus in Android
+  // - accessibility focus in Android
+  // - the chrome automation client's internal focus (via set sequential focus
+  //   action and replying accessibility focus event from Android).
+  // This returns false if we don't want to dispatch the processing
+  // event to chrome automation. Otherwise, this returns true.
+  bool UpdateAndroidFocusedId(const mojom::AccessibilityEventData& event_data);
 
-  void UpdateAXNameCache(AccessibilityInfoDataWrapper* focused_node,
-                         const std::vector<std::string>& event_text);
-
-  void ApplyCachedProperties();
+  // Processes implementations of Hooks and returns a list node id that needs
+  // re-serialization.
+  std::vector<int32_t> ProcessHooksOnEvent(
+      const mojom::AccessibilityEventData& event_data);
 
   // Compare previous live region and current live region, and add event to the
   // given vector if there is any difference.
   void HandleLiveRegions(std::vector<ui::AXEvent>* events);
-
-  bool ShouldDispatchFocusLocationChange() const;
 
   // Resets tree state.
   void Reset();
@@ -153,14 +176,11 @@ class AXTreeSourceArc : public ui::AXTreeSource<AccessibilityInfoDataWrapper*,
                AccessibilityInfoDataWrapper* info_data2) const override;
   AccessibilityInfoDataWrapper* GetNull() const override;
 
-  // AXActionHandler:
+  // AXActionHandlerBase:
   void PerformAction(const ui::AXActionData& data) override;
 
   // Maps an AccessibilityInfoDataWrapper ID to its tree data.
   std::map<int32_t, std::unique_ptr<AccessibilityInfoDataWrapper>> tree_map_;
-
-  // The device scale factor of the display which the window is on.
-  float device_scale_factor_;
 
   // Maps an AccessibilityInfoDataWrapper ID to its parent.
   std::map<int32_t, int32_t> parent_map_;
@@ -170,24 +190,23 @@ class AXTreeSourceArc : public ui::AXTreeSource<AccessibilityInfoDataWrapper*,
   base::Optional<int32_t> window_id_;
   base::Optional<int32_t> android_focused_id_;
 
-  // Cache of ChromeVox accessibility focus.
-  base::Optional<int32_t> chrome_focused_id_;
-
   bool is_notification_;
   bool is_input_method_window_;
 
-  std::map<int32_t, std::string> cached_names_;
-  std::map<int32_t, ax::mojom::Role> cached_roles_;
+  base::Optional<std::string> notification_key_;
+
+  // Cache of mapping from the *Android* window id to the last focused node id.
+  std::map<int32_t, int32_t> window_id_to_last_focus_node_id_;
 
   // Mapping from Chrome node ID to its cached computed bounds.
   // This simplifies bounds calculations.
   std::map<int32_t, gfx::Rect> computed_bounds_;
 
-  // Mapping from Chrome node ID to the previous raw bounds.
-  std::map<int32_t, gfx::Rect> previous_raw_bounds_;
-
   // Mapping from Chrome node ID to the previous computed name for live region.
   std::map<int32_t, std::string> previous_live_region_name_;
+
+  // Mapping from Chrome node ID to the attached hook implementations.
+  base::flat_map<int32_t, std::unique_ptr<Hook>> hooks_;
 
   // A delegate that handles accessibility actions on behalf of this tree. The
   // delegate is valid during the lifetime of this tree.

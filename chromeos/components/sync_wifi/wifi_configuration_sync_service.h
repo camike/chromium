@@ -30,6 +30,8 @@ namespace sync_wifi {
 class LocalNetworkCollectorImpl;
 class SyncedNetworkUpdaterImpl;
 class WifiConfigurationBridge;
+class SyncedNetworkMetricsLogger;
+class TimerFactory;
 
 // A profile keyed service which instantiates and provides access to an instance
 // of WifiConfigurationBridge.
@@ -46,11 +48,13 @@ class WifiConfigurationSyncService : public KeyedService {
       base::WeakPtr<NetworkMetadataStore> network_metadata_store);
 
  private:
-  std::unique_ptr<WifiConfigurationBridge> bridge_;
-  std::unique_ptr<SyncedNetworkUpdaterImpl> updater_;
-  std::unique_ptr<LocalNetworkCollectorImpl> collector_;
   mojo::Remote<chromeos::network_config::mojom::CrosNetworkConfig>
       remote_cros_network_config_;
+  std::unique_ptr<SyncedNetworkMetricsLogger> metrics_logger_;
+  std::unique_ptr<TimerFactory> timer_factory_;
+  std::unique_ptr<SyncedNetworkUpdaterImpl> updater_;
+  std::unique_ptr<LocalNetworkCollectorImpl> collector_;
+  std::unique_ptr<WifiConfigurationBridge> bridge_;
 
   DISALLOW_COPY_AND_ASSIGN(WifiConfigurationSyncService);
 };

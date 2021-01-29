@@ -81,12 +81,18 @@ TEST(FormatExtensionTest, SinkAppendChars) {
   }
 }
 
-TEST(FormatExtensionTest, CustomSink) {
-  my_namespace::UserDefinedType sink;
-  absl::Format(&sink, "There were %04d little %s.", 3, "pigs");
-  EXPECT_EQ("There were 0003 little pigs.", sink.Value());
-  absl::Format(&sink, "And %-3llx bad wolf!", 1);
-  EXPECT_EQ("There were 0003 little pigs.And 1   bad wolf!", sink.Value());
+TEST(FormatExtensionTest, VerifyEnumEquality) {
+#define X_VAL(id)                           \
+  EXPECT_EQ(absl::FormatConversionChar::id, \
+            absl::str_format_internal::FormatConversionCharInternal::id);
+  ABSL_INTERNAL_CONVERSION_CHARS_EXPAND_(X_VAL, );
+#undef X_VAL
+
+#define X_VAL(id)                              \
+  EXPECT_EQ(absl::FormatConversionCharSet::id, \
+            absl::str_format_internal::FormatConversionCharSetInternal::id);
+  ABSL_INTERNAL_CONVERSION_CHARS_EXPAND_(X_VAL, );
+#undef X_VAL
 }
 
 }  // namespace

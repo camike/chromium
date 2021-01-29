@@ -55,8 +55,8 @@ class MetadataTestBaseView : public views::View {
     OnPropertyChanged(&int_property_, views::kPropertyEffectsNone);
   }
   int GetIntProperty() const { return int_property_; }
-  views::PropertyChangedSubscription AddIntPropertyChangedCallback(
-      views::PropertyChangedCallback callback) {
+  base::CallbackListSubscription AddIntPropertyChangedCallback(
+      views::PropertyChangedCallback callback) WARN_UNUSED_RESULT {
     return AddPropertyChangedCallback(&int_property_, std::move(callback));
   }
 
@@ -64,10 +64,9 @@ class MetadataTestBaseView : public views::View {
   int int_property_ = 0;
 };
 
-BEGIN_METADATA(MetadataTestBaseView)
-METADATA_PARENT_CLASS(views::View)
-ADD_PROPERTY_METADATA(MetadataTestBaseView, int, IntProperty)
-END_METADATA()
+BEGIN_METADATA(MetadataTestBaseView, views::View)
+ADD_PROPERTY_METADATA(int, IntProperty)
+END_METADATA
 
 // Descendent view in the simple hierarchy. The inherited properties are visible
 // within the metadata.
@@ -85,8 +84,8 @@ class MetadataTestView : public MetadataTestBaseView {
     OnPropertyChanged(&float_property_, views::kPropertyEffectsNone);
   }
   float GetFloatProperty() const { return float_property_; }
-  views::PropertyChangedSubscription AddFloatPropertyChangedCallback(
-      views::PropertyChangedCallback callback) {
+  base::CallbackListSubscription AddFloatPropertyChangedCallback(
+      views::PropertyChangedCallback callback) WARN_UNUSED_RESULT {
     return AddPropertyChangedCallback(&float_property_, std::move(callback));
   }
 
@@ -94,10 +93,9 @@ class MetadataTestView : public MetadataTestBaseView {
   float float_property_ = 0.f;
 };
 
-BEGIN_METADATA(MetadataTestView)
-METADATA_PARENT_CLASS(MetadataTestBaseView)
-ADD_PROPERTY_METADATA(MetadataTestView, float, FloatProperty)
-END_METADATA()
+BEGIN_METADATA(MetadataTestView, MetadataTestBaseView)
+ADD_PROPERTY_METADATA(float, FloatProperty)
+END_METADATA
 
 TEST_F(MetadataTest, TestFloatMetadataPropertyAccess) {
   const float start_value = 12.34f;
@@ -117,7 +115,7 @@ TEST_F(MetadataTest, TestFloatPropertyChangedCallback) {
   const float start_value = 12.34f;
 
   MetadataTestView test_obj;
-  views::PropertyChangedSubscription callback =
+  base::CallbackListSubscription callback =
       test_obj.AddFloatPropertyChangedCallback(base::BindRepeating(
           &MetadataTest::OnFloatPropertyChanged, base::Unretained(this)));
 

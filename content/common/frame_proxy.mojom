@@ -5,7 +5,8 @@
 module content.mojom;
 
 import "ui/gfx/geometry/mojom/geometry.mojom";
-import "content/common/render_frame_metadata.mojom";
+import "cc/mojom/render_frame_metadata.mojom";
+import "content/common/frame.mojom";
 import "services/viz/public/mojom/compositing/frame_sink_id.mojom";
 
 // Mojo interface for communicating from RenderFrameProxy to
@@ -14,6 +15,9 @@ import "services/viz/public/mojom/compositing/frame_sink_id.mojom";
 interface RenderFrameProxyHost {
   // TODO(dtapuska): Keep this interface for now. All methods have moved to
   // blink::RemoteFrameHost but we might still need this.
+
+  // Requests that the given URL be opened in the specified manner.
+  OpenURL(OpenURLParams params);
 };
 
 // Mojo interface for communicating from RenderFrameProxyHost to
@@ -24,15 +28,9 @@ interface RenderFrameProxy {
   // contents has terminated.
   ChildProcessGone();
 
-  // This function enables auto-resize mode from the parent renderer.
-  EnableAutoResize(gfx.mojom.Size min_size, gfx.mojom.Size max_size);
-
-  // This function disables auto-resize-mode from the parent renderer.
-  DisableAutoResize();
-
   // Informs the completion of an autoresize transaction from the parent
   // renderer and updates with the provided viz::LocalSurfaceId.
-  DidUpdateVisualProperties(RenderFrameMetadata metadata);
+  DidUpdateVisualProperties(cc.mojom.RenderFrameMetadata metadata);
 
   // This function notifies the remote frame that its associated
   // compositing destination (RenderWidgetHostView) has changed.

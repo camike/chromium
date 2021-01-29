@@ -7,10 +7,16 @@ package org.chromium.chrome.browser.webapps.addtohomescreen;
 import android.graphics.Bitmap;
 import android.util.Pair;
 
+import androidx.annotation.StringRes;
+
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
-import org.chromium.chrome.browser.ShortcutHelper;
-import org.chromium.chrome.browser.banners.AppData;
+import org.chromium.chrome.browser.webapps.AddToHomescreenProperties;
+import org.chromium.chrome.browser.webapps.AddToHomescreenViewDelegate;
+import org.chromium.components.webapps.AppData;
+import org.chromium.components.webapps.AppType;
+import org.chromium.components.webapps.WebappsIconUtils;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.modelutil.PropertyModel;
@@ -24,6 +30,7 @@ import javax.annotation.Nonnull;
  * information about the app is available. These methods modify the model that lives on the Java
  * side.
  */
+@JNINamespace("webapps")
 class AddToHomescreenMediator implements AddToHomescreenViewDelegate {
     private long mNativeAddToHomescreenMediator;
     private PropertyModel mModel;
@@ -36,11 +43,11 @@ class AddToHomescreenMediator implements AddToHomescreenViewDelegate {
         mNativeAddToHomescreenMediator = AddToHomescreenMediatorJni.get().initialize(this);
     }
 
-    void startForAppMenu(@Nonnull WebContents webContents) {
+    void startForAppMenu(@Nonnull WebContents webContents, @StringRes int titleId) {
         if (mNativeAddToHomescreenMediator == 0) return;
 
         AddToHomescreenMediatorJni.get().startForAppMenu(
-                mNativeAddToHomescreenMediator, webContents);
+                mNativeAddToHomescreenMediator, webContents, titleId);
     }
 
     @CalledByNative
@@ -48,7 +55,7 @@ class AddToHomescreenMediator implements AddToHomescreenViewDelegate {
         Bitmap iconToShow = icon;
         if (needToAddPadding) {
             assert isAdaptive;
-            iconToShow = ShortcutHelper.createHomeScreenIconFromWebIcon(icon, true /*maskable*/);
+            iconToShow = WebappsIconUtils.createHomeScreenIconFromWebIcon(icon, true /*maskable*/);
         }
 
         mModel.set(AddToHomescreenProperties.ICON, new Pair<>(iconToShow, isAdaptive));
@@ -82,6 +89,7 @@ class AddToHomescreenMediator implements AddToHomescreenViewDelegate {
         if (mNativeAddToHomescreenMediator == 0) return;
 
         AddToHomescreenMediatorJni.get().addToHomescreen(mNativeAddToHomescreenMediator, title);
+        destroyNative();
     }
 
     @Override
@@ -103,15 +111,24 @@ class AddToHomescreenMediator implements AddToHomescreenViewDelegate {
         if (mNativeAddToHomescreenMediator == 0) return;
 
         AddToHomescreenMediatorJni.get().onUiDismissed(mNativeAddToHomescreenMediator);
+        destroyNative();
+    }
+
+    private void destroyNative() {
+        if (mNativeAddToHomescreenMediator == 0) return;
+
+        AddToHomescreenMediatorJni.get().destroy(mNativeAddToHomescreenMediator);
         mNativeAddToHomescreenMediator = 0;
     }
 
     @NativeMethods
     interface Natives {
         long initialize(AddToHomescreenMediator instance);
-        void startForAppMenu(long nativeAddToHomescreenMediator, WebContents webContents);
+        void startForAppMenu(long nativeAddToHomescreenMediator, WebContents webContents,
+                @StringRes int titleId);
         void addToHomescreen(long nativeAddToHomescreenMediator, String title);
         void onNativeDetailsShown(long nativeAddToHomescreenMediator);
         void onUiDismissed(long nativeAddToHomescreenMediator);
+        void destroy(long nativeAddToHomescreenMediator);
     }
 }

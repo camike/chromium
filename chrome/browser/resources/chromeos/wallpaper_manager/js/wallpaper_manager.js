@@ -406,6 +406,18 @@ WallpaperManager.prototype.preDownloadDomInit_ = function() {
       }, 500);
     };
   }());
+
+  var dialogTopbar = this.document_.body.querySelector('.dialog-topbar');
+  dialogTopbar.addEventListener('scroll', function() {
+    var scrollTimer;
+    return () => {
+      dialogTopbar.classList.add('show-scroll-bar');
+      window.clearTimeout(scrollTimer);
+      scrollTimer = window.setTimeout(() => {
+        dialogTopbar.classList.remove('show-scroll-bar');
+      }, 500);
+    };
+  }());
 };
 
 /**
@@ -1098,6 +1110,7 @@ WallpaperManager.prototype.onPreviewModeStarted_ = function(
     });
   };
   this.addEventToButton_($('cancel-preview-wallpaper'), onCancelClicked);
+  window.addEventListener(Constants.ClosePreviewWallpaper, onCancelClicked);
 
   $('message-container').style.display = 'none';
 };

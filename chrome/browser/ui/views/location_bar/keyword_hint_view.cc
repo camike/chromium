@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/numerics/safe_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -30,12 +31,16 @@
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/flex_layout.h"
 #include "ui/views/layout/flex_layout_types.h"
+#include "ui/views/metadata/metadata_header_macros.h"
+#include "ui/views/metadata/metadata_impl_macros.h"
 #include "ui/views/view_class_properties.h"
 
 namespace {
 
 class ChipLabel : public views::Label {
  public:
+  METADATA_HEADER(ChipLabel);
+
   using views::Label::Label;
 
   // views::Label
@@ -52,10 +57,13 @@ class ChipLabel : public views::Label {
   }
 };
 
+BEGIN_METADATA(ChipLabel, views::Label)
+END_METADATA
+
 }  // namespace
 
-KeywordHintView::KeywordHintView(LocationBarView* parent, Profile* profile)
-    : Button(parent), profile_(profile) {
+KeywordHintView::KeywordHintView(PressedCallback callback, Profile* profile)
+    : Button(std::move(callback)), profile_(profile) {
   auto chip_container = std::make_unique<views::View>();
 
   chip_label_ = chip_container->AddChildView(std::make_unique<ChipLabel>(
@@ -92,6 +100,10 @@ KeywordHintView::KeywordHintView(LocationBarView* parent, Profile* profile)
 
 KeywordHintView::~KeywordHintView() {}
 
+base::string16 KeywordHintView::GetKeyword() const {
+  return keyword_;
+}
+
 void KeywordHintView::SetKeyword(const base::string16& keyword) {
   // When the virtual keyboard is visible, we show a modified touch UI
   // containing only the chip and no surrounding labels.
@@ -102,6 +114,9 @@ void KeywordHintView::SetKeyword(const base::string16& keyword) {
     return;
 
   keyword_ = keyword;
+  OnPropertyChanged(&keyword_, views::kPropertyEffectsNone);
+  // TODO(pkasting): Arguably, much of the code below would be better as
+  // property change handlers in file-scope subclasses of Label etc.
   if (keyword_.empty())
     return;
   DCHECK(profile_);
@@ -163,7 +178,7 @@ gfx::Insets KeywordHintView::GetInsets() const {
       << "LOCATION_BAR_HEIGHT must be tall enough to contain the chip.";
   const float subsumed_width =
       std::sqrt(hypotenuse * hypotenuse - extent * extent);
-  const int horizontal_margin = gfx::ToCeiledInt(radius - subsumed_width);
+  const int horizontal_margin = base::ClampCeil(radius - subsumed_width);
   // This ensures the end of the KeywordHintView doesn't touch the edge of the
   // omnibox, but the padding should be symmetrical, so use it on both sides,
   // collapsing into the horizontal padding used by the previous View.
@@ -178,10 +193,6 @@ gfx::Size KeywordHintView::GetMinimumSize() const {
   gfx::Size chip_size = chip_container_->GetPreferredSize();
   chip_size.Enlarge(GetInsets().width(), GetInsets().height());
   return chip_size;
-}
-
-const char* KeywordHintView::GetClassName() const {
-  return "KeywordHintView";
 }
 
 void KeywordHintView::OnThemeChanged() {
@@ -216,3 +227,7 @@ void KeywordHintView::OnThemeChanged() {
   trailing_label_->SetEnabledColor(text_color);
   trailing_label_->SetBackgroundColor(background_color);
 }
+
+BEGIN_METADATA(KeywordHintView, views::Button)
+ADD_PROPERTY_METADATA(base::string16, Keyword)
+END_METADATA

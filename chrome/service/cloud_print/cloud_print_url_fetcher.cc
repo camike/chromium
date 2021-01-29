@@ -18,7 +18,6 @@
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/url_fetcher.h"
-#include "net/url_request/url_request_status.h"
 #include "url/gurl.h"
 
 namespace cloud_print {
@@ -102,12 +101,11 @@ void CloudPrintURLFetcher::set_test_factory(
 }
 
 CloudPrintURLFetcher::ResponseAction
-CloudPrintURLFetcher::Delegate::HandleRawResponse(
-    const net::URLFetcher* source,
-    const GURL& url,
-    const net::URLRequestStatus& status,
-    int response_code,
-    const std::string& data) {
+CloudPrintURLFetcher::Delegate::HandleRawResponse(const net::URLFetcher* source,
+                                                  const GURL& url,
+                                                  net::Error error,
+                                                  int response_code,
+                                                  const std::string& data) {
   return CONTINUE_PROCESSING;
 }
 
@@ -129,7 +127,7 @@ CloudPrintURLFetcher::Delegate::HandleJSONData(const net::URLFetcher* source,
 
 CloudPrintURLFetcher::CloudPrintURLFetcher(
     const net::PartialNetworkTrafficAnnotationTag& partial_traffic_annotation)
-    : delegate_(NULL),
+    : delegate_(nullptr),
       num_retries_(0),
       type_(REQUEST_MAX),
       partial_traffic_annotation_(partial_traffic_annotation) {}
@@ -138,14 +136,22 @@ bool CloudPrintURLFetcher::IsSameRequest(const net::URLFetcher* source) {
   return (request_.get() == source);
 }
 
-void CloudPrintURLFetcher::StartGetRequest(
+void CloudPrintURLFetcher::StartGetRequest(RequestType type,
+                                           const GURL& url,
+                                           Delegate* delegate,
+                                           int max_retries) {
+  StartRequestHelper(type, url, net::URLFetcher::GET, delegate, max_retries,
+                     std::string(), std::string(), std::string());
+}
+
+void CloudPrintURLFetcher::StartGetRequestWithAcceptHeader(
     RequestType type,
     const GURL& url,
     Delegate* delegate,
     int max_retries,
-    const std::string& additional_headers) {
+    const std::string& accept_header) {
   StartRequestHelper(type, url, net::URLFetcher::GET, delegate, max_retries,
-                     std::string(), std::string(), additional_headers);
+                     std::string(), std::string(), accept_header);
 }
 
 void CloudPrintURLFetcher::StartPostRequest(
@@ -154,10 +160,9 @@ void CloudPrintURLFetcher::StartPostRequest(
     Delegate* delegate,
     int max_retries,
     const std::string& post_data_mime_type,
-    const std::string& post_data,
-    const std::string& additional_headers) {
+    const std::string& post_data) {
   StartRequestHelper(type, url, net::URLFetcher::POST, delegate, max_retries,
-                     post_data_mime_type, post_data, additional_headers);
+                     post_data_mime_type, post_data, std::string());
 }
 
 void CloudPrintURLFetcher::OnURLFetchComplete(
@@ -170,12 +175,9 @@ void CloudPrintURLFetcher::OnURLFetchComplete(
   source->GetResponseAsString(&data);
   ReportRequestTime(type_, base::Time::Now() - start_time_);
   ReportDownloadSize(type_, data.size());
-  ResponseAction action = delegate_->HandleRawResponse(
-      source,
-      source->GetURL(),
-      source->GetStatus(),
-      source->GetResponseCode(),
-      data);
+  ResponseAction action =
+      delegate_->HandleRawResponse(source, source->GetURL(), source->GetError(),
+                                   source->GetResponseCode(), data);
 
   // If we get auth error, notify delegate and check if it wants to proceed.
   if (action == CONTINUE_PROCESSING &&
@@ -185,7 +187,7 @@ void CloudPrintURLFetcher::OnURLFetchComplete(
 
   if (action == CONTINUE_PROCESSING) {
     // We need to retry on all network errors.
-    if (!source->GetStatus().is_success() || (source->GetResponseCode() != 200))
+    if (source->GetError() != net::OK || source->GetResponseCode() != 200)
       action = RETRY_REQUEST;
     else
       action = delegate_->HandleRawData(source, source->GetURL(), data);
@@ -249,13 +251,13 @@ void CloudPrintURLFetcher::StartRequestHelper(
     int max_retries,
     const std::string& post_data_mime_type,
     const std::string& post_data,
-    const std::string& additional_headers) {
+    const std::string& additional_accept_header) {
   DCHECK(delegate);
   type_ = type;
   UMA_HISTOGRAM_ENUMERATION("CloudPrint.UrlFetcherRequestType", type,
                             REQUEST_MAX);
   // Persist the additional headers in case we need to retry the request.
-  additional_headers_ = additional_headers;
+  additional_accept_header_ = additional_accept_header;
   net::NetworkTrafficAnnotationTag traffic_annotation =
       net::CompleteNetworkTrafficAnnotation("cloud_print",
                                             partial_traffic_annotation_,
@@ -293,15 +295,16 @@ void CloudPrintURLFetcher::StartRequestHelper(
 }
 
 void CloudPrintURLFetcher::SetupRequestHeaders() {
-  std::string headers = delegate_->GetAuthHeader();
-  if (!headers.empty())
-    headers += "\r\n";
-  headers += kChromeCloudPrintProxyHeader;
-  if (!additional_headers_.empty()) {
-    headers += "\r\n";
-    headers += additional_headers_;
+  request_->ClearExtraRequestHeaders();
+  std::string auth_header_value = delegate_->GetAuthHeaderValue();
+  if (!auth_header_value.empty()) {
+    request_->AddExtraRequestHeader("Authorization", auth_header_value);
   }
-  request_->SetExtraRequestHeaders(headers);
+  request_->AddExtraRequestHeader(kChromeCloudPrintProxyHeaderName,
+                                  kChromeCloudPrintProxyHeaderValue);
+  if (!additional_accept_header_.empty()) {
+    request_->AddExtraRequestHeader("Accept", additional_accept_header_);
+  }
 }
 
 CloudPrintURLFetcher::~CloudPrintURLFetcher() {}

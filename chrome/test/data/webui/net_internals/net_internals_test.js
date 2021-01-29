@@ -50,11 +50,6 @@ var NetInternalsTest = (function() {
     setUp: function() {
       testing.Test.prototype.setUp.call(this);
 
-      // Wrap g_browser.receive around a test function so that assert and expect
-      // functions can be called from observers.
-      g_browser.receive = this.continueTest(
-          WhenTestDone.EXPECT, BrowserBridge.prototype.receive.bind(g_browser));
-
       var runTest = this.deferRunTest(WhenTestDone.EXPECT);
       window.setTimeout(runTest, 0);
     }
@@ -99,7 +94,7 @@ var NetInternalsTest = (function() {
    * @return {node} The tbody node, or null.
    */
   NetInternalsTest.getTbodyDescendent = function(ancestorId) {
-    if ($(ancestorId).nodeName == 'TBODY') {
+    if ($(ancestorId).nodeName === 'TBODY') {
       return $(ancestorId);
     }
     // The tbody element of the first styled table in |parentId|.
@@ -154,7 +149,7 @@ var NetInternalsTest = (function() {
     var currentChild = tbody.children[0];
     while (currentChild) {
       if (NetInternalsTest.nodeIsVisible(currentChild)) {
-        if (row == 0) {
+        if (row === 0) {
           return currentChild.children[column].innerText;
         }
         --row;
@@ -190,7 +185,7 @@ var NetInternalsTest = (function() {
    * @return {bool} Whether or not the node is visible.
    */
   NetInternalsTest.nodeIsVisible = function(node) {
-    return node.style.display != 'none';
+    return node.style.display !== 'none';
   };
 
   /**
@@ -275,7 +270,7 @@ var NetInternalsTest = (function() {
     var tabIdToView = tabSwitcher.getAllTabViews();
     for (var curTabId in tabIdToView) {
       expectEquals(
-          curTabId == tabId, tabSwitcher.getTabView(curTabId).isVisible(),
+          curTabId === tabId, tabSwitcher.getTabView(curTabId).isVisible(),
           curTabId + ': Unexpected visibility state.');
     }
   };
@@ -529,7 +524,7 @@ var NetInternalsTest = (function() {
    */
   NetInternalsTest.isDisplayed = function(node) {
     var style = getComputedStyle(node);
-    return style.getPropertyValue('display') != 'none';
+    return style.getPropertyValue('display') !== 'none';
   };
 
   /**
@@ -544,7 +539,7 @@ var NetInternalsTest = (function() {
 
     for (var i = 0; i < allIds.length; ++i) {
       var curId = allIds[i];
-      expectEquals(nodeId == curId, NetInternalsTest.nodeIsVisible($(curId)));
+      expectEquals(nodeId === curId, NetInternalsTest.nodeIsVisible($(curId)));
     }
   };
 

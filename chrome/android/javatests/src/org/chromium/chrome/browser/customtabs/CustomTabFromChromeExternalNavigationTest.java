@@ -6,13 +6,13 @@ package org.chromium.chrome.browser.customtabs;
 
 import android.content.Intent;
 import android.net.Uri;
-import android.os.Build;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.LargeTest;
-import android.support.test.filters.MediumTest;
 import android.util.Base64;
-import android.view.Menu;
 
+import androidx.test.filters.LargeTest;
+import androidx.test.filters.MediumTest;
+
+import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
@@ -22,9 +22,9 @@ import org.chromium.base.ActivityState;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.DisableIf;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.R;
 import org.chromium.chrome.browser.LaunchIntentDispatcher;
 import org.chromium.chrome.browser.customtabs.CustomTabDelegateFactory.CustomTabNavigationDelegate;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
@@ -33,10 +33,9 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabDelegateFactory;
 import org.chromium.chrome.browser.tab.TabTestUtils;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResult;
+import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
+import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResultType;
 import org.chromium.components.external_intents.InterceptNavigationDelegateImpl;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.EmbeddedTestServerRule;
 
@@ -52,6 +51,9 @@ public class CustomTabFromChromeExternalNavigationTest {
     public CustomTabActivityTestRule mActivityRule = new CustomTabActivityTestRule();
 
     @Rule
+    public ChromeTabbedActivityTestRule mChromeActivityTestRule =
+            new ChromeTabbedActivityTestRule();
+
     public EmbeddedTestServerRule mServerRule = new EmbeddedTestServerRule();
 
     private Intent getCustomTabFromChromeIntent(final String url, final boolean markFromChrome) {
@@ -78,14 +80,6 @@ public class CustomTabFromChromeExternalNavigationTest {
         mActivityRule.startCustomTabActivityWithIntent(intent);
     }
 
-    private void startPaymentRequestUIFromChrome(String url) {
-        Intent intent = getCustomTabFromChromeIntent(url, false);
-        CustomTabIntentDataProvider.addPaymentRequestUIExtras(intent);
-
-        mActivityRule.startCustomTabActivityWithIntent(intent);
-        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
-    }
-
     @Test
     @Feature("CustomTabFromChrome")
     @MediumTest
@@ -104,10 +98,7 @@ public class CustomTabFromChromeExternalNavigationTest {
     @Test
     @Feature("CustomTabFromChrome")
     @LargeTest
-    @DisableIf.Build(message = "Flaky on K, https://crbug.com/962974",
-            sdk_is_less_than = Build.VERSION_CODES.LOLLIPOP)
-    public void
-    testIntentWithRedirectToApp() {
+    public void testIntentWithRedirectToApp() {
         final String redirectUrl = "https://maps.google.com/maps?q=1600+amphitheatre+parkway";
         final String initialUrl =
                 mServerRule.getServer().getURL("/chrome/test/data/android/redirect/js_redirect.html"
@@ -118,7 +109,7 @@ public class CustomTabFromChromeExternalNavigationTest {
                         + Base64.encodeToString(
                                 ApiCompatibilityUtils.getBytesUtf8(redirectUrl), Base64.URL_SAFE));
 
-        mActivityRule.startActivityCompletely(getCustomTabFromChromeIntent(initialUrl, true));
+        mActivityRule.launchActivity(getCustomTabFromChromeIntent(initialUrl, true));
         mActivityRule.waitForActivityNativeInitializationComplete();
 
         final AtomicReference<InterceptNavigationDelegateImpl> navigationDelegate =
@@ -137,40 +128,15 @@ public class CustomTabFromChromeExternalNavigationTest {
             return true;
         }, "Navigation delegate never initialized.");
 
-        CriteriaHelper.pollUiThread(
-                Criteria.equals(OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT,
-                        navigationDelegate.get()::getLastOverrideUrlLoadingResultForTests));
+        CriteriaHelper.pollUiThread(() -> {
+            Criteria.checkThat(
+                    navigationDelegate.get().getLastOverrideUrlLoadingResultTypeForTests(),
+                    Matchers.is(OverrideUrlLoadingResultType.OVERRIDE_WITH_EXTERNAL_INTENT));
+        });
 
         CriteriaHelper.pollUiThread(() -> {
             int state = ApplicationStatus.getStateForActivity(mActivityRule.getActivity());
             return state == ActivityState.STOPPED || state == ActivityState.DESTROYED;
         }, "Activity never stopped or destroyed.");
-    }
-
-    @Test
-    @Feature("CustomTabFromChrome")
-    @MediumTest
-    public void testIntentToOpenPaymentRequestUI() throws Exception {
-        startPaymentRequestUIFromChrome("about:blank");
-
-        Tab tab = mActivityRule.getActivity().getActivityTab();
-        TabDelegateFactory delegateFactory = TabTestUtils.getDelegateFactory(tab);
-        Assert.assertTrue(delegateFactory instanceof CustomTabDelegateFactory);
-        CustomTabDelegateFactory customTabDelegateFactory =
-                ((CustomTabDelegateFactory) delegateFactory);
-        Assert.assertFalse(customTabDelegateFactory.getExternalNavigationDelegate()
-                                   instanceof CustomTabNavigationDelegate);
-
-        CustomTabsTestUtils.openAppMenuAndAssertMenuShown(mActivityRule.getActivity());
-        Menu menu = mActivityRule.getMenu();
-
-        Assert.assertTrue(menu.findItem(R.id.icon_row_menu_id).isVisible());
-        Assert.assertTrue(menu.findItem(R.id.find_in_page_id).isVisible());
-        Assert.assertFalse(menu.findItem(R.id.open_in_browser_id).isVisible());
-        Assert.assertFalse(menu.findItem(R.id.bookmark_this_page_id).isVisible());
-        Assert.assertFalse(menu.findItem(R.id.offline_page_id).isVisible());
-        Assert.assertFalse(menu.findItem(R.id.request_desktop_site_row_menu_id).isVisible());
-        Assert.assertFalse(menu.findItem(R.id.add_to_homescreen_id).isVisible());
-        Assert.assertFalse(menu.findItem(R.id.open_webapk_id).isVisible());
     }
 }

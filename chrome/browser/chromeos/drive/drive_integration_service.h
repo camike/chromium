@@ -99,16 +99,15 @@ class DriveIntegrationService : public KeyedService,
       std::unique_ptr<drivefs::DriveFsBootstrapListener>()>;
   using GetQuickAccessItemsCallback =
       base::OnceCallback<void(drive::FileError, std::vector<QuickAccessItem>)>;
+  using SearchDriveByFileNameCallback =
+      base::OnceCallback<void(drive::FileError, std::vector<base::FilePath>)>;
 
-  // test_drive_service, test_mount_point_name, test_cache_root and
-  // test_file_system are used by tests to inject customized instances.
+  // test_mount_point_name, test_cache_root and
+  // test_drivefs_mojo_listener_factory are used by tests to inject customized
+  // instances.
   // Pass NULL or the empty value when not interested.
-  // |preference_watcher| observes the drive enable preference, and sets the
-  // enable state when changed. It can be NULL. The ownership is taken by
-  // the DriveIntegrationService.
   DriveIntegrationService(
       Profile* profile,
-      PreferenceWatcher* preference_watcher,
       const std::string& test_mount_point_name,
       const base::FilePath& test_cache_root,
       DriveFsMojoListenerFactory test_drivefs_mojo_listener_factory = {});
@@ -165,7 +164,54 @@ class DriveIntegrationService : public KeyedService,
   void GetQuickAccessItems(int max_number,
                            GetQuickAccessItemsCallback callback);
 
+  void SearchDriveByFileName(
+      std::string query,
+      int max_results,
+      drivefs::mojom::QueryParameters::SortField sort_field,
+      drivefs::mojom::QueryParameters::SortDirection sort_direction,
+      SearchDriveByFileNameCallback callback) const;
+
+  // Returns the metadata for Drive file at |local_path|.
+  void GetMetadata(const base::FilePath& local_path,
+                   drivefs::mojom::DriveFs::GetMetadataCallback callback);
+
+  // Locates files or dirs by their server-side ID. Paths are relative to the
+  // mount point.
+  void LocateFilesByItemIds(
+      const std::vector<std::string>& item_ids,
+      drivefs::mojom::DriveFs::LocateFilesByItemIdsCallback callback);
+
   void RestartDrive();
+
+  // Sets the arguments to be parsed by DriveFS on startup. Should only be
+  // called in developer mode.
+  void SetStartupArguments(std::string arguments,
+                           base::OnceCallback<void(bool)> callback);
+
+  // Gets the currently set arguments parsed by DriveFS on startup. Should only
+  // be called in developer mode.
+  void GetStartupArguments(
+      base::OnceCallback<void(const std::string&)> callback);
+
+  // Enables or disables performance tracing, which logs to
+  // |data_dir_path|/Logs/drive_fs_trace.
+  void SetTracingEnabled(bool enabled);
+
+  // Enables or disables networking for testing. Should only be called in
+  // developer mode.
+  void SetNetworkingEnabled(bool enabled);
+
+  // Overrides syncing to be paused if enabled. Should only be called in
+  // developer mode.
+  void ForcePauseSyncing(bool enabled);
+
+  // Dumps account settings (including feature flags) to
+  // |data_dir_path/account_settings. Should only be called in developer mode.
+  void DumpAccountSettings();
+
+  // Loads account settings (including feature flags) from
+  // |data_dir_path/account_settings. Should only be called in developer mode.
+  void LoadAccountSettings();
 
  private:
   enum State {
@@ -188,6 +234,9 @@ class DriveIntegrationService : public KeyedService,
   // complete before adding the mount point.
   void AddDriveMountPoint();
 
+  // Mounts Drive if the directory exists.
+  void MaybeMountDrive(bool data_directory_exists);
+
   // Registers remote file system for drive mount point.
   bool AddDriveMountPointAfterMounted();
 
@@ -196,7 +245,7 @@ class DriveIntegrationService : public KeyedService,
 
   // Adds back the drive mount point.
   // Used to implement ClearCacheAndRemountFileSystem().
-  void AddBackDriveMountPoint(const base::Callback<void(bool)>& callback,
+  void AddBackDriveMountPoint(base::OnceCallback<void(bool)> callback,
                               FileError error);
 
   // Unregisters drive mount point, and if |remount_delay| is specified
@@ -233,10 +282,15 @@ class DriveIntegrationService : public KeyedService,
 
   // chromeos::PowerManagerClient::Observer overrides:
   void SuspendImminent(power_manager::SuspendImminent::Reason reason) override;
-  void SuspendDone(const base::TimeDelta& sleep_duration) override;
+  void SuspendDone(base::TimeDelta sleep_duration) override;
 
   void OnGetQuickAccessItems(
       GetQuickAccessItemsCallback callback,
+      drive::FileError error,
+      base::Optional<std::vector<drivefs::mojom::QueryItemPtr>> items);
+
+  void OnSearchDriveByFileName(
+      SearchDriveByFileNameCallback callback,
       drive::FileError error,
       base::Optional<std::vector<drivefs::mojom::QueryItemPtr>> items);
 
@@ -282,8 +336,8 @@ class DriveIntegrationServiceFactory
     : public BrowserContextKeyedServiceFactory {
  public:
   // Factory function used by tests.
-  typedef base::Callback<DriveIntegrationService*(Profile* profile)>
-      FactoryCallback;
+  using FactoryCallback =
+      base::RepeatingCallback<DriveIntegrationService*(Profile* profile)>;
 
   // Sets and resets a factory function for tests. See below for why we can't
   // use BrowserContextKeyedServiceFactory::SetTestingFactory().

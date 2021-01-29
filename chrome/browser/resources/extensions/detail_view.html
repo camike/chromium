@@ -58,8 +58,11 @@
   }
 
   .inspectable-view {
+    display: inline;
     height: 20px;
+    overflow-wrap: anywhere;
     width: auto;  /* override the default button size of 24x24 */
+    word-break: normal;
   }
 
   @media (prefers-color-scheme: light) {
@@ -97,10 +100,7 @@
 
   extensions-toggle-row {
     box-sizing: border-box;
-    padding-inline-end: 0;
-    padding-inline-start: 0;
-    --toggle-row-label-horizontal-padding: var(--cr-section-padding);
-    --toggle-row-label-vertical-padding: var(--cr-section-vertical-padding);
+    padding: var(--cr-section-vertical-padding) var(--cr-section-padding);
   }
 
   #load-path {
@@ -128,6 +128,7 @@
           aria-label="$i18n{back}" on-click="onCloseButtonTap_">
       </cr-icon-button>
       <img id="icon" src="[[data.iconUrl]]"
+          aria-label$="[[a11yAssociation(data.name)]]"
           alt$="[[appOrExtension(
               data.type,
               '$i18nPolymer{appIcon}',
@@ -144,8 +145,8 @@
       <div class="layout horizontal">
         <cr-tooltip-icon hidden$="[[!data.controlledInfo]]"
             tooltip-text="[[data.controlledInfo.text]]"
-            icon-class="[[getIndicatorIcon_(data.controlledInfo.type)]]"
-            icon-aria-label="[[data.controlledInfo.type]]">
+            icon-class="cr20:domain"
+            icon-aria-label="[[data.controlledInfo.text]]">
         </cr-tooltip-icon>
         <template is="dom-if" if="[[showReloadButton_(data.state)]]">
           <cr-button id="terminated-reload-button" class="action-button"
@@ -153,6 +154,12 @@
             $i18n{itemReload}
           </cr-button>
         </template>
+        <cr-tooltip-icon id="parentDisabledPermissionsToolTip"
+            hidden$="[[!data.disableReasons.parentDisabledPermissions]]"
+            tooltip-text="$i18n{parentDisabledPermissions}"
+            icon-class="cr20:kite"
+            icon-aria-label="$i18n{parentDisabledPermissions}">
+        </cr-tooltip-icon>
         <cr-toggle id="enableToggle"
             aria-label$="[[appOrExtension(
                 data.type,
@@ -371,7 +378,8 @@
         external></cr-link-row>
     <cr-link-row class="hr"
         id="extensionsActivityLogLink" hidden$="[[!showActivityLog]]"
-        label="$i18n{viewActivityLog}" on-click="onActivityLogTap_">
+        label="$i18n{viewActivityLog}" on-click="onActivityLogTap_"
+        role-description="$i18n{subpageArrowRoleDescription}">
     </cr-link-row>
     <cr-link-row class="hr" hidden="[[!data.manifestHomePageUrl.length]]"
         id="extensionWebsite" label="$i18n{extensionWebsite}"
@@ -395,7 +403,7 @@
       </div>
     </div>
     <cr-link-row class="hr" id="remove-extension"
-        hidden="[[isControlled_(data.controlledInfo)]]"
+        hidden="[[data.mustRemainInstalled]]"
         label="$i18n{itemRemoveExtension}" on-click="onRemoveTap_">
     </cr-link-row>
   </div>

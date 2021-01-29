@@ -4,7 +4,7 @@
 
 #include "ui/gfx/image/image_skia_rep_ios.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "ui/gfx/color_palette.h"
 
 namespace gfx {
@@ -23,6 +23,8 @@ ImageSkiaRep::ImageSkiaRep(const SkBitmap& src, float scale)
     : pixel_size_(gfx::Size(src.width(), src.height())),
       bitmap_(src),
       scale_(scale) {
+  CHECK_EQ(src.colorType(), kN32_SkColorType);
+  DCHECK(!bitmap_.drawsNothing());
   bitmap_.setImmutable();
 }
 

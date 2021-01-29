@@ -17,6 +17,7 @@
 #include "base/task_runner.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/sync_preferences/pref_service_syncable.h"
@@ -132,12 +133,14 @@ void InputMethodSyncer::RegisterProfilePrefs(
   registry->RegisterStringPref(
       prefs::kLanguageEnabledImesSyncable, "",
       user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
+  // Locally tracks whether we should do the first-sync merge, hence not a
+  // syncable pref itself.
   registry->RegisterBooleanPref(prefs::kLanguageShouldMergeInputMethods, false);
 }
 
 void InputMethodSyncer::Initialize() {
-  // This causes OnIsSyncingChanged to be called when the value of
-  // PrefService::IsSyncing() changes.
+  // This causes OnIsSyncingChanged to be called when the PrefService starts
+  // syncing prefs.
   prefs_->AddObserver(this);
 
   preferred_languages_syncable_.Init(
@@ -146,9 +149,8 @@ void InputMethodSyncer::Initialize() {
                                  prefs_);
   enabled_imes_syncable_.Init(prefs::kLanguageEnabledImesSyncable, prefs_);
 
-  BooleanPrefMember::NamedChangeCallback callback =
-      base::Bind(&InputMethodSyncer::OnPreferenceChanged,
-                 base::Unretained(this));
+  BooleanPrefMember::NamedChangeCallback callback = base::BindRepeating(
+      &InputMethodSyncer::OnPreferenceChanged, base::Unretained(this));
   preferred_languages_.Init(language::prefs::kPreferredLanguages, prefs_,
                             callback);
   preload_engines_.Init(prefs::kLanguagePreloadEngines,
@@ -249,11 +251,11 @@ std::string InputMethodSyncer::AddSupportedInputMethodValues(
       pref_name == prefs::kLanguageEnabledImes) {
     input_method::InputMethodManager* manager =
         input_method::InputMethodManager::Get();
-    std::unique_ptr<input_method::InputMethodDescriptors> supported_descriptors;
+    std::unique_ptr<input_method::InputMethodDescriptors>
+        supported_descriptors =
+            std::make_unique<input_method::InputMethodDescriptors>();
 
     if (pref_name == prefs::kLanguagePreloadEngines) {
-      // Set the known input methods.
-      supported_descriptors = manager->GetSupportedInputMethods();
       // Add the available component extension IMEs.
       ComponentExtensionIMEManager* component_extension_manager =
           manager->GetComponentExtensionIMEManager();
@@ -263,7 +265,6 @@ std::string InputMethodSyncer::AddSupportedInputMethodValues(
                                     component_descriptors.begin(),
                                     component_descriptors.end());
     } else {
-      supported_descriptors.reset(new input_method::InputMethodDescriptors);
       ime_state_->GetInputMethodExtensions(supported_descriptors.get());
     }
     CheckAndResolveInputMethodIDs(*supported_descriptors, &new_token_values);
@@ -314,10 +315,15 @@ void InputMethodSyncer::OnPreferenceChanged(const std::string& pref_name) {
 }
 
 void InputMethodSyncer::OnIsSyncingChanged() {
-  if (prefs_->GetBoolean(prefs::kLanguageShouldMergeInputMethods) &&
-      prefs_->IsSyncing()) {
+  // Only merge once.
+  if (!prefs_->GetBoolean(prefs::kLanguageShouldMergeInputMethods))
+    return;
+  // Wait for the correct type of prefs to sync before merging.
+  bool is_syncing = chromeos::features::IsSplitSettingsSyncEnabled()
+                        ? prefs_->AreOsPrefsSyncing()
+                        : prefs_->IsSyncing();
+  if (is_syncing)
     MergeSyncedPrefs();
-  }
 }
 
 }  // namespace input_method

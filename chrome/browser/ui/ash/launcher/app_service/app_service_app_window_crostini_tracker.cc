@@ -6,10 +6,12 @@
 
 #include "ash/public/cpp/multi_user_window_manager.h"
 #include "ash/public/cpp/shelf_model.h"
+#include "ash/public/cpp/window_properties.h"
 #include "base/containers/flat_tree.h"
 #include "base/time/time.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
+#include "chrome/browser/chromeos/crosapi/browser_util.h"
 #include "chrome/browser/chromeos/crostini/crostini_features.h"
 #include "chrome/browser/chromeos/crostini/crostini_force_close_watcher.h"
 #include "chrome/browser/chromeos/crostini/crostini_shelf_utils.h"
@@ -21,6 +23,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/launcher/app_service/app_service_app_window_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/app_service/app_service_app_window_launcher_item_controller.h"
+#include "chrome/browser/ui/ash/launcher/app_window_base.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/shelf_spinner_controller.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_helper.h"
@@ -32,7 +35,6 @@
 #include "components/exo/shell_surface_util.h"
 #include "components/user_manager/user_manager.h"
 #include "ui/aura/window.h"
-#include "ui/base/base_window.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/wm/core/window_util.h"
@@ -82,7 +84,8 @@ void AppServiceAppWindowCrostiniTracker::OnWindowVisibilityChanged(
   // Crostini shouldn't need to know about ARC app windows.
   if (wm::GetTransientParent(window) ||
       arc::GetWindowTaskId(window) != arc::kNoTaskId ||
-      plugin_vm::IsPluginVmWindow(window)) {
+      crosapi::browser_util::IsLacrosWindow(window) ||
+      plugin_vm::IsPluginVmAppWindow(window)) {
     return;
   }
 
@@ -161,6 +164,13 @@ void AppServiceAppWindowCrostiniTracker::OnWindowVisibilityChanged(
     MoveWindowFromOldDisplayToNewDisplay(window, old_display, new_display);
 }
 
+void AppServiceAppWindowCrostiniTracker::OnWindowDestroying(
+    aura::Window* window) {
+  base::EraseIf(activation_permissions_, [&window](const auto& element) {
+    return element.first == window;
+  });
+}
+
 void AppServiceAppWindowCrostiniTracker::OnAppLaunchRequested(
     const std::string& app_id,
     int64_t display_id) {
@@ -181,7 +191,7 @@ void AppServiceAppWindowCrostiniTracker::OnAppLaunchRequested(
   // necessary.
   if (!launcher_item_controller)
     return;
-  for (ui::BaseWindow* app_window : launcher_item_controller->windows()) {
+  for (AppWindowBase* app_window : launcher_item_controller->windows()) {
     activation_permissions_.emplace(
         app_window->GetNativeWindow(),
         exo::GrantPermissionToActivate(app_window->GetNativeWindow(),
@@ -191,18 +201,20 @@ void AppServiceAppWindowCrostiniTracker::OnAppLaunchRequested(
 
 std::string AppServiceAppWindowCrostiniTracker::GetShelfAppId(
     aura::Window* window) const {
-  // Only handle the app associated with the primary user.
-  if (!crostini::CrostiniFeatures::Get()->IsUIAllowed(
-          app_service_controller_->owner()->profile())) {
-    return std::string();
-  }
-
   // Transient windows are set up after window init, so remove them here.
   // Crostini shouldn't need to know about ARC app windows.
   if (wm::GetTransientParent(window) ||
       arc::GetWindowTaskId(window) != arc::kNoTaskId ||
-      plugin_vm::IsPluginVmWindow(window)) {
+      crosapi::browser_util::IsLacrosWindow(window) ||
+      plugin_vm::IsPluginVmAppWindow(window)) {
     return std::string();
+  }
+
+  ash::ShelfID shelf_id =
+      ash::ShelfID::Deserialize(window->GetProperty(ash::kShelfIDKey));
+  if (shelf_id.app_id == crostini::kCrostiniInstallerShelfId ||
+      shelf_id.app_id == crostini::kCrostiniUpgraderShelfId) {
+    return shelf_id.app_id;
   }
 
   // Handle browser windows, such as the Crostini terminal.
@@ -219,7 +231,7 @@ std::string AppServiceAppWindowCrostiniTracker::GetShelfAppId(
     // cause inconsistent error.
     auto* proxy_ = apps::AppServiceProxyFactory::GetForProfile(
         app_service_controller_->owner()->profile());
-    const ash::ShelfID shelf_id = proxy_->InstanceRegistry().GetShelfId(window);
+    shelf_id = proxy_->InstanceRegistry().GetShelfId(window);
     if (shelf_id.app_id != app_id) {
       app_service_controller_->app_service_instance_helper()->OnInstances(
           shelf_id.app_id, window, std::string(),

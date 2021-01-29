@@ -28,7 +28,6 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/extension_set.h"
-#include "extensions/common/scoped_worker_based_extensions_channel.h"
 #include "extensions/common/value_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/metrics_proto/extension_install.pb.h"
@@ -98,7 +97,7 @@ class TestExtensionsMetricsProvider : public ExtensionsMetricsProvider {
 
   // Override GetClientID() to return a specific value on which test
   // expectations are based.
-  uint64_t GetClientID() override { return 0x3f1bfee9; }
+  uint64_t GetClientID() const override { return 0x3f1bfee9; }
 };
 
 }  // namespace
@@ -134,7 +133,8 @@ TEST(ExtensionsMetricsProvider, SystemProtoEncoding) {
   std::unique_ptr<metrics::MetricsStateManager> metrics_state_manager(
       metrics::MetricsStateManager::Create(
           &local_state, &enabled_state_provider, base::string16(),
-          base::Bind(&StoreNoClientInfoBackup), base::Bind(&ReturnNoBackup)));
+          base::BindRepeating(&StoreNoClientInfoBackup),
+          base::BindRepeating(&ReturnNoBackup)));
   TestExtensionsMetricsProvider extension_metrics(metrics_state_manager.get());
   extension_metrics.ProvideSystemProfileMetrics(&system_profile);
   ASSERT_EQ(2, system_profile.occupied_extension_bucket_size());
@@ -158,7 +158,7 @@ class ExtensionMetricsProviderInstallsTest
 
   ExtensionInstallProto ConstructProto(const Extension& extension) {
     return ExtensionsMetricsProvider::ConstructInstallProtoForTesting(
-        extension, prefs_, last_sample_time_);
+        extension, prefs_, last_sample_time_, profile());
   }
   std::vector<ExtensionInstallProto> GetInstallsForProfile() {
     return ExtensionsMetricsProvider::GetInstallsForProfileForTesting(
@@ -366,7 +366,6 @@ TEST_F(ExtensionMetricsProviderInstallsTest, TestProtoConstruction) {
   }
   {
     // Test that service worker scripts are reported correctly.
-    extensions::ScopedWorkerBasedExtensionsChannel worker_channel_override;
     scoped_refptr<const Extension> extension =
         ExtensionBuilder("service worker")
             .SetBackgroundContext(
@@ -383,8 +382,8 @@ TEST_F(ExtensionMetricsProviderInstallsTest, TestProtoConstruction) {
     scoped_refptr<const Extension> extension =
         ExtensionBuilder("blacklist").SetLocation(Manifest::INTERNAL).Build();
     add_extension(extension.get());
-    prefs()->SetExtensionBlacklistState(
-        extension->id(), extensions::BLACKLISTED_SECURITY_VULNERABILITY);
+    prefs()->SetExtensionBlocklistState(
+        extension->id(), extensions::BLOCKLISTED_SECURITY_VULNERABILITY);
     ExtensionInstallProto install = ConstructProto(*extension);
     EXPECT_EQ(ExtensionInstallProto::BLACKLISTED_SECURITY_VULNERABILITY,
               install.blacklist_state());

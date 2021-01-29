@@ -172,9 +172,6 @@ class OfflinePageRequestHandler {
     // response data is received.
     virtual void SetOfflinePageNavigationUIData(bool is_offline_page) = 0;
 
-    // Returns true if the preview is allowed.
-    virtual bool ShouldAllowPreview() const = 0;
-
     // Returns the page transition type for this navigation.
     virtual int GetPageTransition() const = 0;
 
@@ -253,7 +250,7 @@ class OfflinePageRequestHandler {
   void Redirect(const GURL& redirected_url);
 
   void OpenFile(const base::FilePath& file_path,
-                const base::Callback<void(int)>& callback);
+                const base::RepeatingCallback<void(int)>& callback);
   void UpdateDigestOnBackground(
       scoped_refptr<net::IOBuffer> buffer,
       size_t len,

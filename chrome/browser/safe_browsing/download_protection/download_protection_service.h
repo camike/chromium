@@ -25,6 +25,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/supports_user_data.h"
 #include "chrome/browser/download/download_commands.h"
+#include "chrome/browser/enterprise/connectors/common.h"
 #include "chrome/browser/safe_browsing/cloud_content_scanning/binary_upload_service.h"
 #include "chrome/browser/safe_browsing/download_protection/deep_scanning_request.h"
 #include "chrome/browser/safe_browsing/download_protection/download_protection_util.h"
@@ -38,7 +39,7 @@
 
 namespace content {
 class PageNavigator;
-struct NativeFileSystemWriteItem;
+struct FileSystemAccessWriteItem;
 }  // namespace content
 
 namespace download {
@@ -55,8 +56,9 @@ namespace safe_browsing {
 class BinaryFeatureExtractor;
 class CheckClientDownloadRequest;
 class CheckClientDownloadRequestBase;
-class CheckNativeFileSystemWriteRequest;
+class CheckFileSystemAccessWriteRequest;
 class ClientDownloadRequest;
+class DownloadRequestMaker;
 class DownloadFeedbackService;
 class PPAPIDownloadRequest;
 
@@ -70,12 +72,12 @@ class DownloadProtectionService {
 
   virtual ~DownloadProtectionService();
 
-  // Parse a flag of blacklisted sha256 hashes to check at each download.
+  // Parse a flag of blocklisted sha256 hashes to check at each download.
   // This is used for testing, to hunt for safe-browsing by-pass bugs.
-  virtual void ParseManualBlacklistFlag();
+  virtual void ParseManualBlocklistFlag();
 
-  // Return true if this hash value is blacklisted via flag (for testing).
-  virtual bool IsHashManuallyBlacklisted(const std::string& sha256_hash) const;
+  // Return true if this hash value is blocklisted via flag (for testing).
+  virtual bool IsHashManuallyBlocklisted(const std::string& sha256_hash) const;
 
   // Checks whether the given client download is likely to be malicious or not.
   // The result is delivered asynchronously via the given callback.  This
@@ -91,6 +93,10 @@ class DownloadProtectionService {
       download::DownloadItem* item,
       CheckDownloadRepeatingCallback callback);
 
+  // Returns whether the download URL should be checked for safety based on user
+  // prefs.
+  virtual bool ShouldCheckDownloadUrl(download::DownloadItem* item);
+
   // Checks whether any of the URLs in the redirect chain of the
   // download match the SafeBrowsing bad binary URL list.  The result is
   // delivered asynchronously via the given callback.  This method must be
@@ -98,11 +104,6 @@ class DownloadProtectionService {
   // thread.  Pre-condition: !info.download_url_chain.empty().
   virtual void CheckDownloadUrl(download::DownloadItem* item,
                                 CheckDownloadCallback callback);
-
-  // Checks the user permissions, then calls |CheckDownloadUrl|. Returns whether
-  // we began checking the URL.
-  virtual bool MaybeCheckDownloadUrl(download::DownloadItem* item,
-                                     CheckDownloadCallback callback);
 
   // Returns true iff the download specified by |info| should be scanned by
   // CheckClientDownload() for malicious content.
@@ -118,13 +119,13 @@ class DownloadProtectionService {
       Profile* profile,
       CheckDownloadCallback callback);
 
-  // Checks whether the given Native File System write operation is likely to be
+  // Checks whether the given File System Access write operation is likely to be
   // malicious or not. The result is delivered asynchronously via the given
   // callback.  This method must be called on the UI thread, and the callback
   // will also be invoked on the UI thread.  This method must be called once the
   // write is finished and data has been written to disk.
-  virtual void CheckNativeFileSystemWrite(
-      std::unique_ptr<content::NativeFileSystemWriteItem> item,
+  virtual void CheckFileSystemAccessWrite(
+      std::unique_ptr<content::FileSystemAccessWriteItem> item,
       CheckDownloadCallback callback);
 
   // Display more information to the user regarding the download specified by
@@ -155,21 +156,20 @@ class DownloadProtectionService {
 
   // Registers a callback that will be run when a ClientDownloadRequest has
   // been formed.
-  ClientDownloadRequestSubscription RegisterClientDownloadRequestCallback(
+  base::CallbackListSubscription RegisterClientDownloadRequestCallback(
       const ClientDownloadRequestCallback& callback);
 
-  // Registers a callback that will be run when a NativeFileSystemWriteRequest
+  // Registers a callback that will be run when a FileSystemAccessWriteRequest
   // has been formed.
-  NativeFileSystemWriteRequestSubscription
-  RegisterNativeFileSystemWriteRequestCallback(
-      const NativeFileSystemWriteRequestCallback& callback);
+  base::CallbackListSubscription RegisterFileSystemAccessWriteRequestCallback(
+      const FileSystemAccessWriteRequestCallback& callback);
 
   // Registers a callback that will be run when a PPAPI ClientDownloadRequest
   // has been formed.
-  PPAPIDownloadRequestSubscription RegisterPPAPIDownloadRequestCallback(
+  base::CallbackListSubscription RegisterPPAPIDownloadRequestCallback(
       const PPAPIDownloadRequestCallback& callback);
 
-  double whitelist_sample_rate() const { return whitelist_sample_rate_; }
+  double allowlist_sample_rate() const { return allowlist_sample_rate_; }
 
   scoped_refptr<SafeBrowsingNavigationObserverManager>
   navigation_observer_manager() {
@@ -200,20 +200,21 @@ class DownloadProtectionService {
       download::DownloadItem* item,
       CheckDownloadRepeatingCallback callback,
       DeepScanningRequest::DeepScanTrigger trigger,
-      std::vector<DeepScanningRequest::DeepScanType> allowed_scans);
+      enterprise_connectors::AnalysisSettings analysis_settings);
 
-  scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory(
+  virtual scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory(
       content::BrowserContext* browser_context);
 
  private:
   friend class PPAPIDownloadRequest;
   friend class DownloadUrlSBClient;
-  friend class DownloadProtectionServiceTest;
+  friend class DownloadProtectionServiceTestBase;
   friend class DownloadDangerPromptTest;
   friend class CheckClientDownloadRequestBase;
   friend class CheckClientDownloadRequest;
-  friend class CheckNativeFileSystemWriteRequest;
+  friend class CheckFileSystemAccessWriteRequest;
   friend class DeepScanningRequest;
+  friend class DownloadRequestMaker;
 
   FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
                            TestDownloadRequestTimeout);
@@ -261,10 +262,10 @@ class DownloadProtectionService {
   std::unique_ptr<ReferrerChainData> IdentifyReferrerChain(
       const download::DownloadItem& item);
 
-  // Identify referrer chain info of a native file system write. This function
+  // Identify referrer chain info of a File System Access write. This function
   // also records UMA stats of download attribution result.
   std::unique_ptr<ReferrerChainData> IdentifyReferrerChain(
-      const content::NativeFileSystemWriteItem& item);
+      const content::FileSystemAccessWriteItem& item);
 
   // Identify referrer chain of the PPAPI download based on the frame URL where
   // the download is initiated. Then add referrer chain info to
@@ -319,20 +320,20 @@ class DownloadProtectionService {
   ClientDownloadRequestCallbackList client_download_request_callbacks_;
 
   // A list of callbacks to be run on the main thread when a
-  // NativeFileSystemWriteRequest has been formed.
-  NativeFileSystemWriteRequestCallbackList
-      native_file_system_write_request_callbacks_;
+  // FileSystemAccessWriteRequest has been formed.
+  FileSystemAccessWriteRequestCallbackList
+      file_system_access_write_request_callbacks_;
 
   // A list of callbacks to be run on the main thread when a
   // PPAPIDownloadRequest has been formed.
   PPAPIDownloadRequestCallbackList ppapi_download_request_callbacks_;
 
-  // List of 8-byte hashes that are blacklisted manually by flag.
+  // List of 8-byte hashes that are blocklisted manually by flag.
   // Normally empty.
-  std::set<std::string> manual_blacklist_hashes_;
+  std::set<std::string> manual_blocklist_hashes_;
 
-  // Rate of whitelisted downloads we sample to send out download ping.
-  double whitelist_sample_rate_;
+  // Rate of allowlisted downloads we sample to send out download ping.
+  double allowlist_sample_rate_;
 
   // DownloadReporter to send real time reports for dangerous download events.
   DownloadReporter download_reporter_;

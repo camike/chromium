@@ -6,18 +6,15 @@ package org.chromium.chrome.browser.download;
 
 import android.content.Context;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 import android.text.format.DateUtils;
 
-import org.junit.After;
+import androidx.test.filters.SmallTest;
+
 import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -31,20 +28,8 @@ import org.chromium.components.offline_items_collection.OfflineItemProgressUnit;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @Features.DisableFeatures(ChromeFeatureList.DOWNLOAD_FILE_PROVIDER)
+@Batch(Batch.UNIT_TESTS)
 public class StringUtilsTest {
-    @Rule
-    public TestRule mFeaturesProcessorRule = new Features.InstrumentationProcessor();
-
-    @Before
-    public void setUp() {
-        RecordHistogram.setDisabledForTests(true);
-    }
-
-    @After
-    public void tearDown() {
-        RecordHistogram.setDisabledForTests(false);
-    }
-
     @Test
     @SmallTest
     @Feature({"Download"})

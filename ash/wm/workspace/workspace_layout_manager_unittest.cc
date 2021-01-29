@@ -33,6 +33,7 @@
 #include "ash/shell_observer.h"
 #include "ash/system/unified/unified_system_tray.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/test/test_window_builder.h"
 #include "ash/wallpaper/wallpaper_controller_test_api.h"
 #include "ash/window_factory.h"
 #include "ash/wm/always_on_top_controller.h"
@@ -48,7 +49,8 @@
 #include "ash/wm/workspace/backdrop_controller.h"
 #include "ash/wm/workspace/workspace_window_resizer.h"
 #include "ash/wm/workspace_controller_test_api.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/optional.h"
 #include "base/run_loop.h"
 #include "chromeos/audio/chromeos_sounds.h"
 #include "ui/aura/client/aura_constants.h"
@@ -74,6 +76,8 @@
 
 namespace ash {
 namespace {
+
+using ::chromeos::WindowStateType;
 
 class MaximizeDelegateView : public views::WidgetDelegateView {
  public:
@@ -128,12 +132,12 @@ class ScopedStickyKeyboardEnabler {
  public:
   ScopedStickyKeyboardEnabler()
       : accessibility_controller_(Shell::Get()->accessibility_controller()),
-        enabled_(accessibility_controller_->virtual_keyboard_enabled()) {
-    accessibility_controller_->SetVirtualKeyboardEnabled(true);
+        enabled_(accessibility_controller_->virtual_keyboard().enabled()) {
+    accessibility_controller_->virtual_keyboard().SetEnabled(true);
   }
 
   ~ScopedStickyKeyboardEnabler() {
-    accessibility_controller_->SetVirtualKeyboardEnabled(enabled_);
+    accessibility_controller_->virtual_keyboard().SetEnabled(enabled_);
   }
 
  private:
@@ -410,8 +414,8 @@ TEST_F(WorkspaceLayoutManagerTest, ChildBoundsResetOnMaximize) {
   window->Show();
   WindowState* window_state = WindowState::Get(window.get());
   window_state->Activate();
-  std::unique_ptr<aura::Window> child_window(
-      CreateChildWindow(window.get(), gfx::Rect(5, 6, 7, 8)));
+  std::unique_ptr<aura::Window> child_window =
+      ChildTestWindowBuilder(window.get(), gfx::Rect(5, 6, 7, 8)).Build();
   window_state->Maximize();
   EXPECT_EQ("5,6 7x8", child_window->bounds().ToString());
 }
@@ -1180,7 +1184,7 @@ class WorkspaceLayoutManagerBackdropTest : public AshTestBase {
   DISALLOW_COPY_AND_ASSIGN(WorkspaceLayoutManagerBackdropTest);
 };
 
-constexpr int kNoSoundKey = -1;
+constexpr base::Optional<chromeos::Sound> kNoSoundKey = base::nullopt;
 
 }  // namespace
 
@@ -1538,11 +1542,11 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, SpokenFeedbackFullscreenBackground) {
 
   // Enable spoken feedback.
   controller->SetSpokenFeedbackEnabled(true, A11Y_NOTIFICATION_NONE);
-  EXPECT_TRUE(controller->spoken_feedback_enabled());
+  EXPECT_TRUE(controller->spoken_feedback().enabled());
 
   generator->MoveMouseTo(300, 300);
   generator->ClickLeftButton();
-  EXPECT_EQ(chromeos::SOUND_VOLUME_ADJUST, client.GetPlayedEarconAndReset());
+  EXPECT_EQ(chromeos::Sound::kVolumeAdjust, client.GetPlayedEarconAndReset());
 
   generator->MoveMouseRelativeTo(window.get(), 10, 10);
   generator->ClickLeftButton();
@@ -1550,7 +1554,7 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, SpokenFeedbackFullscreenBackground) {
 
   // Disable spoken feedback. Shadow underlay is restored.
   controller->SetSpokenFeedbackEnabled(false, A11Y_NOTIFICATION_NONE);
-  EXPECT_FALSE(controller->spoken_feedback_enabled());
+  EXPECT_FALSE(controller->spoken_feedback().enabled());
 
   generator->MoveMouseTo(300, 300);
   generator->ClickLeftButton();
@@ -1561,33 +1565,6 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, SpokenFeedbackFullscreenBackground) {
   EXPECT_EQ(kNoSoundKey, client.GetPlayedEarconAndReset());
 }
 
-// TODO(crbug.com/803286): The npot texture check failed on asan tests bot.
-// TODO(crbug.com/838756): Very flaky on mash_ash_unittests.
-TEST_F(WorkspaceLayoutManagerBackdropTest, DISABLED_OpenAppListInOverviewMode) {
-  WorkspaceController* wc = ShellTestApi().workspace_controller();
-  WorkspaceControllerTestApi test_helper(wc);
-
-  std::unique_ptr<aura::Window> window(
-      CreateTestWindow(gfx::Rect(0, 0, 100, 100)));
-  EXPECT_FALSE(test_helper.GetBackdropWindow());
-
-  // Turn the top window backdrop on.
-  SetTabletModeEnabled(true);
-  EXPECT_TRUE(test_helper.GetBackdropWindow());
-
-  // Enter overview mode.
-  Shell::Get()->overview_controller()->StartOverview();
-  base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(test_helper.GetBackdropWindow());
-
-  ui::ScopedAnimationDurationScaleMode test_duration_mode(
-      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
-  EXPECT_FALSE(test_helper.GetBackdropWindow());
-  // Showing the app list in overview mode should still hide the backdrop.
-  GetAppListTestHelper()->Show(GetPrimaryDisplay().id());
-  EXPECT_FALSE(test_helper.GetBackdropWindow());
-}
-
 TEST_F(WorkspaceLayoutManagerBackdropTest, SpokenFeedbackForArc) {
   WorkspaceController* wc = ShellTestApi().workspace_controller();
   WorkspaceControllerTestApi test_helper(wc);
@@ -1596,7 +1573,7 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, SpokenFeedbackForArc) {
   TestAccessibilityControllerClient client;
 
   controller->SetSpokenFeedbackEnabled(true, A11Y_NOTIFICATION_NONE);
-  EXPECT_TRUE(controller->spoken_feedback_enabled());
+  EXPECT_TRUE(controller->spoken_feedback().enabled());
 
   aura::test::TestWindowDelegate delegate;
   std::unique_ptr<aura::Window> window_arc(CreateTestWindowInShellWithDelegate(
@@ -1625,7 +1602,7 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, SpokenFeedbackForArc) {
   ui::test::EventGenerator* generator = GetEventGenerator();
   generator->MoveMouseTo(300, 300);
   generator->ClickLeftButton();
-  EXPECT_EQ(chromeos::SOUND_VOLUME_ADJUST, client.GetPlayedEarconAndReset());
+  EXPECT_EQ(chromeos::Sound::kVolumeAdjust, client.GetPlayedEarconAndReset());
 
   generator->MoveMouseTo(70, 70);
   generator->ClickLeftButton();

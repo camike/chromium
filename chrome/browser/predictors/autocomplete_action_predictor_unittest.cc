@@ -11,24 +11,24 @@
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/guid.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/no_destructor.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/prerender/prerender_field_trial.h"
-#include "chrome/browser/prerender/prerender_manager.h"
-#include "chrome/browser/prerender/prerender_test_utils.h"
+#include "chrome/browser/prefetch/no_state_prefetch/prerender_test_utils.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/in_memory_database.h"
 #include "components/history/core/browser/url_database.h"
+#include "components/no_state_prefetch/browser/no_state_prefetch_manager.h"
+#include "components/no_state_prefetch/browser/prerender_field_trial.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_result.h"
 #include "content/public/test/browser_task_environment.h"
@@ -127,7 +127,7 @@ class AutocompleteActionPredictorTest : public testing::Test {
  public:
   AutocompleteActionPredictorTest()
       : profile_(std::make_unique<TestingProfile>()), predictor_(nullptr) {
-    CHECK(profile_->CreateHistoryService(true, false));
+    CHECK(profile_->CreateHistoryService());
     predictor_ = std::make_unique<AutocompleteActionPredictor>(profile_.get());
     predictor_->CreateLocalCachesFromDatabase();
     profile_->BlockUntilHistoryProcessesPendingRequests();
@@ -505,9 +505,6 @@ TEST_F(AutocompleteActionPredictorTest, RecommendActionURL) {
 
   AutocompleteMatch match;
   match.type = AutocompleteMatchType::HISTORY_URL;
-  prerender::test_utils::RestorePrerenderMode restore_prerender_mode;
-  prerender::PrerenderManager::SetMode(
-      prerender::PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH);
 
   for (size_t i = 0; i < base::size(TestUrlDb()); ++i) {
     match.destination_url = GURL(TestUrlDb()[i].url);
@@ -522,9 +519,6 @@ TEST_F(AutocompleteActionPredictorTest, RecommendActionSearch) {
 
   AutocompleteMatch match;
   match.type = AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED;
-  prerender::test_utils::RestorePrerenderMode restore_prerender_mode;
-  prerender::PrerenderManager::SetMode(
-      prerender::PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH);
 
   for (size_t i = 0; i < base::size(TestUrlDb()); ++i) {
     match.destination_url = GURL(TestUrlDb()[i].url);

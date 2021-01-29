@@ -25,7 +25,18 @@ struct AppLaunchParams {
                   apps::mojom::AppLaunchSource source,
                   int64_t display_id = display::kInvalidDisplayId);
 
-  AppLaunchParams(const AppLaunchParams& other);
+  AppLaunchParams(const std::string& app_id,
+                  apps::mojom::LaunchContainer container,
+                  WindowOpenDisposition disposition,
+                  apps::mojom::AppLaunchSource source,
+                  int64_t display_id,
+                  const std::vector<base::FilePath>& files,
+                  const apps::mojom::IntentPtr& intentPtr);
+
+  AppLaunchParams(const AppLaunchParams&) = delete;
+  AppLaunchParams& operator=(const AppLaunchParams&) = delete;
+  AppLaunchParams(AppLaunchParams&&);
+  AppLaunchParams& operator=(AppLaunchParams&&);
 
   ~AppLaunchParams();
 
@@ -52,6 +63,9 @@ struct AppLaunchParams {
   // If non-empty, use override_app_name in place of generating one normally.
   std::string override_app_name;
 
+  // The id from the restore data to restore the browser window.
+  int32_t restore_id = 0;
+
   // If non-empty, information from the command line may be passed on to the
   // application.
   base::CommandLine command_line;
@@ -62,6 +76,8 @@ struct AppLaunchParams {
 
   // Record where the app is launched from for tracking purpose.
   // Different app may have their own enumeration of sources.
+  // TODO(crbug.com/1113502): Reconcile AppLaunchSource vs. LaunchSource vs.
+  // app_runtime::LaunchSource.
   apps::mojom::AppLaunchSource source;
 
   // The id of the display from which the app is launched.
@@ -72,6 +88,10 @@ struct AppLaunchParams {
   // The files the application was launched with. Empty if the application was
   // not launched with files.
   std::vector<base::FilePath> launch_files;
+
+  // The intent the application was launched with. Empty if the application was
+  // not launched with intent.
+  apps::mojom::IntentPtr intent;
 };
 
 }  // namespace apps

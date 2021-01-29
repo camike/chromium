@@ -21,6 +21,8 @@
 #include "chromeos/components/drivefs/mojom/drivefs.mojom.h"
 #include "chromeos/disks/disk_mount_manager.h"
 #include "components/account_id/account_id.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 
 namespace drive {
 class DriveNotificationManager;
@@ -47,6 +49,9 @@ class DriveFsHostObserver;
 class COMPONENT_EXPORT(DRIVEFS) DriveFsHost {
  public:
   using MountObserver = DriveFsSession::MountObserver;
+  using DialogHandler = base::RepeatingCallback<void(
+      const mojom::DialogReason&,
+      base::OnceCallback<void(mojom::DialogResult)>)>;
 
   class Delegate : public DriveFsAuth::Delegate {
    public:
@@ -57,6 +62,12 @@ class COMPONENT_EXPORT(DRIVEFS) DriveFsHost {
     virtual std::unique_ptr<DriveFsBootstrapListener> CreateMojoListener();
     virtual base::FilePath GetMyFilesPath() = 0;
     virtual std::string GetLostAndFoundDirectoryName() = 0;
+    virtual bool IsVerboseLoggingEnabled() = 0;
+    virtual mojom::DriveFsDelegate::ExtensionConnectionStatus
+    ConnectToExtension(
+        mojom::ExtensionConnectionParamsPtr params,
+        mojo::PendingReceiver<mojom::NativeMessagingPort> port,
+        mojo::PendingRemote<mojom::NativeMessagingHost> host) = 0;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(Delegate);
@@ -97,6 +108,10 @@ class COMPONENT_EXPORT(DRIVEFS) DriveFsHost {
       mojom::QueryParametersPtr query,
       mojom::SearchQuery::GetNextPageCallback callback);
 
+  void set_dialog_handler(DialogHandler dialog_handler) {
+    dialog_handler_ = dialog_handler;
+  }
+
  private:
   class AccountTokenDelegate;
   class MountState;
@@ -121,6 +136,7 @@ class COMPONENT_EXPORT(DRIVEFS) DriveFsHost {
   std::unique_ptr<MountState> mount_state_;
 
   base::ObserverList<DriveFsHostObserver>::Unchecked observers_;
+  DialogHandler dialog_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(DriveFsHost);
 };

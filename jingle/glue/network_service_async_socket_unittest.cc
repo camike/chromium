@@ -20,6 +20,7 @@
 #include "base/stl_util.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/test/gtest_util.h"
 #include "base/test/task_environment.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -30,6 +31,7 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/ip_address.h"
 #include "net/base/net_errors.h"
+#include "net/base/network_isolation_key.h"
 #include "net/cert/mock_cert_verifier.h"
 #include "net/http/transport_security_state.h"
 #include "net/log/net_log_source.h"
@@ -42,6 +44,7 @@
 #include "services/network/public/mojom/proxy_resolving_socket.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/webrtc/rtc_base/third_party/sigslot/sigslot.h"
+#include "url/origin.h"
 
 namespace jingle_glue {
 
@@ -191,11 +194,16 @@ class MockProxyResolvingSocketFactory
   // mojom::ProxyResolvingSocketFactory implementation.
   void CreateProxyResolvingSocket(
       const GURL& url,
+      const net::NetworkIsolationKey& network_isolation_key,
       network::mojom::ProxyResolvingSocketOptionsPtr options,
       const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
       mojo::PendingReceiver<network::mojom::ProxyResolvingSocket> receiver,
       mojo::PendingRemote<network::mojom::SocketObserver> observer,
       CreateProxyResolvingSocketCallback callback) override {
+    url::Origin origin = url::Origin::Create(url);
+    EXPECT_EQ(net::NetworkIsolationKey(origin /* top_frame_origin */,
+                                       origin /* frame_origin */),
+              network_isolation_key);
     auto socket = std::make_unique<MockProxyResolvingSocket>();
     socket_raw_ = socket.get();
     proxy_resolving_socket_receivers_.Add(std::move(socket),
@@ -627,7 +635,7 @@ TEST_F(NetworkServiceAsyncSocketTest, ZeroPortConnect) {
 }
 
 TEST_F(NetworkServiceAsyncSocketTest, DoubleConnect) {
-  EXPECT_DEBUG_DEATH(
+  EXPECT_DCHECK_DEATH_WITH(
       {
         DoOpenClosed();
 
@@ -725,7 +733,7 @@ TEST_F(NetworkServiceAsyncSocketTest, EmptyRead) {
 }
 
 TEST_F(NetworkServiceAsyncSocketTest, WrongRead) {
-  EXPECT_DEBUG_DEATH(
+  EXPECT_DCHECK_DEATH_WITH(
       {
         async_socket_data_provider_.set_connect_data(
             net::MockConnect(net::ASYNC, net::OK));
@@ -887,7 +895,7 @@ TEST_F(NetworkServiceAsyncSocketTest, PendingReadError) {
 // After this we can assume non-SSL Read() works as expected.
 
 TEST_F(NetworkServiceAsyncSocketTest, WrongWrite) {
-  EXPECT_DEBUG_DEATH(
+  EXPECT_DCHECK_DEATH_WITH(
       {
         std::string data("foo");
         EXPECT_FALSE(ns_async_socket_->Write(data.data(), data.size()));
@@ -969,7 +977,7 @@ TEST_F(NetworkServiceAsyncSocketTest, AsyncWriteError) {
 }
 
 TEST_F(NetworkServiceAsyncSocketTest, LargeWrite) {
-  EXPECT_DEBUG_DEATH(
+  EXPECT_DCHECK_DEATH_WITH(
       {
         DoOpenClosed();
 
@@ -988,7 +996,7 @@ TEST_F(NetworkServiceAsyncSocketTest, LargeWrite) {
 }
 
 TEST_F(NetworkServiceAsyncSocketTest, LargeAccumulatedWrite) {
-  EXPECT_DEBUG_DEATH(
+  EXPECT_DCHECK_DEATH_WITH(
       {
         DoOpenClosed();
 
@@ -1038,7 +1046,7 @@ TEST_F(NetworkServiceAsyncSocketTest, ImmediateSSLConnect) {
 }
 
 TEST_F(NetworkServiceAsyncSocketTest, DoubleSSLConnect) {
-  EXPECT_DEBUG_DEATH(
+  EXPECT_DCHECK_DEATH_WITH(
       {
         async_socket_data_provider_.AddRead(net::MockRead(kReadData));
         DoOpenClosed();

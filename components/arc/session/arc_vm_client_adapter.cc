@@ -7,20 +7,25 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <time.h>
+#include <unistd.h>
 
+#include <deque>
 #include <set>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
+#include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
 #include "base/optional.h"
 #include "base/posix/eintr_wrapper.h"
@@ -37,13 +42,14 @@
 #include "base/threading/scoped_blocking_call.h"
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
+#include "chromeos/components/sensors/buildflags.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/dbus/concierge_client.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/debug_daemon/debug_daemon_client.h"
-#include "chromeos/dbus/upstart/upstart_client.h"
+#include "chromeos/dbus/session_manager/session_manager_client.h"
 #include "chromeos/system/statistics_provider.h"
 #include "components/arc/arc_features.h"
 #include "components/arc/arc_util.h"
@@ -57,23 +63,47 @@ namespace {
 // The "_2d" in job names below corresponds to "-". Upstart escapes characters
 // that aren't valid in D-Bus object paths with underscore followed by its
 // ascii code in hex. So "arc_2dcreate_2ddata" becomes "arc-create-data".
-constexpr const char kArcCreateDataJobName[] = "arc_2dcreate_2ddata";
-constexpr const char kArcKeymasterJobName[] = "arc_2dkeymasterd";
-constexpr const char kArcVmServerProxyJobName[] = "arcvm_2dserver_2dproxy";
 constexpr const char kArcVmPerBoardFeaturesJobName[] =
     "arcvm_2dper_2dboard_2dfeatures";
-constexpr const char kArcVmBootNotificationServerJobName[] =
-    "arcvm_2dboot_2dnotification_2dserver";
+constexpr char kArcVmPreLoginServicesJobName[] =
+    "arcvm_2dpre_2dlogin_2dservices";
+constexpr char kArcVmPostLoginServicesJobName[] =
+    "arcvm_2dpost_2dlogin_2dservices";
+constexpr char kArcVmPostVmStartServicesJobName[] =
+    "arcvm_2dpost_2dvm_2dstart_2dservices";
 
-constexpr const char kCrosSystemPath[] = "/usr/bin/crossystem";
-constexpr const char kHomeDirectory[] = "/home";
 constexpr const char kArcVmBootNotificationServerSocketPath[] =
     "/run/arcvm_boot_notification_server/host.socket";
 
+constexpr base::TimeDelta kArcBugReportBackupTimeMetricMinTime =
+    base::TimeDelta::FromMilliseconds(1);
+constexpr base::TimeDelta kArcBugReportBackupTimeMetricMaxTime =
+    base::TimeDelta::FromSeconds(60);
+constexpr int kArcBugReportBackupTimeMetricBuckets = 50;
+constexpr const char kArcBugReportBackupTimeMetric[] =
+    "Login.ArcBugReportBackupTime";
+
+// The owner ID that ARCVM is started with for mini-ARCVM. On UpgradeArc,
+// the owner ID is set to the logged-in user.
+constexpr const char kArcVmDefaultOwner[] = "ARCVM_DEFAULT_OWNER";
+
 constexpr int64_t kInvalidCid = -1;
+
+constexpr base::TimeDelta kConnectTimeoutLimit =
+    base::TimeDelta::FromSeconds(20);
+constexpr base::TimeDelta kConnectSleepDurationInitial =
+    base::TimeDelta::FromMilliseconds(100);
+
+base::Optional<base::TimeDelta> g_connect_timeout_limit_for_testing;
+base::Optional<base::TimeDelta> g_connect_sleep_duration_initial_for_testing;
+base::Optional<int> g_boot_notification_server_fd;
 
 chromeos::ConciergeClient* GetConciergeClient() {
   return chromeos::DBusThreadManager::Get()->GetConciergeClient();
+}
+
+chromeos::DebugDaemonClient* GetDebugDaemonClient() {
+  return chromeos::DBusThreadManager::Get()->GetDebugDaemonClient();
 }
 
 std::string GetChromeOsChannelFromLsbRelease() {
@@ -91,26 +121,6 @@ std::string GetChromeOsChannelFromLsbRelease() {
   return value.erase(value.find(kChannelSuffix), kChannelSuffix.size());
 }
 
-// TODO(pliard): Export host-side /data to the VM, and remove the function.
-vm_tools::concierge::CreateDiskImageRequest CreateArcDiskRequest(
-    const std::string& user_id_hash,
-    int64_t free_disk_bytes) {
-  DCHECK(!user_id_hash.empty());
-
-  vm_tools::concierge::CreateDiskImageRequest request;
-  request.set_cryptohome_id(user_id_hash);
-  request.set_disk_path("arcvm");
-
-  // The type of disk image to be created.
-  request.set_image_type(vm_tools::concierge::DISK_IMAGE_AUTO);
-  request.set_storage_location(vm_tools::concierge::STORAGE_CRYPTOHOME_ROOT);
-
-  // The logical size of the new disk image, in bytes.
-  request.set_disk_size(free_disk_bytes / 2);
-
-  return request;
-}
-
 std::string MonotonicTimestamp() {
   struct timespec ts;
   const int ret = clock_gettime(CLOCK_BOOTTIME, &ts);
@@ -123,11 +133,12 @@ std::string MonotonicTimestamp() {
 ArcBinaryTranslationType IdentifyBinaryTranslationType(
     const StartParams& start_params) {
   const auto* command_line = base::CommandLine::ForCurrentProcess();
-  bool is_houdini_available =
+  const bool is_houdini_available =
       command_line->HasSwitch(chromeos::switches::kEnableHoudini) ||
       command_line->HasSwitch(chromeos::switches::kEnableHoudini64);
-  bool is_ndk_translation_available =
-      command_line->HasSwitch(chromeos::switches::kEnableNdkTranslation);
+  const bool is_ndk_translation_available =
+      command_line->HasSwitch(chromeos::switches::kEnableNdkTranslation) ||
+      command_line->HasSwitch(chromeos::switches::kEnableNdkTranslation64);
 
   if (!is_houdini_available && !is_ndk_translation_available)
     return ArcBinaryTranslationType::NONE;
@@ -141,16 +152,50 @@ ArcBinaryTranslationType IdentifyBinaryTranslationType(
   return ArcBinaryTranslationType::HOUDINI;
 }
 
+std::vector<std::string> GenerateUpgradeProps(
+    const UpgradeParams& upgrade_params,
+    const std::string& serial_number,
+    const std::string& prefix) {
+  std::vector<std::string> result = {
+      base::StringPrintf("%s.disable_boot_completed=%d", prefix.c_str(),
+                         upgrade_params.skip_boot_completed_broadcast),
+      base::StringPrintf("%s.enable_adb_sideloading=%d", prefix.c_str(),
+                         upgrade_params.is_adb_sideloading_enabled),
+      base::StringPrintf("%s.copy_packages_cache=%d", prefix.c_str(),
+                         static_cast<int>(upgrade_params.packages_cache_mode)),
+      base::StringPrintf("%s.skip_gms_core_cache=%d", prefix.c_str(),
+                         upgrade_params.skip_gms_core_cache),
+      base::StringPrintf("%s.arc_demo_mode=%d", prefix.c_str(),
+                         upgrade_params.is_demo_session),
+      base::StringPrintf(
+          "%s.supervision.transition=%d", prefix.c_str(),
+          static_cast<int>(upgrade_params.supervision_transition)),
+      base::StringPrintf("%s.serialno=%s", prefix.c_str(),
+                         serial_number.c_str()),
+  };
+  // Conditionally sets more properties based on |upgrade_params|.
+  if (!upgrade_params.locale.empty()) {
+    result.push_back(base::StringPrintf("%s.locale=%s", prefix.c_str(),
+                                        upgrade_params.locale.c_str()));
+    if (!upgrade_params.preferred_languages.empty()) {
+      result.push_back(base::StringPrintf(
+          "%s.preferred_languages=%s", prefix.c_str(),
+          base::JoinString(upgrade_params.preferred_languages, ",").c_str()));
+    }
+  }
+
+  // TODO(niwa): Handle |is_account_managed| and
+  // |is_managed_adb_sideloading_allowed| in |upgrade_params| when we
+  // implement apk sideloading for ARCVM.
+  return result;
+}
+
 std::vector<std::string> GenerateKernelCmdline(
     const StartParams& start_params,
-    const UpgradeParams& upgrade_params,
     const FileSystemStatus& file_system_status,
     bool is_dev_mode,
     bool is_host_on_vm,
-    const std::string& channel,
-    const std::string& serial_number) {
-  DCHECK(!serial_number.empty());
-
+    const std::string& channel) {
   std::string native_bridge;
   switch (IdentifyBinaryTranslationType(start_params)) {
     case ArcBinaryTranslationType::NONE:
@@ -171,9 +216,6 @@ std::vector<std::string> GenerateKernelCmdline(
       base::StringPrintf("androidboot.dev_mode=%d", is_dev_mode),
       base::StringPrintf("androidboot.disable_runas=%d", !is_dev_mode),
       base::StringPrintf("androidboot.host_is_in_vm=%d", is_host_on_vm),
-      // TODO(jschettler): Remove androidboot.vm once ro.boot.vm is no longer
-      // used.
-      base::StringPrintf("androidboot.vm=%d", is_host_on_vm),
       base::StringPrintf("androidboot.debuggable=%d",
                          file_system_status.is_android_debuggable()),
       base::StringPrintf("androidboot.lcd_density=%d",
@@ -182,23 +224,28 @@ std::vector<std::string> GenerateKernelCmdline(
                          start_params.arc_file_picker_experiment),
       base::StringPrintf("androidboot.arc_custom_tabs=%d",
                          start_params.arc_custom_tabs_experiment),
-      base::StringPrintf("androidboot.arc_print_spooler=%d",
-                         start_params.arc_print_spooler_experiment),
       base::StringPrintf("androidboot.disable_system_default_app=%d",
                          start_params.arc_disable_system_default_app),
       "androidboot.chromeos_channel=" + channel,
       "androidboot.boottime_offset=" + MonotonicTimestamp(),
-      // TODO(yusukes): remove this once arcvm supports SELinux.
-      "androidboot.selinux=permissive",
+      base::StringPrintf("androidboot.iioservice_present=%d",
+                         BUILDFLAG(USE_IIOSERVICE)),
   };
-  // Since we don't do mini VM yet, set not only |start_params| but also
-  // |upgrade_params| here for now.
-  const std::vector<std::string> upgrade_props =
-      GenerateUpgradeProps(upgrade_params, serial_number, "androidboot");
-  result.insert(result.end(), upgrade_props.begin(), upgrade_props.end());
 
-  // TODO(yusukes): Check if we need to set ro.boot.enable_adb_sideloading for
+  // We run vshd under a restricted domain on non-test images.
+  // (go/arcvm-android-sh-restricted)
+  if (channel == "testimage")
+    result.push_back("androidboot.vshd_service_override=vshd_for_test");
+
+  // TODO(niwa): Check if we need to set ro.boot.enable_adb_sideloading for
   // ARCVM.
+
+  // Only add boot property if flag to disable media store maintenance is set.
+  if (start_params.disable_media_store_maintenance)
+    result.push_back("androidboot.disable_media_store_maintenance=1");
+
+  if (start_params.arc_generate_play_auto_install)
+    result.push_back("androidboot.arc_generate_pai=1");
 
   // Conditionally sets some properties based on |start_params|.
   switch (start_params.play_store_auto_update) {
@@ -212,20 +259,32 @@ std::vector<std::string> GenerateKernelCmdline(
       break;
   }
 
+  switch (start_params.dalvik_memory_profile) {
+    case StartParams::DalvikMemoryProfile::DEFAULT:
+      break;
+    case StartParams::DalvikMemoryProfile::M4G:
+      result.push_back("androidboot.arc_dalvik_memory_profile=4G");
+      break;
+    case StartParams::DalvikMemoryProfile::M8G:
+      result.push_back("androidboot.arc_dalvik_memory_profile=8G");
+      break;
+    case StartParams::DalvikMemoryProfile::M16G:
+      result.push_back("androidboot.arc_dalvik_memory_profile=16G");
+      break;
+  }
+
   return result;
 }
 
 vm_tools::concierge::StartArcVmRequest CreateStartArcVmRequest(
-    const std::string& user_id_hash,
     uint32_t cpus,
-    const base::FilePath& data_disk_path,
     const base::FilePath& demo_session_apps_path,
     const FileSystemStatus& file_system_status,
     std::vector<std::string> kernel_cmdline) {
   vm_tools::concierge::StartArcVmRequest request;
 
   request.set_name(kArcVmName);
-  request.set_owner_id(user_id_hash);
+  request.set_owner_id(kArcVmDefaultOwner);
 
   request.add_params("root=/dev/vda");
   if (file_system_status.is_host_rootfs_writable() &&
@@ -234,14 +293,6 @@ vm_tools::concierge::StartArcVmRequest CreateStartArcVmRequest(
   }
   request.add_params("init=/init");
 
-  // TIP: When you want to see all dmesg logs from the Android system processes
-  // such as init, uncomment the following line. By default, the guest kernel
-  // rate-limits the logging and you might not be able to see all LOGs from
-  // them. The logs could be silently dropped. This is useful when modifying
-  // init.bertha.rc, for example.
-  //
-  // request.add_params("printk.devkmsg=on");
-
   for (auto& entry : kernel_cmdline)
     request.add_params(std::move(entry));
 
@@ -249,24 +300,21 @@ vm_tools::concierge::StartArcVmRequest CreateStartArcVmRequest(
 
   vm->set_kernel(file_system_status.guest_kernel_path().value());
 
-  // Add / as /dev/vda.
+  // Add rootfs as /dev/vda.
   vm->set_rootfs(file_system_status.system_image_path().value());
   request.set_rootfs_writable(file_system_status.is_host_rootfs_writable() &&
                               file_system_status.is_system_image_ext_format());
 
-  // Add /data as /dev/vdb.
+  // Add /vendor as /dev/block/vdb. The device name has to be consistent with
+  // the one in GenerateFirstStageFstab() in platform2/arc/setup/.
   vm_tools::concierge::DiskImage* disk_image = request.add_disks();
-  disk_image->set_path(data_disk_path.value());
-  disk_image->set_image_type(vm_tools::concierge::DISK_IMAGE_AUTO);
-  disk_image->set_writable(true);
-  disk_image->set_do_mount(true);
-  // Add /vendor as /dev/vdc.
-  disk_image = request.add_disks();
   disk_image->set_path(file_system_status.vendor_image_path().value());
   disk_image->set_image_type(vm_tools::concierge::DISK_IMAGE_AUTO);
   disk_image->set_writable(false);
   disk_image->set_do_mount(true);
-  // Add /run/imageloader/.../android_demo_apps.squash as /dev/vdd if needed.
+
+  // Add /run/imageloader/.../android_demo_apps.squash as /dev/block/vdc if
+  // needed.
   // TODO(b/144542975): Do this on upgrade instead.
   if (!demo_session_apps_path.empty()) {
     disk_image = request.add_disks();
@@ -282,17 +330,10 @@ vm_tools::concierge::StartArcVmRequest CreateStartArcVmRequest(
   // Add cpus.
   request.set_cpus(cpus);
 
-  return request;
-}
+  // Add ignore_dev_conf setting for dev mode.
+  request.set_ignore_dev_conf(IsArcVmDevConfIgnored());
 
-// Gets a system property managed by crossystem. This function can be called
-// only with base::MayBlock().
-int GetSystemPropertyInt(const std::string& property) {
-  std::string output;
-  if (!base::GetAppOutput({kCrosSystemPath, property}, &output))
-    return -1;
-  int output_int;
-  return base::StringToInt(output, &output_int) ? output_int : -1;
+  return request;
 }
 
 const sockaddr_un* GetArcVmBootNotificationServerAddress() {
@@ -307,6 +348,9 @@ const sockaddr_un* GetArcVmBootNotificationServerAddress() {
 // Returns the connected socket fd if successful, or else an invalid fd. This
 // function can only be called with base::MayBlock().
 base::ScopedFD ConnectToArcVmBootNotificationServer() {
+  if (g_boot_notification_server_fd)
+    return base::ScopedFD(HANDLE_EINTR(dup(*g_boot_notification_server_fd)));
+
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::WILL_BLOCK);
   base::ScopedFD fd(socket(AF_UNIX, SOCK_STREAM, 0));
@@ -331,8 +375,13 @@ base::ScopedFD ConnectToArcVmBootNotificationServer() {
 // base::MayBlock().
 bool IsArcVmBootNotificationServerListening() {
   const base::ElapsedTimer timer;
-  constexpr base::TimeDelta limit = base::TimeDelta::FromSeconds(20);
-  base::TimeDelta sleep_duration = base::TimeDelta::FromMilliseconds(100);
+  const base::TimeDelta limit = g_connect_timeout_limit_for_testing
+                                    ? *g_connect_timeout_limit_for_testing
+                                    : kConnectTimeoutLimit;
+  base::TimeDelta sleep_duration =
+      g_connect_sleep_duration_initial_for_testing
+          ? *g_connect_sleep_duration_initial_for_testing
+          : kConnectSleepDurationInitial;
 
   do {
     if (ConnectToArcVmBootNotificationServer().is_valid())
@@ -360,8 +409,6 @@ bool SendUpgradePropsToArcVmBootNotificationServer(
     return false;
 
   if (!base::WriteFileDescriptor(fd.get(), props.c_str(), props.size())) {
-    // TODO(wvk): Add a unittest to cover this failure once the UpgradeArc flow
-    // requires this function to run successfully.
     PLOG(ERROR) << "Unable to write props to "
                 << kArcVmBootNotificationServerSocketPath;
     return false;
@@ -421,12 +468,7 @@ class ArcVmClientAdapter : public ArcClientAdapter,
   // ArcClientAdapter overrides:
   void StartMiniArc(StartParams params,
                     chromeos::VoidDBusMethodCallback callback) override {
-    // TODO(yusukes): Support mini ARC.
-    VLOG(2) << "Mini ARCVM instance is not supported.";
-
-    // Save the parameters for the later call to UpgradeArc.
     start_params_ = std::move(params);
-
     base::ThreadPool::PostTaskAndReplyWithResult(
         FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
         base::BindOnce(
@@ -437,11 +479,28 @@ class ArcVmClientAdapter : public ArcClientAdapter,
 
   void UpgradeArc(UpgradeParams params,
                   chromeos::VoidDBusMethodCallback callback) override {
-    VLOG(1) << "Starting Concierge service";
-    chromeos::DBusThreadManager::Get()->GetDebugDaemonClient()->StartConcierge(
-        base::BindOnce(&ArcVmClientAdapter::OnConciergeStarted,
-                       weak_factory_.GetWeakPtr(), std::move(params),
-                       std::move(callback)));
+    if (user_id_hash_.empty()) {
+      LOG(ERROR) << "User ID hash is not set";
+      StopArcInstanceInternal();
+      std::move(callback).Run(false);
+      return;
+    }
+    if (serial_number_.empty()) {
+      LOG(ERROR) << "Serial number is not set";
+      StopArcInstanceInternal();
+      std::move(callback).Run(false);
+      return;
+    }
+
+    // Stop the existing full-VM if any (e.g. in case of a chrome crash).
+    VLOG(1) << "Stopping the existing full-VM if any.";
+    vm_tools::concierge::StopVmRequest request;
+    request.set_name(kArcVmName);
+    request.set_owner_id(user_id_hash_);
+    GetConciergeClient()->StopVm(
+        request, base::BindOnce(&ArcVmClientAdapter::OnExistingFullVmStopped,
+                                weak_factory_.GetWeakPtr(), std::move(params),
+                                std::move(callback)));
   }
 
   void StopArcInstance(bool on_shutdown, bool should_backup_log) override {
@@ -454,18 +513,16 @@ class ArcVmClientAdapter : public ArcClientAdapter,
           << "StopArcInstance is called during browser shutdown. Do nothing.";
       return;
     }
+    DCHECK_NE(current_cid_, kInvalidCid) << "ARCVM is not running.";
 
     if (should_backup_log) {
-      // TODO(b/149874690): Call debugd to back up the log.
+      GetDebugDaemonClient()->BackupArcBugReport(
+          cryptohome::CreateAccountIdentifierFromIdentification(cryptohome_id_),
+          base::BindOnce(&ArcVmClientAdapter::OnArcBugReportBackedUp,
+                         weak_factory_.GetWeakPtr(), base::TimeTicks::Now()));
+    } else {
+      StopArcInstanceInternal();
     }
-
-    VLOG(1) << "Stopping arcvm";
-    vm_tools::concierge::StopVmRequest request;
-    request.set_name(kArcVmName);
-    request.set_owner_id(user_id_hash_);
-    GetConciergeClient()->StopVm(
-        request, base::BindOnce(&ArcVmClientAdapter::OnStopVmReply,
-                                weak_factory_.GetWeakPtr()));
   }
 
   void SetUserInfo(const cryptohome::Identification& cryptohome_id,
@@ -485,6 +542,10 @@ class ArcVmClientAdapter : public ArcClientAdapter,
     serial_number_ = serial_number;
   }
 
+  void SetDemoModeDelegate(DemoModeDelegate* delegate) override {
+    demo_mode_delegate_ = delegate;
+  }
+
   // chromeos::ConciergeClient::Observer overrides:
   void ConciergeServiceStopped() override {
     VLOG(1) << "vm_concierge stopped";
@@ -493,102 +554,120 @@ class ArcVmClientAdapter : public ArcClientAdapter,
     OnArcInstanceStopped();
   }
 
-  void ConciergeServiceRestarted() override {}
+  void ConciergeServiceStarted() override {}
 
  private:
+  void OnArcBugReportBackedUp(base::TimeTicks arc_bug_report_backup_time,
+                              bool result) {
+    if (result) {
+      base::TimeDelta elapsed_time =
+          base::TimeTicks::Now() - arc_bug_report_backup_time;
+      base::UmaHistogramCustomTimes(kArcBugReportBackupTimeMetric, elapsed_time,
+                                    kArcBugReportBackupTimeMetricMinTime,
+                                    kArcBugReportBackupTimeMetricMaxTime,
+                                    kArcBugReportBackupTimeMetricBuckets);
+    } else {
+      LOG(ERROR) << "Error contacting debugd to back up ARC bug report.";
+    }
+
+    StopArcInstanceInternal();
+  }
+
+  void StopArcInstanceInternal() {
+    VLOG(1) << "Stopping arcvm";
+    // This may be called before ARCVM has been upgraded and the proper VM id
+    // has been set. Since ConciergeClient::StopVm() returns successfully
+    // regardless of whether the VM exists, check to see which VM is actually
+    // running.
+
+    vm_tools::concierge::GetVmInfoRequest request;
+    request.set_name(kArcVmName);
+    request.set_owner_id(user_id_hash_);
+    GetConciergeClient()->GetVmInfo(
+        request, base::BindOnce(&ArcVmClientAdapter::OnGetVmReply,
+                                weak_factory_.GetWeakPtr()));
+  }
+
+  void OnGetVmReply(
+      base::Optional<vm_tools::concierge::GetVmInfoResponse> reply) {
+    vm_tools::concierge::StopVmRequest request;
+    request.set_name(kArcVmName);
+
+    if (reply.has_value() && reply.value().success())
+      request.set_owner_id(user_id_hash_);
+    else
+      request.set_owner_id(kArcVmDefaultOwner);
+
+    GetConciergeClient()->StopVm(
+        request, base::BindOnce(&ArcVmClientAdapter::OnStopVmReply,
+                                weak_factory_.GetWeakPtr()));
+  }
+
   void OnIsDevMode(chromeos::VoidDBusMethodCallback callback,
                    bool is_dev_mode) {
-    VLOG(1) << "Starting arcvm-per-board-features";
-    // Note: the Upstart job is a task, and the callback for the start request
-    // won't be called until the task finishes. When the callback is called with
-    // true, it is ensured that the per-board features files exist.
-    chromeos::UpstartClient::Get()->StartJob(
-        kArcVmPerBoardFeaturesJobName, /*environment=*/{},
-        base::BindOnce(&ArcVmClientAdapter::OnArcVmPerBoardFeaturesStarted,
-                       weak_factory_.GetWeakPtr(), std::move(callback)));
     is_dev_mode_ = is_dev_mode;
+    std::deque<JobDesc> jobs{
+        // Note: the first Upstart job is a task, and the callback for the start
+        // request won't be called until the task finishes. When the callback is
+        // called with true, it is ensured that the per-board features files
+        // exist.
+        JobDesc{kArcVmPerBoardFeaturesJobName, UpstartOperation::JOB_START, {}},
+        JobDesc{
+            kArcVmPostVmStartServicesJobName, UpstartOperation::JOB_STOP, {}},
+        JobDesc{kArcVmPostLoginServicesJobName, UpstartOperation::JOB_STOP, {}},
+        JobDesc{kArcVmPreLoginServicesJobName,
+                UpstartOperation::JOB_STOP_AND_START,
+                {}},
+    };
+    ConfigureUpstartJobs(
+        std::move(jobs),
+        base::BindOnce(
+            &ArcVmClientAdapter::OnConfigureUpstartJobsOnStartMiniArc,
+            weak_factory_.GetWeakPtr(), std::move(callback)));
   }
 
-  void OnArcVmPerBoardFeaturesStarted(chromeos::VoidDBusMethodCallback callback,
-                                      bool result) {
+  void OnConfigureUpstartJobsOnStartMiniArc(
+      chromeos::VoidDBusMethodCallback callback,
+      bool result) {
     if (!result) {
-      LOG(ERROR) << "Failed to start arcvm-per-board-features";
-      // TODO(yusukes): Record UMA for this case.
-      std::move(callback).Run(result);
-      return;
-    }
-    // Make sure to kill a stale arcvm-server-proxy job (if any).
-    chromeos::UpstartClient::Get()->StopJob(
-        kArcVmServerProxyJobName, /*environment=*/{},
-        base::BindOnce(&ArcVmClientAdapter::OnArcVmServerProxyJobStopped,
-                       weak_factory_.GetWeakPtr(), std::move(callback)));
-  }
-
-  void OnArcVmServerProxyJobStopped(chromeos::VoidDBusMethodCallback callback,
-                                    bool result) {
-    // Ignore |result| since it can be false when the proxy job has already been
-    // stopped for other reasons, but it's not considered as an error.
-    VLOG(1) << "OnArcVmServerProxyJobStopped: job "
-            << (result ? "stopped" : "not running?");
-
-    should_notify_observers_ = true;
-
-    // Make sure to stop arc-keymasterd if it's already started. Always move
-    // |callback| as is and ignore |result|.
-    chromeos::UpstartClient::Get()->StopJob(
-        kArcKeymasterJobName, /*environment=*/{},
-        base::BindOnce(&ArcVmClientAdapter::OnArcKeymasterJobStopped,
-                       weak_factory_.GetWeakPtr(), std::move(callback)));
-  }
-
-  void OnArcKeymasterJobStopped(chromeos::VoidDBusMethodCallback callback,
-                                bool result) {
-    VLOG(1) << "OnArcKeymasterJobStopped: arc-keymasterd job "
-            << (result ? "stopped" : "not running?");
-
-    // Start arc-keymasterd. Always move |callback| as is and ignore |result|.
-    VLOG(1) << "Starting arc-keymasterd";
-    chromeos::UpstartClient::Get()->StartJob(
-        kArcKeymasterJobName, /*environment=*/{},
-        base::BindOnce(&ArcVmClientAdapter::OnArcKeymasterJobStarted,
-                       weak_factory_.GetWeakPtr(), std::move(callback)));
-  }
-
-  void OnArcKeymasterJobStarted(chromeos::VoidDBusMethodCallback callback,
-                                bool result) {
-    if (!result) {
-      LOG(ERROR) << "Failed to start arc-keymasterd job";
+      LOG(ERROR) << "ConfigureUpstartJobs (on starting mini ARCVM) failed";
       std::move(callback).Run(false);
       return;
     }
 
-    // Kill a stale arcvm-boot-notification-server job
-    chromeos::UpstartClient::Get()->StopJob(
-        kArcVmBootNotificationServerJobName, /*environment=*/{},
-        base::BindOnce(
-            &ArcVmClientAdapter::OnArcVmBootNotificationServerStopped,
-            weak_factory_.GetWeakPtr(), std::move(callback)));
+    VLOG(1) << "Waiting for Concierge to be available";
+    GetConciergeClient()->WaitForServiceToBeAvailable(
+        base::BindOnce(&ArcVmClientAdapter::OnConciergeAvailable,
+                       weak_factory_.GetWeakPtr(), std::move(callback)));
   }
 
-  void OnArcVmBootNotificationServerStopped(
-      chromeos::VoidDBusMethodCallback callback,
-      bool result) {
-    VLOG(1) << "OnArcVmBootNotificationServerStopped: job "
-            << (result ? "stopped" : "not running?");
+  void OnConciergeAvailable(chromeos::VoidDBusMethodCallback callback,
+                            bool service_available) {
+    if (!service_available) {
+      LOG(ERROR) << "Failed to wait for Concierge to be available";
+      std::move(callback).Run(false);
+      return;
+    }
 
-    VLOG(1) << "Starting arcvm-boot-notification-server";
-    chromeos::UpstartClient::Get()->StartJob(
-        kArcVmBootNotificationServerJobName, /*environment=*/{},
-        base::BindOnce(
-            &ArcVmClientAdapter::OnArcVmBootNotificationServerStarted,
-            weak_factory_.GetWeakPtr(), std::move(callback)));
+    // Stop the existing mini-VM if any (e.g. in case of a chrome crash).
+    VLOG(1) << "Stopping the existing mini-VM if any.";
+    vm_tools::concierge::StopVmRequest request;
+    request.set_name(kArcVmName);
+    request.set_owner_id(kArcVmDefaultOwner);
+    GetConciergeClient()->StopVm(
+        request,
+        base::BindOnce(&ArcVmClientAdapter::OnExistingMiniVmStopped,
+                       weak_factory_.GetWeakPtr(), std::move(callback)));
   }
 
-  void OnArcVmBootNotificationServerStarted(
+  void OnExistingMiniVmStopped(
       chromeos::VoidDBusMethodCallback callback,
-      bool result) {
-    if (!result) {
-      LOG(ERROR) << "Failed to start arcvm-boot-notification-server job";
+      base::Optional<vm_tools::concierge::StopVmResponse> reply) {
+    // reply->success() returns true even when there was no VM running.
+    if (!reply.has_value() || !reply->success()) {
+      LOG(ERROR) << "StopVm failed: "
+                 << (reply.has_value() ? reply->failure_reason()
+                                       : "No D-Bus response.");
       std::move(callback).Run(false);
       return;
     }
@@ -609,127 +688,32 @@ class ArcVmClientAdapter : public ArcClientAdapter,
       std::move(callback).Run(false);
       return;
     }
-    std::move(callback).Run(true);
-  }
 
-  void OnConciergeStarted(UpgradeParams params,
-                          chromeos::VoidDBusMethodCallback callback,
-                          bool success) {
-    if (!success) {
-      LOG(ERROR) << "Failed to start Concierge service for arcvm";
-      std::move(callback).Run(false);
-      return;
-    }
-    VLOG(1) << "Starting arcvm-server-proxy";
-    chromeos::UpstartClient::Get()->StartJob(
-        kArcVmServerProxyJobName, /*environment=*/{},
-        base::BindOnce(&ArcVmClientAdapter::OnArcVmServerProxyJobStarted,
-                       weak_factory_.GetWeakPtr(), std::move(params),
-                       std::move(callback)));
-  }
-
-  void OnArcVmServerProxyJobStarted(UpgradeParams params,
-                                    chromeos::VoidDBusMethodCallback callback,
-                                    bool result) {
-    if (!result) {
-      LOG(ERROR) << "Failed to start arcvm-server-proxy job";
-      std::move(callback).Run(false);
-      return;
-    }
-
-    VLOG(1) << "Starting arc-create-data";
-    const std::string account_id =
-        cryptohome::CreateAccountIdentifierFromIdentification(cryptohome_id_)
-            .account_id();
-    chromeos::UpstartClient::Get()->StartJob(
-        kArcCreateDataJobName, {"CHROMEOS_USER=" + account_id},
-        base::BindOnce(&ArcVmClientAdapter::OnArcCreateDataJobStarted,
-                       weak_factory_.GetWeakPtr(), std::move(params),
-                       std::move(callback)));
-  }
-
-  void OnArcCreateDataJobStarted(UpgradeParams params,
-                                 chromeos::VoidDBusMethodCallback callback,
-                                 bool result) {
-    if (!result) {
-      LOG(ERROR) << "Failed to start arc-create-data job";
-      std::move(callback).Run(false);
-      return;
-    }
-    // TODO(pliard): Export host-side /data to the VM, and remove the call. Note
-    // that ArcSessionImpl checks low disk conditions before calling UpgradeArc.
-    base::ThreadPool::PostTaskAndReplyWithResult(
-        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
-        base::BindOnce(&base::SysInfo::AmountOfFreeDiskSpace,
-                       base::FilePath(kHomeDirectory)),
-        base::BindOnce(&ArcVmClientAdapter::CreateDiskImageAfterSizeCheck,
-                       weak_factory_.GetWeakPtr(), std::move(params),
-                       std::move(callback)));
-  }
-
-  void CreateDiskImageAfterSizeCheck(UpgradeParams params,
-                                     chromeos::VoidDBusMethodCallback callback,
-                                     int64_t free_disk_bytes) {
-    VLOG(2) << "Got free disk size: " << free_disk_bytes;
-    if (user_id_hash_.empty()) {
-      LOG(ERROR) << "User ID hash is not set";
-      std::move(callback).Run(false);
-      return;
-    }
-    // TODO(pliard): Export host-side /data to the VM, and remove the call.
-    GetConciergeClient()->CreateDiskImage(
-        CreateArcDiskRequest(user_id_hash_, free_disk_bytes),
-        base::BindOnce(&ArcVmClientAdapter::OnDiskImageCreated,
-                       weak_factory_.GetWeakPtr(), std::move(params),
-                       std::move(callback)));
-  }
-
-  // TODO(pliard): Export host-side /data to the VM, and remove the first half
-  // of the function.
-  void OnDiskImageCreated(
-      UpgradeParams params,
-      chromeos::VoidDBusMethodCallback callback,
-      base::Optional<vm_tools::concierge::CreateDiskImageResponse> reply) {
-    if (!reply.has_value()) {
-      LOG(ERROR) << "Failed to create disk image. Empty response.";
-      std::move(callback).Run(false);
-      return;
-    }
-
-    const vm_tools::concierge::CreateDiskImageResponse& response =
-        reply.value();
-    if (response.status() != vm_tools::concierge::DISK_STATUS_EXISTS &&
-        response.status() != vm_tools::concierge::DISK_STATUS_CREATED) {
-      LOG(ERROR) << "Failed to create disk image: "
-                 << response.failure_reason();
-      std::move(callback).Run(false);
-      return;
-    }
-    VLOG(1) << "Disk image for arcvm ready. status=" << response.status()
-            << ", disk=" << response.disk_path();
-
+    VLOG(2) << "Checking file system status";
     base::ThreadPool::PostTaskAndReplyWithResult(
         FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
         base::BindOnce(&FileSystemStatus::GetFileSystemStatusBlocking),
         base::BindOnce(&ArcVmClientAdapter::OnFileSystemStatus,
-                       weak_factory_.GetWeakPtr(), std::move(params),
-                       std::move(callback),
-                       base::FilePath(response.disk_path())));
+                       weak_factory_.GetWeakPtr(), std::move(callback)));
   }
 
-  void OnFileSystemStatus(UpgradeParams params,
-                          chromeos::VoidDBusMethodCallback callback,
-                          const base::FilePath& data_disk_path,
+  void OnFileSystemStatus(chromeos::VoidDBusMethodCallback callback,
                           FileSystemStatus file_system_status) {
     VLOG(2) << "Got file system status";
     if (file_system_status_rewriter_for_testing_)
       file_system_status_rewriter_for_testing_.Run(&file_system_status);
 
-    if (serial_number_.empty()) {
-      LOG(ERROR) << "Serial number is not set";
-      std::move(callback).Run(false);
-      return;
-    }
+    VLOG(2) << "Retrieving demo session apps path";
+    DCHECK(demo_mode_delegate_);
+    demo_mode_delegate_->EnsureOfflineResourcesLoaded(base::BindOnce(
+        &ArcVmClientAdapter::OnDemoResourcesLoaded, weak_factory_.GetWeakPtr(),
+        std::move(callback), std::move(file_system_status)));
+  }
+
+  void OnDemoResourcesLoaded(chromeos::VoidDBusMethodCallback callback,
+                             FileSystemStatus file_system_status) {
+    const base::FilePath demo_session_apps_path =
+        demo_mode_delegate_->GetDemoAppsPath();
 
     const int32_t cpus =
         base::SysInfo::NumberOfProcessors() - start_params_.num_cores_disabled;
@@ -737,26 +721,16 @@ class ArcVmClientAdapter : public ArcClientAdapter,
 
     DCHECK(is_dev_mode_);
     std::vector<std::string> kernel_cmdline = GenerateKernelCmdline(
-        start_params_, params, file_system_status, *is_dev_mode_,
-        is_host_on_vm_, GetChromeOsChannelFromLsbRelease(), serial_number_);
-    auto start_request = CreateStartArcVmRequest(
-        user_id_hash_, cpus, data_disk_path, params.demo_session_apps_path,
-        file_system_status, std::move(kernel_cmdline));
+        start_params_, file_system_status, *is_dev_mode_, is_host_on_vm_,
+        GetChromeOsChannelFromLsbRelease());
+    auto start_request =
+        CreateStartArcVmRequest(cpus, demo_session_apps_path,
+                                file_system_status, std::move(kernel_cmdline));
 
     GetConciergeClient()->StartArcVm(
         start_request,
         base::BindOnce(&ArcVmClientAdapter::OnStartArcVmReply,
                        weak_factory_.GetWeakPtr(), std::move(callback)));
-
-    base::ThreadPool::PostTaskAndReplyWithResult(
-        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
-        base::BindOnce(&SendUpgradePropsToArcVmBootNotificationServer, params,
-                       serial_number_),
-        base::BindOnce([](bool result) {
-          VLOG(1)
-              << "Sending upgrade props to arcvm-boot-notification-server was "
-              << (result ? "successful" : "unsuccessful");
-        }));
   }
 
   void OnStartArcVmReply(
@@ -776,18 +750,161 @@ class ArcVmClientAdapter : public ArcClientAdapter,
       return;
     }
     current_cid_ = response.vm_info().cid();
-
+    should_notify_observers_ = true;
     VLOG(1) << "ARCVM started cid=" << current_cid_;
     std::move(callback).Run(true);
   }
 
-  void OnArcInstanceStopped() {
-    VLOG(1) << "ARCVM stopped. Stopping arcvm-server-proxy";
+  void OnExistingFullVmStopped(
+      UpgradeParams params,
+      chromeos::VoidDBusMethodCallback callback,
+      base::Optional<vm_tools::concierge::StopVmResponse> reply) {
+    // reply->success() returns true even when there was no VM running.
+    if (!reply.has_value() || !reply->success()) {
+      LOG(ERROR) << "StopVm failed: "
+                 << (reply.has_value() ? reply->failure_reason()
+                                       : "No D-Bus response.");
+      StopArcInstanceInternal();
+      std::move(callback).Run(false);
+      return;
+    }
 
-    // TODO(yusukes): Consider removing this stop call once b/142140355 is
-    // implemented.
-    chromeos::UpstartClient::Get()->StopJob(
-        kArcVmServerProxyJobName, /*environment=*/{}, base::DoNothing());
+    VLOG(1) << "Checking adb sideload status";
+    chromeos::SessionManagerClient::Get()->QueryAdbSideload(base::BindOnce(
+        &ArcVmClientAdapter::OnQueryAdbSideload, weak_factory_.GetWeakPtr(),
+        std::move(params), std::move(callback)));
+  }
+
+  void OnQueryAdbSideload(
+      UpgradeParams params,
+      chromeos::VoidDBusMethodCallback callback,
+      chromeos::SessionManagerClient::AdbSideloadResponseCode response_code,
+      bool enabled) {
+    VLOG(1) << "IsAdbSideloadAllowed, response_code="
+            << static_cast<int>(response_code) << ", enabled=" << enabled;
+
+    switch (response_code) {
+      case chromeos::SessionManagerClient::AdbSideloadResponseCode::FAILED:
+        LOG(ERROR) << "Failed response from QueryAdbSideload";
+        StopArcInstanceInternal();
+        std::move(callback).Run(false);
+        return;
+      case chromeos::SessionManagerClient::AdbSideloadResponseCode::
+          NEED_POWERWASH:
+        params.is_adb_sideloading_enabled = false;
+        break;
+      case chromeos::SessionManagerClient::AdbSideloadResponseCode::SUCCESS:
+        params.is_adb_sideloading_enabled = enabled;
+        break;
+    }
+
+    VLOG(1) << "Starting upstart jobs for UpgradeArc()";
+    std::vector<std::string> environment{
+        "CHROMEOS_USER=" +
+            cryptohome::CreateAccountIdentifierFromIdentification(
+                cryptohome_id_)
+                .account_id(),
+        "CHROMEOS_USER_ID_HASH=" + user_id_hash_};
+    std::deque<JobDesc> jobs{
+        JobDesc{kArcVmPostLoginServicesJobName, UpstartOperation::JOB_START,
+                std::move(environment)},
+    };
+
+    ConfigureUpstartJobs(
+        std::move(jobs),
+        base::BindOnce(&ArcVmClientAdapter::OnConfigureUpstartJobsOnUpgradeArc,
+                       weak_factory_.GetWeakPtr(), std::move(params),
+                       std::move(callback)));
+  }
+
+  void OnConfigureUpstartJobsOnUpgradeArc(
+      UpgradeParams params,
+      chromeos::VoidDBusMethodCallback callback,
+      bool result) {
+    if (!result) {
+      LOG(ERROR) << "ConfigureUpstartJobs (on upgrading ARCVM) failed. ";
+      StopArcInstanceInternal();
+      std::move(callback).Run(false);
+      return;
+    }
+
+    VLOG(1) << "Setting owner ID for mini-VM instance.";
+    vm_tools::concierge::SetVmIdRequest request;
+    request.set_name(kArcVmName);
+    request.set_src_owner_id(kArcVmDefaultOwner);
+    request.set_dest_owner_id(user_id_hash_);
+    GetConciergeClient()->SetVmId(
+        request, base::BindOnce(&ArcVmClientAdapter::OnSetVmId,
+                                weak_factory_.GetWeakPtr(), std::move(params),
+                                std::move(callback)));
+  }
+
+  void OnSetVmId(UpgradeParams params,
+                 chromeos::VoidDBusMethodCallback callback,
+                 base::Optional<vm_tools::concierge::SetVmIdResponse> reply) {
+    if (!reply.has_value()) {
+      LOG(ERROR) << "Failed to set VM ID. Empty response.";
+      StopArcInstanceInternal();
+      std::move(callback).Run(false);
+      return;
+    }
+
+    const vm_tools::concierge::SetVmIdResponse& response = reply.value();
+    if (!response.success()) {
+      LOG(ERROR) << "Failed to set VM ID. Failure reason="
+                 << response.failure_reason();
+      StopArcInstanceInternal();
+      std::move(callback).Run(false);
+      return;
+    }
+
+    VLOG(2) << "Set VM id for default instance";
+
+    base::ThreadPool::PostTaskAndReplyWithResult(
+        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+        base::BindOnce(&SendUpgradePropsToArcVmBootNotificationServer,
+                       std::move(params), serial_number_),
+        base::BindOnce(&ArcVmClientAdapter::OnUpgradePropsSent,
+                       weak_factory_.GetWeakPtr(), std::move(callback)));
+  }
+
+  void OnUpgradePropsSent(chromeos::VoidDBusMethodCallback callback,
+                          bool result) {
+    if (!result) {
+      LOG(ERROR)
+          << "Failed to send upgrade props to arcvm-boot-notification-server";
+      StopArcInstanceInternal();
+      std::move(callback).Run(false);
+      return;
+    }
+
+    VLOG(1) << "Starting arcvm-post-vm-start-services.";
+    std::vector<std::string> environment;
+    std::deque<JobDesc> jobs{JobDesc{kArcVmPostVmStartServicesJobName,
+                                     UpstartOperation::JOB_START,
+                                     std::move(environment)}};
+    ConfigureUpstartJobs(
+        std::move(jobs),
+        base::BindOnce(&ArcVmClientAdapter::OnConfigureUpstartJobsAfterVmStart,
+                       weak_factory_.GetWeakPtr(), std::move(callback)));
+  }
+
+  void OnConfigureUpstartJobsAfterVmStart(
+      chromeos::VoidDBusMethodCallback callback,
+      bool result) {
+    if (!result) {
+      LOG(ERROR) << "ConfigureUpstartJobs (after starting ARCVM) failed.";
+      StopArcInstanceInternal();
+      std::move(callback).Run(false);
+      return;
+    }
+
+    VLOG(1) << "ARCVM upgrade completed";
+    std::move(callback).Run(true);
+  }
+
+  void OnArcInstanceStopped() {
+    VLOG(1) << "ARCVM stopped.";
 
     // If this method is called before even mini VM is started (e.g. very early
     // vm_concierge crash), or this method is called twice (e.g. crosvm crash
@@ -807,16 +924,16 @@ class ArcVmClientAdapter : public ArcClientAdapter,
     if (reply.has_value() && reply.value().success())
       return;
 
-    // We likely tried to stop mini VM which doesn't exist today. Notify
-    // observers.
-    // TODO(yusukes): Remove the fallback once we implement mini VM.
+    // StopVm always returns successfully, so the only case where this happens
+    // is if the reply is empty, which means Concierge isn't running and ARCVM
+    // isn't either.
+    LOG(ERROR) << "Failed to stop ARCVM: empty reply.";
     OnArcInstanceStopped();
   }
 
   base::Optional<bool> is_dev_mode_;
   // True when the *host* is running on a VM.
   const bool is_host_on_vm_;
-
   // A cryptohome ID of the primary profile.
   cryptohome::Identification cryptohome_id_;
   // A hash of the primary profile user ID.
@@ -829,6 +946,9 @@ class ArcVmClientAdapter : public ArcClientAdapter,
   int64_t current_cid_ = kInvalidCid;
 
   FileSystemStatusRewriter file_system_status_rewriter_for_testing_;
+
+  // The delegate is owned by ArcSessionRunner.
+  DemoModeDelegate* demo_mode_delegate_ = nullptr;
 
   // For callbacks.
   base::WeakPtrFactory<ArcVmClientAdapter> weak_factory_{this};
@@ -846,49 +966,32 @@ std::unique_ptr<ArcClientAdapter> CreateArcVmClientAdapterForTesting(
 }
 
 void SetArcVmBootNotificationServerAddressForTesting(
-    const std::string& new_address) {
+    const std::string& new_address,
+    base::TimeDelta connect_timeout_limit,
+    base::TimeDelta connect_sleep_duration_initial) {
   sockaddr_un* address =
       const_cast<sockaddr_un*>(GetArcVmBootNotificationServerAddress());
   DCHECK_GE(sizeof(address->sun_path), new_address.size());
+  DCHECK_GT(connect_timeout_limit, connect_sleep_duration_initial);
+
   memset(address->sun_path, 0, sizeof(address->sun_path));
   // |new_address| may contain '\0' if it is an abstract socket address, so use
   // memcpy instead of strcpy.
   memcpy(address->sun_path, new_address.data(), new_address.size());
+
+  g_connect_timeout_limit_for_testing = connect_timeout_limit;
+  g_connect_sleep_duration_initial_for_testing = connect_sleep_duration_initial;
 }
 
-std::vector<std::string> GenerateUpgradeProps(
+void SetArcVmBootNotificationServerFdForTesting(base::Optional<int> fd) {
+  g_boot_notification_server_fd = fd;
+}
+
+std::vector<std::string> GenerateUpgradePropsForTesting(
     const UpgradeParams& upgrade_params,
     const std::string& serial_number,
     const std::string& prefix) {
-  std::vector<std::string> result = {
-      base::StringPrintf("%s.disable_boot_completed=%d", prefix.c_str(),
-                         upgrade_params.skip_boot_completed_broadcast),
-      base::StringPrintf("%s.copy_packages_cache=%d", prefix.c_str(),
-                         static_cast<int>(upgrade_params.packages_cache_mode)),
-      base::StringPrintf("%s.skip_gms_core_cache=%d", prefix.c_str(),
-                         upgrade_params.skip_gms_core_cache),
-      base::StringPrintf("%s.arc_demo_mode=%d", prefix.c_str(),
-                         upgrade_params.is_demo_session),
-      base::StringPrintf(
-          "%s.supervision.transition=%d", prefix.c_str(),
-          static_cast<int>(upgrade_params.supervision_transition)),
-      base::StringPrintf("%s.serialno=%s", prefix.c_str(),
-                         serial_number.c_str()),
-  };
-  // Conditionally sets more properties based on |upgrade_params|.
-  if (!upgrade_params.locale.empty()) {
-    result.push_back(base::StringPrintf("%s.locale=%s", prefix.c_str(),
-                                        upgrade_params.locale.c_str()));
-    if (!upgrade_params.preferred_languages.empty()) {
-      result.push_back(base::StringPrintf(
-          "%s.preferred_languages=%s", prefix.c_str(),
-          base::JoinString(upgrade_params.preferred_languages, ",").c_str()));
-    }
-  }
-
-  // TODO(yusukes): Handle |is_managed_account| in |upgrade_params|.
-
-  return result;
+  return GenerateUpgradeProps(upgrade_params, serial_number, prefix);
 }
 
 }  // namespace arc

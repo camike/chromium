@@ -18,6 +18,7 @@
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/views/accessibility/view_accessibility.h"
@@ -30,6 +31,7 @@ class TestDialog : public views::DialogDelegateView {
  public:
   TestDialog() {
     SetFocusBehavior(FocusBehavior::ALWAYS);
+    SetModalType(ui::MODAL_TYPE_CHILD);
     GetViewAccessibility().OverrideName("Test dialog");
   }
   ~TestDialog() override {}
@@ -37,8 +39,6 @@ class TestDialog : public views::DialogDelegateView {
   views::View* GetInitiallyFocusedView() override { return this; }
   // Don't delete the delegate yet. Keep it around for inspection later.
   void DeleteDelegate() override {}
-
-  ui::ModalType GetModalType() const override { return ui::MODAL_TYPE_CHILD; }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestDialog);
@@ -63,7 +63,7 @@ class ConstrainedWindowViewTest : public InProcessBrowserTest {
 
 }  // namespace
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 // Unexpected multiple focus managers on MacViews: http://crbug.com/824551
 #define MAYBE_FocusTest DISABLED_FocusTest
 #else

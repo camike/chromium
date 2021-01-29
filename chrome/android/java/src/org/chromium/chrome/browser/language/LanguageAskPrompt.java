@@ -21,7 +21,7 @@ import androidx.recyclerview.widget.RecyclerView.ViewHolder;
 import org.chromium.base.LocaleUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.language.settings.LanguageItem;
 import org.chromium.chrome.browser.translate.TranslateBridge;
@@ -299,7 +299,7 @@ public class LanguageAskPrompt implements ModalDialogProperties.Controller {
 
         View customView = LayoutInflater.from(activity).inflate(
                 R.layout.language_ask_prompt_content, null, false);
-        RecyclerView list = customView.findViewById(R.id.recycler_view);
+        RecyclerView list = customView.findViewById(R.id.language_ask_prompt_content_recycler_view);
         LanguageItemAdapter adapter = new LanguageItemAdapter(activity, mLanguagesUpdate);
         list.setAdapter(adapter);
         LinearLayoutManager linearLayoutManager = new LinearLayoutManager(activity);

@@ -8,9 +8,9 @@
 #include <set>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "base/threading/sequenced_task_runner_handle.h"
@@ -132,8 +132,8 @@ class FeedbackUploaderTest : public testing::Test {
         test_shared_loader_factory_, &context_);
   }
 
-  void QueueReport(const std::string& data) {
-    uploader_->QueueReport(std::make_unique<std::string>(data));
+  void QueueReport(const std::string& data, bool has_email = true) {
+    uploader_->QueueReport(std::make_unique<std::string>(data), has_email);
   }
 
   MockFeedbackUploader* uploader() const { return uploader_.get(); }

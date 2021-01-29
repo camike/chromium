@@ -34,6 +34,9 @@ class TestAXTreeManager : public AXTreeManager {
   TestAXTreeManager(const TestAXTreeManager& manager) = delete;
   TestAXTreeManager& operator=(const TestAXTreeManager& manager) = delete;
 
+  TestAXTreeManager(TestAXTreeManager&& manager);
+  TestAXTreeManager& operator=(TestAXTreeManager&& manager);
+
   void DestroyTree();
   AXTree* GetTree() const;
   // Takes ownership of |tree|.
@@ -43,6 +46,8 @@ class TestAXTreeManager : public AXTreeManager {
   AXNode* GetNodeFromTree(const AXTreeID tree_id,
                           const AXNode::AXID node_id) const override;
   AXNode* GetNodeFromTree(const AXNode::AXID node_id) const override;
+  void AddObserver(AXTreeObserver* observer) override;
+  void RemoveObserver(AXTreeObserver* observer) override;
   AXTreeID GetTreeID() const override;
   AXTreeID GetParentTreeID() const override;
   AXNode* GetRootAsAXNode() const override;

@@ -7,8 +7,8 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/policy/cloud/user_policy_signin_service_internal.h"
@@ -98,13 +98,21 @@ void UserPolicySigninService::CallPolicyRegistrationCallback(
   std::move(callback).Run(client->dm_token(), client->client_id());
 }
 
-void UserPolicySigninService::OnPrimaryAccountSet(
-    const CoreAccountInfo& account_info) {
-  if (!identity_manager()->HasAccountWithRefreshToken(account_info.account_id))
+void UserPolicySigninService::OnPrimaryAccountChanged(
+    const signin::PrimaryAccountChangeEvent& event) {
+  UserPolicySigninServiceBase::OnPrimaryAccountChanged(event);
+
+  if (event.GetEventTypeFor(signin::ConsentLevel::kSync) !=
+      signin::PrimaryAccountChangeEvent::Type::kSet) {
+    return;
+  }
+
+  DCHECK(identity_manager()->HasPrimaryAccount());
+  if (!identity_manager()->HasPrimaryAccountWithRefreshToken())
     return;
 
-  // ProfileOAuth2TokenService now has a refresh token for the primary account
-  // so initialize the UserCloudPolicyManager.
+  // IdentityManager has a refresh token for the primary account, so initialize
+  // the UserCloudPolicyManager.
   TryInitializeForSignedInUser();
 }
 

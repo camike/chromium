@@ -17,6 +17,7 @@
 #include "chromeos/constants/chromeos_switches.h"
 #include "components/prefs/pref_service.h"
 #include "components/session_manager/core/session_manager.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/common/api/app_runtime.h"
@@ -67,7 +68,7 @@ class LockScreenAppsEnabledWaiter : public lock_screen_apps::StateObserver {
                  lock_screen_apps::StateObserver>
       lock_screen_apps_state_observer_;
 
-  base::Closure state_change_callback_;
+  base::OnceClosure state_change_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(LockScreenAppsEnabledWaiter);
 };
@@ -78,7 +79,7 @@ class LockScreenNoteTakingTest : public extensions::ExtensionBrowserTest {
   ~LockScreenNoteTakingTest() override = default;
 
   void SetUpCommandLine(base::CommandLine* cmd_line) override {
-    cmd_line->AppendSwitchASCII(extensions::switches::kWhitelistedExtensionID,
+    cmd_line->AppendSwitchASCII(extensions::switches::kAllowlistedExtensionID,
                                 kTestAppId);
     cmd_line->AppendSwitch(ash::switches::kAshForceEnableStylusTools);
 

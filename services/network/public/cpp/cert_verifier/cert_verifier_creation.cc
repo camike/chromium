@@ -5,16 +5,17 @@
 #include "services/network/public/cpp/cert_verifier/cert_verifier_creation.h"
 
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "net/base/features.h"
 #include "net/cert_net/cert_net_fetcher_url_request.h"
 #include "net/net_buildflags.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "crypto/nss_util_internal.h"
+#include "net/cert/cert_verify_proc.h"
 #include "net/cert/cert_verify_proc_builtin.h"
 #include "net/cert/internal/system_trust_store.h"
 #include "net/cert/multi_threaded_cert_verifier.h"
-#include "services/network/public/cpp/cert_verifier/cert_verify_proc_chromeos.h"
 #include "services/network/public/cpp/cert_verifier/system_trust_store_provider_chromeos.h"
 #endif
 
@@ -48,37 +49,29 @@ bool UsingBuiltinCertVerifier(
 }
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 scoped_refptr<net::CertVerifyProc> CreateCertVerifyProcForUser(
     scoped_refptr<net::CertNetFetcher> net_fetcher,
-    crypto::ScopedPK11Slot user_public_slot,
-    bool use_builtin_cert_verifier) {
-  if (use_builtin_cert_verifier) {
-    return net::CreateCertVerifyProcBuiltin(
-        std::move(net_fetcher),
-        std::make_unique<SystemTrustStoreProviderChromeOS>(
-            std::move(user_public_slot)));
-  }
-  return base::MakeRefCounted<CertVerifyProcChromeOS>(
-      std::move(user_public_slot));
+    crypto::ScopedPK11Slot user_public_slot) {
+  return net::CreateCertVerifyProcBuiltin(
+      std::move(net_fetcher),
+      std::make_unique<SystemTrustStoreProviderChromeOS>(
+          std::move(user_public_slot)));
 }
 
 scoped_refptr<net::CertVerifyProc> CreateCertVerifyProcWithoutUserSlots(
-    scoped_refptr<net::CertNetFetcher> net_fetcher,
-    bool use_builtin_cert_verifier) {
-  if (use_builtin_cert_verifier) {
-    return net::CreateCertVerifyProcBuiltin(
-        std::move(net_fetcher),
-        std::make_unique<SystemTrustStoreProviderChromeOS>());
-  }
-  return base::MakeRefCounted<CertVerifyProcChromeOS>();
+    scoped_refptr<net::CertNetFetcher> net_fetcher) {
+  return net::CreateCertVerifyProcBuiltin(
+      std::move(net_fetcher),
+      std::make_unique<SystemTrustStoreProviderChromeOS>());
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace
 
 bool IsUsingCertNetFetcher() {
 #if defined(OS_ANDROID) || defined(OS_FUCHSIA) || defined(OS_CHROMEOS) || \
+    defined(OS_LINUX) ||                                                  \
     BUILDFLAG(TRIAL_COMPARISON_CERT_VERIFIER_SUPPORTED) ||                \
     BUILDFLAG(BUILTIN_CERT_VERIFIER_FEATURE_SUPPORTED)
   return true;
@@ -105,15 +98,11 @@ std::unique_ptr<net::CertVerifier> CreateCertVerifier(
   use_builtin_cert_verifier = false;
 #endif
 
-#if defined(OS_CHROMEOS) && BUILDFLAG(TRIAL_COMPARISON_CERT_VERIFIER_SUPPORTED)
-#error "ChromeOS no longer supports the trial comparison cert verifier."
-#endif
-
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   scoped_refptr<net::CertVerifyProc> verify_proc;
   if (!creation_params || creation_params->username_hash.empty()) {
-    verify_proc = CreateCertVerifyProcWithoutUserSlots(
-        std::move(cert_net_fetcher), use_builtin_cert_verifier);
+    verify_proc =
+        CreateCertVerifyProcWithoutUserSlots(std::move(cert_net_fetcher));
   } else {
     // Make sure NSS is initialized for the user.
     crypto::InitializeNSSForChromeOSUser(creation_params->username_hash,
@@ -122,8 +111,7 @@ std::unique_ptr<net::CertVerifier> CreateCertVerifier(
     crypto::ScopedPK11Slot public_slot =
         crypto::GetPublicSlotForChromeOSUser(creation_params->username_hash);
     verify_proc = CreateCertVerifyProcForUser(std::move(cert_net_fetcher),
-                                              std::move(public_slot),
-                                              use_builtin_cert_verifier);
+                                              std::move(public_slot));
   }
   cert_verifier =
       std::make_unique<net::MultiThreadedCertVerifier>(std::move(verify_proc));

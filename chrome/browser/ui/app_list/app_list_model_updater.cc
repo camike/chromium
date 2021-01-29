@@ -18,6 +18,11 @@ int g_next_unique_model_id = ash::kAppListProfileIdStartFrom;
 AppListModelUpdater::AppListModelUpdater()
     : model_id_(g_next_unique_model_id++) {}
 
+std::vector<ChromeSearchResult*>
+AppListModelUpdater::GetPublishedSearchResultsForTest() {
+  return std::vector<ChromeSearchResult*>();
+}
+
 // static
 syncer::StringOrdinal AppListModelUpdater::GetFirstAvailablePositionInternal(
     const std::vector<ChromeAppListItem*>& top_level_items) {
@@ -62,4 +67,20 @@ syncer::StringOrdinal AppListModelUpdater::GetFirstAvailablePositionInternal(
   if (sorted_items.empty())
     return syncer::StringOrdinal::CreateInitialOrdinal();
   return sorted_items.back()->position().CreateAfter();
+}
+
+// static
+syncer::StringOrdinal AppListModelUpdater::GetPositionBeforeFirstItemInternal(
+    const std::vector<ChromeAppListItem*>& top_level_items) {
+  auto iter =
+      std::min_element(top_level_items.begin(), top_level_items.end(),
+                       [](ChromeAppListItem* const& item1,
+                          ChromeAppListItem* const& item2) -> bool {
+                         return item1->position().LessThan(item2->position());
+                       });
+
+  if (iter == top_level_items.end())
+    return syncer::StringOrdinal::CreateInitialOrdinal();
+
+  return (*iter)->position().CreateBefore();
 }

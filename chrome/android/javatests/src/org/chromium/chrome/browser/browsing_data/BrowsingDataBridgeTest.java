@@ -10,34 +10,35 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
-import android.support.test.filters.MediumTest;
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.MediumTest;
+import androidx.test.filters.SmallTest;
 
 import junit.framework.Assert;
 
 import org.hamcrest.Matchers;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UserActionTester;
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.browserservices.BrowserServicesIntentDataProvider;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabState;
+import org.chromium.chrome.browser.tab.TabStateExtractor;
+import org.chromium.chrome.browser.tab.WebContentsStateBridge;
 import org.chromium.chrome.browser.webapps.TestFetchStorageCallback;
 import org.chromium.chrome.browser.webapps.WebappDataStorage;
-import org.chromium.chrome.browser.webapps.WebappInfo;
 import org.chromium.chrome.browser.webapps.WebappRegistry;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
+import org.chromium.chrome.test.batch.BlankCTATabInitialStateRule;
 import org.chromium.chrome.test.util.browser.webapps.WebappTestHelper;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationEntry;
@@ -56,10 +57,15 @@ import java.util.List;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+@Batch(Batch.PER_CLASS)
 public class BrowsingDataBridgeTest {
+    @ClassRule
+    public static ChromeTabbedActivityTestRule sActivityTestRule =
+            new ChromeTabbedActivityTestRule();
+
     @Rule
-    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
-            new ChromeActivityTestRule<>(ChromeActivity.class);
+    public BlankCTATabInitialStateRule mBlankCTATabInitialStateRule =
+            new BlankCTATabInitialStateRule(sActivityTestRule, false);
 
     private CallbackHelper mCallbackHelper;
     private BrowsingDataBridge.OnClearBrowsingDataListener mListener;
@@ -69,14 +75,8 @@ public class BrowsingDataBridgeTest {
     @Before
     public void setUp() throws Exception {
         mCallbackHelper = new CallbackHelper();
-        mListener = new BrowsingDataBridge.OnClearBrowsingDataListener() {
-            @Override
-            public void onBrowsingDataCleared() {
-                mCallbackHelper.notifyCalled();
-            }
-        };
-        mActivityTestRule.startMainActivityOnBlankPage();
-        mTestServer = mActivityTestRule.getTestServer();
+        mListener = mCallbackHelper::notifyCalled;
+        mTestServer = sActivityTestRule.getTestServer();
         mActionTester = new UserActionTester();
     }
 
@@ -90,7 +90,6 @@ public class BrowsingDataBridgeTest {
      */
     @Test
     @SmallTest
-    @RetryOnFailure
     public void testNoCalls() throws Exception {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             BrowsingDataBridge.getInstance().clearBrowsingData(
@@ -116,6 +115,21 @@ public class BrowsingDataBridgeTest {
                 Matchers.containsInAnyOrder("ClearBrowsingData_LastHour",
                         "ClearBrowsingData_MaskContainsUnprotectedWeb", "ClearBrowsingData_Cookies",
                         "ClearBrowsingData_SiteUsageData", "ClearBrowsingData_ContentLicenses"));
+    }
+
+    /**
+     * Test deleting SameSite=None cookies.
+     */
+    @Test
+    @SmallTest
+    public void testSameSiteNoneCookiesDeleted() throws Exception {
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            BrowsingDataBridge.getInstance().clearSameSiteNoneData(
+                    () -> { mCallbackHelper.notifyCalled(); }, false);
+        });
+        mCallbackHelper.waitForCallback(0);
+        assertThat(mActionTester.toString(), getActions(),
+                Matchers.contains("ClearBrowsingData_SameSiteNoneData"));
     }
 
     /**
@@ -228,23 +242,22 @@ public class BrowsingDataBridgeTest {
      */
     @Test
     @MediumTest
-    @Features.EnableFeatures(ChromeFeatureList.REMOVE_NAVIGATION_HISTORY)
     public void testFrozenNavigationDeletion() throws Exception {
         final String url1 = mTestServer.getURL("/chrome/test/data/browsing_data/a.html");
         final String url2 = mTestServer.getURL("/chrome/test/data/browsing_data/b.html");
 
         // Navigate to url1 and url2, close and recreate as frozen tab.
-        Tab tab = mActivityTestRule.loadUrlInNewTab(url1);
-        mActivityTestRule.loadUrl(url2);
+        Tab tab = sActivityTestRule.loadUrlInNewTab(url1);
+        sActivityTestRule.loadUrl(url2);
         Tab[] frozen = new Tab[1];
         WebContents[] restored = new WebContents[1];
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            TabState state = TabState.from(tab);
-            mActivityTestRule.getActivity().getCurrentTabModel().closeTab(tab);
-            frozen[0] = mActivityTestRule.getActivity().getCurrentTabCreator().createFrozenTab(
-                    state, tab.getId(), 1);
-            restored[0] =
-                    TabState.from(frozen[0]).contentsState.restoreContentsFromByteBuffer(false);
+            TabState state = TabStateExtractor.from(tab);
+            sActivityTestRule.getActivity().getCurrentTabModel().closeTab(tab);
+            frozen[0] = sActivityTestRule.getActivity().getCurrentTabCreator().createFrozenTab(
+                    state, null, tab.getId(), 1);
+            restored[0] = WebContentsStateBridge.restoreContentsFromByteBuffer(
+                    TabStateExtractor.from(frozen[0]).contentsState, false);
         });
 
         // Check content of frozen state.
@@ -265,8 +278,8 @@ public class BrowsingDataBridgeTest {
 
         // Check that frozen state was cleaned up.
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            restored[0] =
-                    TabState.from(frozen[0]).contentsState.restoreContentsFromByteBuffer(false);
+            restored[0] = WebContentsStateBridge.restoreContentsFromByteBuffer(
+                    TabStateExtractor.from(frozen[0]).contentsState, false);
         });
 
         controller = restored[0].getNavigationController();
@@ -279,15 +292,14 @@ public class BrowsingDataBridgeTest {
      * Tests navigation entries are removed by history deletions.
      */
     @Test
-    @Features.EnableFeatures(ChromeFeatureList.REMOVE_NAVIGATION_HISTORY)
     @MediumTest
     public void testNavigationDeletion() throws Exception {
         final String url1 = mTestServer.getURL("/chrome/test/data/browsing_data/a.html");
         final String url2 = mTestServer.getURL("/chrome/test/data/browsing_data/b.html");
 
         // Navigate to url1 and url2.
-        Tab tab = mActivityTestRule.loadUrlInNewTab(url1);
-        mActivityTestRule.loadUrl(url2);
+        Tab tab = sActivityTestRule.loadUrlInNewTab(url1);
+        sActivityTestRule.loadUrl(url2);
         NavigationController controller = tab.getWebContents().getNavigationController();
         assertTrue(tab.canGoBack());
         assertEquals(1, controller.getLastCommittedEntryIndex());
@@ -338,11 +350,12 @@ public class BrowsingDataBridgeTest {
     @Test
     @MediumTest
     public void testClearingHistoryClearsWebappScopesAndLaunchTimes() throws Exception {
-        WebappInfo webappInfo = WebappTestHelper.createWebappInfo("id", "url");
+        BrowserServicesIntentDataProvider intentDataProvider =
+                WebappTestHelper.createIntentDataProvider("id", "url");
         TestFetchStorageCallback callback = new TestFetchStorageCallback();
         WebappRegistry.getInstance().register("first", callback);
         callback.waitForCallback(0);
-        callback.getStorage().updateFromWebappInfo(webappInfo);
+        callback.getStorage().updateFromWebappIntentDataProvider(intentDataProvider);
 
         Assert.assertEquals(new HashSet<>(Arrays.asList("first")),
                 WebappRegistry.getRegisteredWebappIdsForTesting());
@@ -370,7 +383,7 @@ public class BrowsingDataBridgeTest {
         while (true) {
             NavigationEntry entry = controller.getEntryAtIndex(i++);
             if (entry == null) return urls;
-            urls.add(entry.getUrl());
+            urls.add(entry.getUrl().getSpec());
         }
     }
 }

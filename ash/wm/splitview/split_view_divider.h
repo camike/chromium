@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ASH_WM_SPLITSVIEW_SPLIT_VIEW_DIVIDER_H_
-#define ASH_WM_SPLITSVIEW_SPLIT_VIEW_DIVIDER_H_
+#ifndef ASH_WM_SPLITVIEW_SPLIT_VIEW_DIVIDER_H_
+#define ASH_WM_SPLITVIEW_SPLIT_VIEW_DIVIDER_H_
 
 #include <memory>
 
 #include "ash/ash_export.h"
 #include "base/macros.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_multi_source_observation.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
 #include "ui/display/display.h"
@@ -96,6 +96,9 @@ class ASH_EXPORT SplitViewDivider : public aura::WindowObserver,
  private:
   void CreateDividerWidget(SplitViewController* controller);
 
+  void StartObservingTransientChild(aura::Window* transient);
+  void StopObservingTransientChild(aura::Window* transient);
+
   SplitViewController* controller_;
 
   // The window targeter that is installed on the always on top container window
@@ -117,12 +120,12 @@ class ASH_EXPORT SplitViewDivider : public aura::WindowObserver,
   aura::Window::Windows observed_windows_;
 
   // Tracks observed transient windows.
-  ScopedObserver<aura::Window, aura::WindowObserver>
-      transient_windows_observer_{this};
+  base::ScopedMultiSourceObservation<aura::Window, aura::WindowObserver>
+      transient_windows_observations_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SplitViewDivider);
 };
 
 }  // namespace ash
 
-#endif  // ASH_WM_SPLITSVIEW_SPLIT_VIEW_DIVIDER_H_
+#endif  // ASH_WM_SPLITVIEW_SPLIT_VIEW_DIVIDER_H_

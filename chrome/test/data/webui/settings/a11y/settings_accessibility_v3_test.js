@@ -10,8 +10,6 @@ GEN_INCLUDE([
   '//chrome/test/data/webui/polymer_browser_test_base.js',
 ]);
 
-GEN('#include "services/network/public/cpp/features.h"');
-
 /**
  * Test fixture for Accessibility of Chrome Settings.
  * @constructor
@@ -57,8 +55,8 @@ SettingsAccessibilityV3Test.violationFilter = {
     // tabindex -1 anyway.
     const parentNode = nodeResult.element.parentNode;
     return parentNode && parentNode.host &&
-        (parentNode.host.tagName == 'CR-TOGGLE' ||
-         parentNode.host.tagName == 'CR-CHECKBOX');
+        (parentNode.host.tagName === 'CR-TOGGLE' ||
+         parentNode.host.tagName === 'CR-CHECKBOX');
   },
 };
 
@@ -71,16 +69,8 @@ SettingsAccessibilityV3Test.prototype = {
 
   // Include files that define the mocha tests.
   extraLibraries: [
-    '//third_party/mocha/mocha.js',
-    '//chrome/test/data/webui/mocha_adapter.js',
     '//third_party/axe-core/axe.js',
   ],
-
-  /** @override */
-  featureList: {
-    enabled: ['network::features::kOutOfBlinkCors'],
-    disabled: [],
-  },
 
   setUp: function() {
     PolymerTest.prototype.setUp.call(this);

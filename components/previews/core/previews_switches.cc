@@ -9,11 +9,9 @@
 namespace previews {
 namespace switches {
 
-bool ShouldIgnorePreviewsBlacklist() {
+bool ShouldIgnorePreviewsBlocklist() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
-             kIgnorePreviewsBlacklist) ||
-         base::CommandLine::ForCurrentProcess()->HasSwitch(
-             kForceEnablePreviews);
+      kIgnorePreviewsBlocklist);
 }
 
 // Do not require the user notification InfoBar to be shown before triggering a
@@ -21,11 +19,9 @@ bool ShouldIgnorePreviewsBlacklist() {
 const char kDoNotRequireLitePageRedirectInfoBar[] =
     "dont-require-litepage-redirect-infobar";
 
-// Ignore decisions made by PreviewsBlackList.
-const char kIgnorePreviewsBlacklist[] = "ignore-previews-blacklist";
-
-// Force enable all available previews on every page load.
-const char kForceEnablePreviews[] = "force-enable-lite-pages";
+// Ignore decisions made by PreviewsBlockList.
+// TODO(crbug.com/1092105) : Migrate this to ignore-previews-blacklist.
+const char kIgnorePreviewsBlocklist[] = "ignore-previews-blacklist";
 
 // Allows defer script preview on all https pages even if optimization hints are
 // missing for that webpage.

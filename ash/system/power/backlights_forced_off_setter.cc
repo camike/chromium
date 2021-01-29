@@ -16,11 +16,10 @@
 
 namespace ash {
 
-BacklightsForcedOffSetter::BacklightsForcedOffSetter()
-    : power_manager_observer_(this) {
+BacklightsForcedOffSetter::BacklightsForcedOffSetter() {
   InitDisableTouchscreenWhileScreenOff();
 
-  power_manager_observer_.Add(chromeos::PowerManagerClient::Get());
+  power_manager_observation_.Observe(chromeos::PowerManagerClient::Get());
   GetInitialBacklightsForcedOff();
 }
 
@@ -30,12 +29,17 @@ BacklightsForcedOffSetter::~BacklightsForcedOffSetter() {
   }
 }
 
-void BacklightsForcedOffSetter::AddObserver(Observer* observer) {
+void BacklightsForcedOffSetter::AddObserver(ScreenBacklightObserver* observer) {
   observers_.AddObserver(observer);
 }
 
-void BacklightsForcedOffSetter::RemoveObserver(Observer* observer) {
+void BacklightsForcedOffSetter::RemoveObserver(
+    ScreenBacklightObserver* observer) {
   observers_.RemoveObserver(observer);
+}
+
+ScreenState BacklightsForcedOffSetter::GetScreenState() const {
+  return screen_state_;
 }
 
 std::unique_ptr<ScopedBacklightsForcedOff>

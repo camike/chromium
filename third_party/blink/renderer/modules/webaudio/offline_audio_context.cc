@@ -108,21 +108,6 @@ OfflineAudioContext* OfflineAudioContext::Create(
   fprintf(stderr, "[%16p]: OfflineAudioContext::OfflineAudioContext()\n",
           audio_context);
 #endif
-  base::UmaHistogramSparse("WebAudio.OfflineAudioContext.ChannelCount",
-                           number_of_channels);
-  // Arbitrarly limit the maximum length to 1 million frames (about 20 sec
-  // at 48kHz).  The number of buckets is fairly arbitrary.
-  base::UmaHistogramCounts1M("WebAudio.OfflineAudioContext.Length",
-                             number_of_frames);
-  // The limits are the min and max AudioBuffer sample rates currently
-  // supported.  We use explicit values here instead of
-  // audio_utilities::minAudioBufferSampleRate() and
-  // audio_utilities::maxAudioBufferSampleRate().  The number of buckets is
-  // fairly arbitrary.
-  base::UmaHistogramCustomCounts(
-      "WebAudio.OfflineAudioContext.SampleRate384kHz", sample_rate, 3000,
-      384000, 50);
-
   return audio_context;
 }
 
@@ -157,7 +142,7 @@ OfflineAudioContext::~OfflineAudioContext() {
 #endif
 }
 
-void OfflineAudioContext::Trace(Visitor* visitor) {
+void OfflineAudioContext::Trace(Visitor* visitor) const {
   visitor->Trace(complete_resolver_);
   visitor->Trace(scheduled_suspends_);
   BaseAudioContext::Trace(visitor);

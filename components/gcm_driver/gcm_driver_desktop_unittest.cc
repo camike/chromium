@@ -7,13 +7,13 @@
 #include <stdint.h>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
+#include "base/task/current_thread.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/thread.h"
@@ -738,7 +738,7 @@ TEST_F(GCMDriverFunctionalTest, DISABLED_RegisterAfterUnfinishedUnregister) {
   // Start unregistration without waiting for it to complete.
   Unregister(kTestAppID1, GCMDriverTest::DO_NOT_WAIT);
 
-  // Register immeidately after unregistration is not completed.
+  // Register immediately after unregistration is not completed.
   sender_ids.push_back("sender2");
   Register(kTestAppID1, sender_ids, GCMDriverTest::WAIT);
 
@@ -947,10 +947,8 @@ void GCMDriverInstanceIDTest::GetToken(const std::string& app_id,
                                        WaitToFinish wait_to_finish) {
   base::RunLoop run_loop;
   set_async_operation_completed_callback(run_loop.QuitClosure());
-  std::map<std::string, std::string> options;
   driver()->GetInstanceIDHandlerInternal()->GetToken(
       app_id, authorized_entity, scope, /*time_to_live=*/base::TimeDelta(),
-      options,
       base::BindOnce(&GCMDriverTest::RegisterCompleted,
                      base::Unretained(this)));
   if (wait_to_finish == WAIT)

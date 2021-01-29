@@ -20,6 +20,11 @@ struct TestUntrustedDataSourceCSP {
   ~TestUntrustedDataSourceCSP();
 
   base::Optional<std::string> child_src = base::nullopt;
+  base::Optional<std::string> script_src = base::nullopt;
+  base::Optional<std::string> default_src = base::nullopt;
+  // Trusted Types is enabled by default for TestUntrustedDataSource.
+  // Setting this to true will disable Trusted Types.
+  bool no_trusted_types = false;
   bool no_xfo = false;
   base::Optional<std::vector<std::string>> frame_ancestors = base::nullopt;
 };
@@ -59,8 +64,6 @@ class TestWebUIControllerFactory : public WebUIControllerFactory {
                              const GURL& url) override;
   bool UseWebUIForURL(BrowserContext* browser_context,
                       const GURL& url) override;
-  bool UseWebUIBindingsForURL(BrowserContext* browser_context,
-                              const GURL& url) override;
 
  private:
   bool disable_xfo_ = false;

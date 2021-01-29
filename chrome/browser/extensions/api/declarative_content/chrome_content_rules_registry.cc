@@ -78,13 +78,13 @@ ChromeContentRulesRegistry::EvaluationScope::~EvaluationScope() {
 ChromeContentRulesRegistry::ChromeContentRulesRegistry(
     content::BrowserContext* browser_context,
     RulesCacheDelegate* cache_delegate,
-    const PredicateEvaluatorsFactory& evaluators_factory)
+    PredicateEvaluatorsFactory evaluators_factory)
     : ContentRulesRegistry(browser_context,
                            declarative_content_constants::kOnPageChanged,
                            content::BrowserThread::UI,
                            cache_delegate,
                            RulesRegistryService::kDefaultRulesRegistryID),
-      evaluators_(evaluators_factory.Run(this)),
+      evaluators_(std::move(evaluators_factory).Run(this)),
       evaluation_disposition_(EVALUATE_REQUESTS) {
   registrar_.Add(this,
                  content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
@@ -230,8 +230,8 @@ std::string ChromeContentRulesRegistry::AddRulesImpl(
     const std::vector<const api::events::Rule*>& api_rules) {
   EvaluationScope evaluation_scope(this);
   const Extension* extension = ExtensionRegistry::Get(browser_context())
-      ->GetInstalledExtension(extension_id);
-  DCHECK(extension);
+      ->enabled_extensions().GetByID(extension_id);
+  CHECK(extension);
 
   std::string error;
   RulesMap new_rules;

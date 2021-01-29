@@ -5,12 +5,12 @@
 #include <stddef.h>
 
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/common/cursors/webcursor.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/cursor/cursor.h"
-#include "ui/base/cursor/cursor_lookup.h"
-#include "ui/base/mojom/cursor_type.mojom-shared.h"
+#include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
@@ -53,7 +53,7 @@ TEST(WebCursorTest, WebCursorCursorConstructorCustom) {
   // Test if the custom cursor is correctly cached and updated
   // on aura platform.
   gfx::NativeCursor native_cursor = webcursor.GetNativeCursor();
-  EXPECT_EQ(gfx::Point(5, 10), GetCursorHotspot(native_cursor));
+  EXPECT_EQ(gfx::Point(5, 10), native_cursor.custom_hotspot());
   EXPECT_TRUE(webcursor.has_custom_cursor_for_test());
   webcursor.SetCursor(cursor);
   EXPECT_FALSE(webcursor.has_custom_cursor_for_test());
@@ -63,15 +63,23 @@ TEST(WebCursorTest, WebCursorCursorConstructorCustom) {
 #if defined(USE_OZONE)
   // Test if the rotating custom cursor works correctly.
   display::Display display;
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   display.set_panel_rotation(display::Display::ROTATE_90);
+#endif
   webcursor.SetDisplayInfo(display);
   EXPECT_FALSE(webcursor.has_custom_cursor_for_test());
   native_cursor = webcursor.GetNativeCursor();
   EXPECT_TRUE(webcursor.has_custom_cursor_for_test());
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Hotspot should be scaled & rotated.  We're using the icon created for 2.0,
   // on the display with dsf=1.0, so the host spot should be
   // ((32 - 20) / 2, 10 / 2) = (6, 5).
-  EXPECT_EQ(gfx::Point(6, 5), GetCursorHotspot(native_cursor));
+  EXPECT_EQ(gfx::Point(6, 5), native_cursor.custom_hotspot());
+#else
+  // For non-CrOS platforms, the cursor mustn't be rotated as logical and
+  // physical location is the same.
+  EXPECT_EQ(gfx::Point(5, 10), native_cursor.custom_hotspot());
+#endif
 #endif
 #endif
 }

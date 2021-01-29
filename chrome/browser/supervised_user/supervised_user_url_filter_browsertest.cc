@@ -5,18 +5,18 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/login/test/logged_in_user_mixin.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_key.h"
-#include "chrome/browser/supervised_user/logged_in_user_mixin.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "chrome/browser/supervised_user/supervised_user_interstitial.h"
 #include "chrome/browser/supervised_user/supervised_user_navigation_observer.h"
@@ -32,7 +32,6 @@
 #include "components/infobars/core/infobar.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
@@ -40,38 +39,18 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "services/network/public/cpp/network_switches.h"
 
-using content::InterstitialPage;
 using content::NavigationController;
 using content::NavigationEntry;
 using content::WebContents;
 
 namespace {
-
-class InterstitialPageObserver : public content::WebContentsObserver {
- public:
-  InterstitialPageObserver(WebContents* web_contents,
-                           const base::Closure& callback)
-      : content::WebContentsObserver(web_contents), callback_(callback) {}
-  ~InterstitialPageObserver() override {}
-
-  void DidFinishNavigation(
-      content::NavigationHandle* navigation_handle) override {
-    // With committed interstitials, DidAttachInterstitialPage is not called, so
-    // call the callback from here if there was an error.
-    if (navigation_handle->IsErrorPage()) {
-      callback_.Run();
-    }
-  }
-
- private:
-  base::Closure callback_;
-};
 
 // Tests filtering for supervised users.
 class SupervisedUserURLFilterTest : public MixinBasedInProcessBrowserTest {
@@ -198,11 +177,8 @@ class TabClosingObserver : public TabStripModelObserver {
       return;
 
     auto* remove = change.GetRemove();
-    if (!remove->will_be_deleted)
-      return;
-
     for (const auto& contents : remove->contents) {
-      if (contents_ == contents.contents) {
+      if (contents_ == contents.contents && contents.will_be_deleted) {
         if (run_loop_.running())
           run_loop_.Quit();
         contents_ = nullptr;
@@ -437,7 +413,7 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest, GoBackOnDontProceed) {
   WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   // Ensure navigation completes.
-  WaitForLoadStop(web_contents);
+  EXPECT_TRUE(WaitForLoadStop(web_contents));
   // We start out at the initial navigation.
   ASSERT_EQ(0, web_contents->GetController().GetCurrentEntryIndex());
 
@@ -478,7 +454,7 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserURLFilterTest,
   WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   // Ensure navigation completes.
-  WaitForLoadStop(web_contents);
+  EXPECT_TRUE(WaitForLoadStop(web_contents));
   ASSERT_EQ(0, web_contents->GetController().GetCurrentEntryIndex());
 
   GURL test_url("http://www.example.com/simple.html");

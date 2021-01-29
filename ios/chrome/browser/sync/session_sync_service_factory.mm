@@ -9,10 +9,14 @@
 #include "base/no_destructor.h"
 #include "base/task/post_task.h"
 #include "base/time/time.h"
+#include "components/dom_distiller/core/url_constants.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/model/model_type_store_service.h"
+#include "components/sync_device_info/device_info_sync_service.h"
+#include "components/sync_device_info/device_info_tracker.h"
 #include "components/sync_sessions/local_session_event_router.h"
 #include "components/sync_sessions/session_sync_prefs.h"
 #include "components/sync_sessions/session_sync_service_impl.h"
@@ -22,6 +26,7 @@
 #include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/browser/favicon/favicon_service_factory.h"
 #include "ios/chrome/browser/history/history_service_factory.h"
+#include "ios/chrome/browser/sync/device_info_sync_service_factory.h"
 #include "ios/chrome/browser/sync/glue/sync_start_util.h"
 #include "ios/chrome/browser/sync/model_type_store_service_factory.h"
 #import "ios/chrome/browser/sync/sessions/ios_chrome_local_session_event_router.h"
@@ -46,7 +51,8 @@ bool ShouldSyncURLImpl(const GURL& url) {
     return true;
   }
   return url.is_valid() && !url.SchemeIs(kChromeUIScheme) &&
-         !url.SchemeIsFile();
+         !url.SchemeIsFile() &&
+         !url.SchemeIs(dom_distiller::kDomDistillerScheme);
 }
 
 // iOS implementation of SyncSessionsClient. Needs to be in a separate class
@@ -69,12 +75,6 @@ class SyncSessionsClientImpl : public sync_sessions::SyncSessionsClient {
   ~SyncSessionsClientImpl() override {}
 
   // SyncSessionsClient implementation.
-  history::HistoryService* GetHistoryService() override {
-    DCHECK_CURRENTLY_ON(web::WebThread::UI);
-    return ios::HistoryServiceFactory::GetForBrowserState(
-        browser_state_, ServiceAccessType::EXPLICIT_ACCESS);
-  }
-
   sync_sessions::SessionSyncPrefs* GetSessionSyncPrefs() override {
     return &session_sync_prefs_;
   }
@@ -84,8 +84,24 @@ class SyncSessionsClientImpl : public sync_sessions::SyncSessionsClient {
         ->GetStoreFactory();
   }
 
+  void ClearAllOnDemandFavicons() override {
+    history::HistoryService* history_service =
+        ios::HistoryServiceFactory::GetForBrowserState(
+            browser_state_, ServiceAccessType::EXPLICIT_ACCESS);
+    if (!history_service) {
+      return;
+    }
+    history_service->ClearAllOnDemandFavicons();
+  }
+
   bool ShouldSyncURL(const GURL& url) const override {
     return ShouldSyncURLImpl(url);
+  }
+
+  bool IsRecentLocalCacheGuid(const std::string& cache_guid) const override {
+    return DeviceInfoSyncServiceFactory::GetForBrowserState(browser_state_)
+        ->GetDeviceInfoTracker()
+        ->IsRecentLocalCacheGuid(cache_guid);
   }
 
   sync_sessions::SyncedWindowDelegatesGetter* GetSyncedWindowDelegatesGetter()

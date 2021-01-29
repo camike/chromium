@@ -53,6 +53,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/api/power/power_api.h"
 #include "extensions/common/api/power.h"
@@ -146,7 +147,7 @@ class PowerPolicyBrowserTestBase : public DevicePolicyCrosBrowserTest {
  private:
   // Runs |closure| and waits for |profile|'s user policy to be updated as a
   // result.
-  void RunClosureAndWaitForUserPolicyUpdate(const base::Closure& closure,
+  void RunClosureAndWaitForUserPolicyUpdate(base::OnceClosure closure,
                                             Profile* profile);
 
   // Reloads user policy for |profile| from session manager client.
@@ -206,9 +207,7 @@ void PowerPolicyBrowserTestBase::InstallUserKey() {
   std::string user_key_bits = user_policy_.GetPublicSigningKeyAsString();
   ASSERT_FALSE(user_key_bits.empty());
   ASSERT_TRUE(base::CreateDirectory(user_key_file.DirName()));
-  ASSERT_EQ(base::checked_cast<int>(user_key_bits.length()),
-            base::WriteFile(user_key_file, user_key_bits.data(),
-                            user_key_bits.length()));
+  ASSERT_TRUE(base::WriteFile(user_key_file, user_key_bits));
 }
 
 void PowerPolicyBrowserTestBase::StoreAndReloadUserPolicy() {
@@ -222,8 +221,8 @@ void PowerPolicyBrowserTestBase::StoreAndReloadUserPolicy() {
   // Reload user policy from session manager client and wait for the update to
   // take effect.
   RunClosureAndWaitForUserPolicyUpdate(
-      base::Bind(&PowerPolicyBrowserTestBase::ReloadUserPolicy,
-                 base::Unretained(this), browser()->profile()),
+      base::BindOnce(&PowerPolicyBrowserTestBase::ReloadUserPolicy,
+                     base::Unretained(this), browser()->profile()),
       browser()->profile());
 }
 
@@ -236,8 +235,8 @@ void PowerPolicyBrowserTestBase::
   // policy from session manager client and wait for a change in the login
   // profile's policy to be observed.
   RunClosureAndWaitForUserPolicyUpdate(
-      base::Bind(&PowerPolicyBrowserTestBase::RefreshDevicePolicy,
-                 base::Unretained(this)),
+      base::BindOnce(&PowerPolicyBrowserTestBase::RefreshDevicePolicy,
+                     base::Unretained(this)),
       profile);
 }
 
@@ -247,7 +246,7 @@ std::string PowerPolicyBrowserTestBase::GetDebugString(
 }
 
 void PowerPolicyBrowserTestBase::RunClosureAndWaitForUserPolicyUpdate(
-    const base::Closure& closure,
+    base::OnceClosure closure,
     Profile* profile) {
   base::RunLoop run_loop;
   MockPolicyServiceObserver observer;
@@ -258,7 +257,7 @@ void PowerPolicyBrowserTestBase::RunClosureAndWaitForUserPolicyUpdate(
       profile->GetProfilePolicyConnector()->policy_service();
   ASSERT_TRUE(policy_service);
   policy_service->AddObserver(POLICY_DOMAIN_CHROME, &observer);
-  closure.Run();
+  std::move(closure).Run();
   run_loop.Run();
   policy_service->RemoveObserver(POLICY_DOMAIN_CHROME, &observer);
 }

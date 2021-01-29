@@ -16,7 +16,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
-#include "extensions/browser/api/declarative_net_request/ruleset_checksum.h"
+#include "extensions/browser/api/declarative_net_request/ruleset_install_pref.h"
 #include "extensions/browser/preload_check.h"
 #include "extensions/common/manifest.h"
 
@@ -77,6 +77,14 @@ class UnpackedInstaller
   void set_completion_callback(CompletionCallback callback) {
     callback_ = std::move(callback);
   }
+
+  void set_allow_file_access(bool allow) { allow_file_access_ = allow; }
+
+  void set_allow_incognito_access(bool allow) {
+    allow_incognito_access_ = allow;
+  }
+
+  void set_install_param(const std::string& param) { install_param_ = param; }
 
  private:
   friend class base::RefCountedThreadSafe<UnpackedInstaller>;
@@ -160,11 +168,19 @@ class UnpackedInstaller
   // Runs the above checks.
   std::unique_ptr<PreloadCheckGroup> check_group_;
 
-  // The checksums for the indexed rulesets corresponding to the Declarative Net
-  // Request API.
-  declarative_net_request::RulesetChecksums ruleset_checksums_;
+  // Install prefs needed for the Declarative Net Request API.
+  declarative_net_request::RulesetInstallPrefs ruleset_install_prefs_;
 
   CompletionCallback callback_;
+
+  // Override default file access.
+  base::Optional<bool> allow_file_access_;
+
+  // Override default incognito access.
+  base::Optional<bool> allow_incognito_access_;
+
+  // Specify an install param.
+  base::Optional<std::string> install_param_;
 
   DISALLOW_COPY_AND_ASSIGN(UnpackedInstaller);
 };

@@ -65,17 +65,18 @@ void Queue::MaybeRun() {
 
   CHECK_GT(max_in_parallel_, executed_.size());
   Task task = std::move(pending_.front());
+  const size_t token = task.token;
   pending_.pop_front();
 
   auto callback = std::move(task.callback);
-  executed_[task.token] = std::move(task);
+  executed_[token] = std::move(task);
   AbortCallback abort_callback = std::move(callback).Run();
 
   // It may happen that the task is completed and removed synchronously. Hence,
   // we need to check if the task is still in the executed collection.
-  const auto executed_task_it = executed_.find(task.token);
+  const auto executed_task_it = executed_.find(token);
   if (executed_task_it != executed_.end())
-    executed_task_it->second.abort_callback = abort_callback;
+    executed_task_it->second.abort_callback = std::move(abort_callback);
 }
 
 void Queue::Abort(size_t token) {
@@ -83,10 +84,9 @@ void Queue::Abort(size_t token) {
   const auto it = executed_.find(token);
   if (it != executed_.end()) {
     Task& task = it->second;
-    AbortCallback abort_callback = task.abort_callback;
-    task.abort_callback = AbortCallback();
+    AbortCallback abort_callback = std::move(task.abort_callback);
     DCHECK(!abort_callback.is_null());
-    abort_callback.Run();
+    std::move(abort_callback).Run();
     return;
   }
 

@@ -290,16 +290,16 @@ TEST_F(ThemeServiceTest, IncognitoTest) {
 
   // Should get the same ThemeService for incognito and original profiles.
   ThemeService* otr_theme_service =
-      ThemeServiceFactory::GetForProfile(profile_->GetOffTheRecordProfile());
+      ThemeServiceFactory::GetForProfile(profile_->GetPrimaryOTRProfile());
   EXPECT_EQ(theme_service_, otr_theme_service);
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
   // Should get a different ThemeProvider for incognito and original profiles.
   const ui::ThemeProvider& provider =
       ThemeService::GetThemeProviderForProfile(profile());
   const ui::ThemeProvider& otr_provider =
       ThemeService::GetThemeProviderForProfile(
-          profile_->GetOffTheRecordProfile());
+          profile_->GetPrimaryOTRProfile());
   EXPECT_NE(&provider, &otr_provider);
   // And (some) colors should be different.
   EXPECT_NE(provider.GetColor(ThemeProperties::COLOR_TOOLBAR),
@@ -459,13 +459,7 @@ TEST_F(ThemeServiceTest, UseDefaultTheme_DisableExtensionTest) {
   EXPECT_FALSE(service_->IsExtensionEnabled(scoper.extension_id()));
 }
 
-// TODO(https://crbug.com/1074297) flaky on TSan bots
-#if defined(THREAD_SANITIZER)
-#define MAYBE_OmniboxContrast DISABLED_OmniboxContrast
-#else
-#define MAYBE_OmniboxContrast OmniboxContrast
-#endif
-TEST_F(ThemeServiceTest, MAYBE_OmniboxContrast) {
+TEST_F(ThemeServiceTest, OmniboxContrast) {
   using TP = ThemeProperties;
   for (bool dark : {false, true}) {
     native_theme_.SetDarkMode(dark);
@@ -594,7 +588,7 @@ TEST_F(ThemeServiceTest, TranslucentOmniboxBackgroundAndText) {
 TEST_F(ThemeServiceTest, NativeIncreasedContrastChanged) {
   theme_service_->UseDefaultTheme();
 
-  native_theme_.SetUsesHighContrastColors(true);
+  native_theme_.SetUserHasContrastPreference(true);
   theme_service_->OnNativeThemeUpdated(&native_theme_);
   EXPECT_TRUE(theme_service_->UsingDefaultTheme());
   bool using_increased_contrast =
@@ -606,7 +600,7 @@ TEST_F(ThemeServiceTest, NativeIncreasedContrastChanged) {
           .ShouldUseIncreasedContrastThemeSupplier(&native_theme_);
   EXPECT_EQ(using_increased_contrast, expecting_increased_contrast);
 
-  native_theme_.SetUsesHighContrastColors(false);
+  native_theme_.SetUserHasContrastPreference(false);
   theme_service_->OnNativeThemeUpdated(&native_theme_);
   EXPECT_TRUE(theme_service_->UsingDefaultTheme());
   EXPECT_EQ(theme_service_->GetThemeSupplier(), nullptr);

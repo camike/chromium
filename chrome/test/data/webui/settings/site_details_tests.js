@@ -8,10 +8,11 @@ import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {listenOnce} from 'chrome://resources/js/util.m.js';
 import {flush,Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {ChooserType,ContentSetting,ContentSettingsTypes,SiteSettingSource,SiteSettingsPrefsBrowserProxyImpl,WebsiteUsageBrowserProxyImpl} from 'chrome://settings/lazy_load.js';
-import {Route,Router,routes} from 'chrome://settings/settings.js';
+import {MetricsBrowserProxyImpl, PrivacyElementInteractions, Route,Router,routes} from 'chrome://settings/settings.js';
 import {TestSiteSettingsPrefsBrowserProxy} from 'chrome://test/settings/test_site_settings_prefs_browser_proxy.js';
 import {createContentSettingTypeToValuePair,createRawChooserException,createRawSiteException,createSiteSettingsPrefs} from 'chrome://test/settings/test_util.js';
 import {TestBrowserProxy} from 'chrome://test/test_browser_proxy.m.js';
+import {TestMetricsBrowserProxy} from './test_metrics_browser_proxy.js';
 
 // clang-format on
 
@@ -51,6 +52,9 @@ suite('SiteDetails', function() {
    */
   let browserProxy;
 
+  /** @type {!TestMetricsBrowserProxy} */
+  let testMetricsBrowserProxy;
+
   /**
    * The mock website usage proxy object to use during test.
    * @type {TestWebsiteUsageBrowserProxy}
@@ -77,11 +81,6 @@ suite('SiteDetails', function() {
               ContentSettingsTypes.SOUND,
               [createRawSiteException('https://foo.com:443')]),
           createContentSettingTypeToValuePair(
-              ContentSettingsTypes.PLUGINS,
-              [createRawSiteException('https://foo.com:443', {
-                source: SiteSettingSource.EXTENSION,
-              })]),
-          createContentSettingTypeToValuePair(
               ContentSettingsTypes.POPUPS,
               [createRawSiteException('https://foo.com:443', {
                 setting: ContentSetting.BLOCK,
@@ -101,9 +100,6 @@ suite('SiteDetails', function() {
               [createRawSiteException('https://foo.com:443')]),
           createContentSettingTypeToValuePair(
               ContentSettingsTypes.CAMERA,
-              [createRawSiteException('https://foo.com:443')]),
-          createContentSettingTypeToValuePair(
-              ContentSettingsTypes.UNSANDBOXED_PLUGINS,
               [createRawSiteException('https://foo.com:443')]),
           createContentSettingTypeToValuePair(
               ContentSettingsTypes.AUTOMATIC_DOWNLOADS,
@@ -136,7 +132,7 @@ suite('SiteDetails', function() {
               ContentSettingsTypes.BLUETOOTH_SCANNING,
               [createRawSiteException('https://foo.com:443')]),
           createContentSettingTypeToValuePair(
-              ContentSettingsTypes.NATIVE_FILE_SYSTEM_WRITE,
+              ContentSettingsTypes.FILE_SYSTEM_WRITE,
               [createRawSiteException('https://foo.com:443', {
                 setting: ContentSetting.BLOCK,
               })]),
@@ -155,7 +151,15 @@ suite('SiteDetails', function() {
           createContentSettingTypeToValuePair(
               ContentSettingsTypes.VR,
               [createRawSiteException('https://foo.com:443')]),
-
+          createContentSettingTypeToValuePair(
+              ContentSettingsTypes.WINDOW_PLACEMENT,
+              [createRawSiteException('https://foo.com:443')]),
+          createContentSettingTypeToValuePair(
+              ContentSettingsTypes.FONT_ACCESS,
+              [createRawSiteException('https://foo.com:443')]),
+          createContentSettingTypeToValuePair(
+              ContentSettingsTypes.IDLE_DETECTION,
+              [createRawSiteException('https://foo.com:443')]),
         ],
         [
           createContentSettingTypeToValuePair(
@@ -172,6 +176,8 @@ suite('SiteDetails', function() {
 
     browserProxy = new TestSiteSettingsPrefsBrowserProxy();
     SiteSettingsPrefsBrowserProxyImpl.instance_ = browserProxy;
+    testMetricsBrowserProxy = new TestMetricsBrowserProxy();
+    MetricsBrowserProxyImpl.instance_ = testMetricsBrowserProxy;
     websiteUsageProxy = new TestWebsiteUsageBrowserProxy();
     WebsiteUsageBrowserProxyImpl.instance_ = websiteUsageProxy;
 
@@ -205,39 +211,29 @@ suite('SiteDetails', function() {
     // flag string.
     const optionalSiteDetailsContentSettingsTypes =
         /** @type {!ContentSettingsType : string} */ ({});
-    optionalSiteDetailsContentSettingsTypes[ContentSettingsTypes.ADS] =
-        'enableSafeBrowsingSubresourceFilter';
-
-    optionalSiteDetailsContentSettingsTypes[ContentSettingsTypes
-                                                .PAYMENT_HANDLER] =
-        'enablePaymentHandlerContentSetting';
-
-    optionalSiteDetailsContentSettingsTypes[ContentSettingsTypes
-                                                .NATIVE_FILE_SYSTEM_WRITE] =
-        'enableNativeFileSystemWriteContentSetting';
-    optionalSiteDetailsContentSettingsTypes[ContentSettingsTypes.MIXEDSCRIPT] =
-        'enableInsecureContentContentSetting';
     optionalSiteDetailsContentSettingsTypes[ContentSettingsTypes
                                                 .BLUETOOTH_SCANNING] =
         'enableExperimentalWebPlatformFeatures';
-    optionalSiteDetailsContentSettingsTypes[ContentSettingsTypes.HID_DEVICES] =
+    optionalSiteDetailsContentSettingsTypes[ContentSettingsTypes
+                                                .WINDOW_PLACEMENT] =
         'enableExperimentalWebPlatformFeatures';
-    optionalSiteDetailsContentSettingsTypes[ContentSettingsTypes.AR] =
-        'enableWebXrContentSetting';
-    optionalSiteDetailsContentSettingsTypes[ContentSettingsTypes.VR] =
-        'enableWebXrContentSetting';
+    optionalSiteDetailsContentSettingsTypes[ContentSettingsTypes
+                                                .PAYMENT_HANDLER] =
+        'enablePaymentHandlerContentSetting';
+    optionalSiteDetailsContentSettingsTypes[ContentSettingsTypes.ADS] =
+        'enableSafeBrowsingSubresourceFilter';
     optionalSiteDetailsContentSettingsTypes[ContentSettingsTypes
                                                 .BLUETOOTH_DEVICES] =
         'enableWebBluetoothNewPermissionsBackend';
+    optionalSiteDetailsContentSettingsTypes[ContentSettingsTypes.FONT_ACCESS] =
+        'enableFontAccessContentSetting';
 
     const controlledSettingsCount = /** @type{string : int } */ ({});
 
-    controlledSettingsCount['enableSafeBrowsingSubresourceFilter'] = 1;
-    controlledSettingsCount['enablePaymentHandlerContentSetting'] = 1;
-    controlledSettingsCount['enableNativeFileSystemWriteContentSetting'] = 1;
-    controlledSettingsCount['enableInsecureContentContentSetting'] = 1;
-    controlledSettingsCount['enableWebXrContentSetting'] = 2;
     controlledSettingsCount['enableExperimentalWebPlatformFeatures'] = 2;
+    controlledSettingsCount['enableFontAccessContentSetting'] = 1;
+    controlledSettingsCount['enablePaymentHandlerContentSetting'] = 1;
+    controlledSettingsCount['enableSafeBrowsingSubresourceFilter'] = 1;
     controlledSettingsCount['enableWebBluetoothNewPermissionsBackend'] = 1;
 
     browserProxy.setPrefs(prefs);
@@ -289,13 +285,13 @@ suite('SiteDetails', function() {
     assertFalse(testElement.$$('#noStorage').hidden);
     assertTrue(testElement.$$('#storage').hidden);
     assertTrue(
-        testElement.$$('#usage').innerText.indexOf('No usage data') != -1);
+        testElement.$$('#usage').innerText.indexOf('No usage data') !== -1);
 
     // If there is, check the correct amount of usage is specified.
     testElement.storedData_ = '1 KB';
     assertTrue(testElement.$$('#noStorage').hidden);
     assertFalse(testElement.$$('#storage').hidden);
-    assertTrue(testElement.$$('#usage').innerText.indexOf('1 KB') != -1);
+    assertTrue(testElement.$$('#usage').innerText.indexOf('1 KB') !== -1);
   });
 
   test('storage gets trashed properly', function() {
@@ -321,7 +317,7 @@ suite('SiteDetails', function() {
           assertTrue(testElement.$$('#noStorage').hidden);
           assertFalse(testElement.$$('#storage').hidden);
 
-          testElement.$$('#confirmClearStorage .action-button').click();
+          testElement.$$('#confirmClearStorageNew .action-button').click();
           return websiteUsageProxy.whenCalled('clearUsage');
         })
         .then(originCleared => {
@@ -352,22 +348,31 @@ suite('SiteDetails', function() {
           assertTrue(testElement.$$('#noStorage').hidden);
           assertFalse(testElement.$$('#storage').hidden);
 
-          testElement.$$('#confirmClearStorage .action-button').click();
+          testElement.$$('#confirmClearStorageNew .action-button').click();
           return websiteUsageProxy.whenCalled('clearUsage');
         })
         .then(originCleared => {
           assertEquals('https://foo.com/', originCleared);
+          return testMetricsBrowserProxy.whenCalled(
+              'recordSettingsPageHistogram');
+        })
+        .then(metric => {
+          assertEquals(
+              PrivacyElementInteractions.SITE_DETAILS_CLEAR_DATA, metric);
         });
   });
 
   test('correct pref settings are shown', function() {
     browserProxy.setPrefs(prefs);
     // Make sure all the possible content settings are shown for this test.
-    loadTimeData.overrideValues({enableSafeBrowsingSubresourceFilter: true});
-    loadTimeData.overrideValues({enablePaymentHandlerContentSetting: true});
-    loadTimeData.overrideValues(
-        {enableNativeFileSystemWriteContentSetting: true});
-    loadTimeData.overrideValues({enableWebXrContentSetting: true});
+    loadTimeData.overrideValues({
+      enableExperimentalWebPlatformFeatures: true,
+      enableFileSystemWriteContentSetting: true,
+      enableFontAccessContentSetting: true,
+      enablePaymentHandlerContentSetting: true,
+      enableSafeBrowsingSubresourceFilter: true,
+      enableWebBluetoothNewPermissionsBackend: true,
+    });
     testElement = createSiteDetails('https://foo.com:443');
 
     return browserProxy.whenCalled('isOriginValid')
@@ -378,7 +383,7 @@ suite('SiteDetails', function() {
           testElement.root.querySelectorAll('site-details-permission')
               .forEach((siteDetailsPermission) => {
                 if (!isChromeOS &&
-                    siteDetailsPermission.category ==
+                    siteDetailsPermission.category ===
                         ContentSettingsTypes.PROTECTED_CONTENT) {
                   return;
                 }
@@ -390,18 +395,16 @@ suite('SiteDetails', function() {
 
                 // For all the categories with non-user-set 'Allow' preferences,
                 // update expected values.
-                if (siteDetailsPermission.category ==
+                if (siteDetailsPermission.category ===
                         ContentSettingsTypes.NOTIFICATIONS ||
-                    siteDetailsPermission.category ==
-                        ContentSettingsTypes.PLUGINS ||
-                    siteDetailsPermission.category ==
+                    siteDetailsPermission.category ===
                         ContentSettingsTypes.JAVASCRIPT ||
-                    siteDetailsPermission.category ==
+                    siteDetailsPermission.category ===
                         ContentSettingsTypes.IMAGES ||
-                    siteDetailsPermission.category ==
+                    siteDetailsPermission.category ===
                         ContentSettingsTypes.POPUPS ||
-                    siteDetailsPermission.category ==
-                        ContentSettingsTypes.NATIVE_FILE_SYSTEM_WRITE) {
+                    siteDetailsPermission.category ===
+                        ContentSettingsTypes.FILE_SYSTEM_WRITE) {
                   expectedSetting =
                       prefs.exceptions[siteDetailsPermission.category][0]
                           .setting;
@@ -409,7 +412,7 @@ suite('SiteDetails', function() {
                       prefs.exceptions[siteDetailsPermission.category][0]
                           .source;
                   expectedMenuValue =
-                      (expectedSource == SiteSettingSource.DEFAULT) ?
+                      (expectedSource === SiteSettingSource.DEFAULT) ?
                       ContentSetting.DEFAULT :
                       expectedSetting;
                 }
@@ -455,13 +458,14 @@ suite('SiteDetails', function() {
     // Check both cancelling and accepting the dialog closes it.
     ['cancel-button', 'action-button'].forEach(buttonType => {
       testElement.$$('#usage cr-button').click();
-      assertTrue(testElement.$.confirmClearStorage.open);
+      assertTrue(testElement.$.confirmClearStorageNew.open);
       const actionButtonList =
-          testElement.$.confirmClearStorage.getElementsByClassName(buttonType);
+          testElement.$.confirmClearStorageNew.getElementsByClassName(
+              buttonType);
       assertEquals(1, actionButtonList.length);
       testElement.storedData_ = '';
       actionButtonList[0].click();
-      assertFalse(testElement.$.confirmClearStorage.open);
+      assertFalse(testElement.$.confirmClearStorageNew.open);
     });
   });
 
@@ -469,8 +473,9 @@ suite('SiteDetails', function() {
     browserProxy.setPrefs(prefs);
     testElement = createSiteDetails('https://foo.com:443');
 
-    const siteDetailsPermission =
-        testElement.root.querySelector('#notifications');
+    const elems = testElement.root.querySelectorAll('site-details-permission');
+    const notificationPermission = Array.from(elems).find(
+        elem => elem.category === ContentSettingsTypes.NOTIFICATIONS);
 
     // Wait for all the permissions to be populated initially.
     return browserProxy.whenCalled('isOriginValid')
@@ -479,11 +484,11 @@ suite('SiteDetails', function() {
         })
         .then(() => {
           // Make sure initial state is as expected.
-          assertEquals(ContentSetting.ASK, siteDetailsPermission.site.setting);
+          assertEquals(ContentSetting.ASK, notificationPermission.site.setting);
           assertEquals(
-              SiteSettingSource.POLICY, siteDetailsPermission.site.source);
+              SiteSettingSource.POLICY, notificationPermission.site.source);
           assertEquals(
-              ContentSetting.ASK, siteDetailsPermission.$.permission.value);
+              ContentSetting.ASK, notificationPermission.$.permission.value);
 
           // Set new prefs and make sure only that permission is updated.
           const newException = {
@@ -502,13 +507,14 @@ suite('SiteDetails', function() {
           // getOriginPermissions was to check notifications.
           assertTrue(args[1].includes(ContentSettingsTypes.NOTIFICATIONS));
 
-          // Check |siteDetailsPermission| now shows the new permission value.
+          // Check |notificationPermission| now shows the new permission value.
           assertEquals(
-              ContentSetting.BLOCK, siteDetailsPermission.site.setting);
+              ContentSetting.BLOCK, notificationPermission.site.setting);
           assertEquals(
-              SiteSettingSource.DEFAULT, siteDetailsPermission.site.source);
+              SiteSettingSource.DEFAULT, notificationPermission.site.source);
           assertEquals(
-              ContentSetting.DEFAULT, siteDetailsPermission.$.permission.value);
+              ContentSetting.DEFAULT,
+              notificationPermission.$.permission.value);
         });
   });
 

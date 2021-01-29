@@ -9,6 +9,7 @@
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/network/network_context.h"
+#include "services/network/public/mojom/fetch_api.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 
 class PrefChangeRegistrar;
@@ -40,8 +41,12 @@ class SafeBrowsingServiceImpl : public SafeBrowsingService {
                   const base::FilePath& user_data_path) override;
   void ShutDown() override;
   std::unique_ptr<safe_browsing::SafeBrowsingUrlCheckerImpl> CreateUrlChecker(
-      safe_browsing::ResourceType resource_type,
+      network::mojom::RequestDestination request_destination,
       web::WebState* web_state) override;
+  bool CanCheckUrl(const GURL& url) const override;
+  scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
+  void ClearCookies(const net::CookieDeletionInfo::TimeRange& creation_range,
+                    base::OnceClosure callback) override;
 
  private:
   // A helper class for enabling/disabling Safe Browsing and maintaining state
@@ -61,7 +66,8 @@ class SafeBrowsingServiceImpl : public SafeBrowsingService {
     void Initialize(
         scoped_refptr<SafeBrowsingServiceImpl> safe_browsing_service,
         mojo::PendingReceiver<network::mojom::NetworkContext>
-            network_context_receiver);
+            network_context_receiver,
+        const base::FilePath& safe_browsing_data_path);
 
     // Disables Safe Browsing, and destroys the network context and URL loader
     // factory used by the SafeBrowsingDatabaseManager.
@@ -69,6 +75,9 @@ class SafeBrowsingServiceImpl : public SafeBrowsingService {
 
     // Enables or disables Safe Browsing database updates and lookups.
     void SetSafeBrowsingEnabled(bool enabled);
+
+    // Clears all cookies. Calls the given |callback| when deletion is complete.
+    void ClearAllCookies(base::OnceClosure callback);
 
    private:
     friend base::RefCountedThreadSafe<IOThreadEnabler>;
@@ -78,8 +87,9 @@ class SafeBrowsingServiceImpl : public SafeBrowsingService {
     // queries.
     void StartSafeBrowsingDBManager();
 
-    // Constructs a URLRequestContext.
-    void SetUpURLRequestContext();
+    // Constructs a URLRequestContext, using the given path as the location for
+    // the cookie store.
+    void SetUpURLRequestContext(const base::FilePath& safe_browsing_data_path);
 
     // Constructs a SharedURLLoaderFactory.
     void SetUpURLLoaderFactory(
@@ -119,8 +129,16 @@ class SafeBrowsingServiceImpl : public SafeBrowsingService {
   // Enables or disables Safe Browsing, depending on the current state of
   // preferences.
   void UpdateSafeBrowsingEnabledState();
+
   // This is the UI thread remote for IOThreadState's network context.
   mojo::Remote<network::mojom::NetworkContext> network_context_client_;
+
+  // The URLLoaderFactory used for Safe Browsing network requests.
+  mojo::Remote<network::mojom::URLLoaderFactory> url_loader_factory_;
+
+  // A SharedURLLoaderFactory that wraps |url_loader_factory_|.
+  scoped_refptr<network::WeakWrapperSharedURLLoaderFactory>
+      shared_url_loader_factory_;
 
   // Constructed on the UI thread, but otherwise its methods are only called on
   // the IO thread.

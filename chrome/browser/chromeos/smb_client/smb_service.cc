@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/metrics/histogram_macros.h"
@@ -41,6 +41,7 @@
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
+#include "crypto/random.h"
 #include "net/base/network_interfaces.h"
 #include "url/url_util.h"
 
@@ -60,6 +61,12 @@ const int32_t kInvalidMountId = -3;
 // Maximum number of smbfs shares to be mounted at the same time, only enforced
 // on user-initiated mount requests.
 const size_t kMaxSmbFsShares = 16;
+// Length of salt used to obfuscate stored password in smbfs.
+const size_t kSaltLength = 16;
+static_assert(kSaltLength >=
+                  smbfs::mojom::CredentialStorageOptions::kMinSaltLength,
+              "Minimum salt length is "
+              "smbfs::mojom::CredentialStorageOptions::kMinSaltLength");
 
 net::NetworkInterfaceList GetInterfaces() {
   net::NetworkInterfaceList list;
@@ -203,15 +210,35 @@ void SmbService::UnmountSmbFs(const base::FilePath& mount_path) {
   for (auto it = smbfs_shares_.begin(); it != smbfs_shares_.end(); ++it) {
     SmbFsShare* share = it->second.get();
     if (share->mount_path() == mount_path) {
-      // UnmountSmbFs() is called by an explicit unmount by the user. In this
-      // case, forget the share.
-      registry_.Delete(share->share_url());
-      smbfs_shares_.erase(it);
+      if (share->options().save_restore_password) {
+        share->RemoveSavedCredentials(
+            base::BindOnce(&SmbService::OnSmbfsRemoveSavedCredentialsDone,
+                           base::Unretained(this), it->first));
+      } else {
+        // If the password wasn't saved, there's nothing for smbfs to do.
+        OnSmbfsRemoveSavedCredentialsDone(it->first, true /* success */);
+      }
       return;
     }
   }
 
   LOG(WARNING) << "Smbfs mount path not found: " << mount_path;
+}
+
+void SmbService::OnSmbfsRemoveSavedCredentialsDone(const std::string& mount_id,
+                                                   bool success) {
+  DCHECK(!mount_id.empty());
+
+  auto it = smbfs_shares_.find(mount_id);
+  if (it == smbfs_shares_.end()) {
+    LOG(WARNING) << "Smbfs mount id " << mount_id << " already deleted";
+    return;
+  }
+
+  // UnmountSmbFs() is called by an explicit unmount by the user. In this
+  // case, forget the share.
+  registry_.Delete(it->second->share_url());
+  smbfs_shares_.erase(it);
 }
 
 SmbFsShare* SmbService::GetSmbFsShareForPath(const base::FilePath& path) {
@@ -357,8 +384,16 @@ void SmbService::Mount(const file_system_provider::MountOptions& options,
     provider_options.file_system_id =
         CreateFileSystemIdForUser(share_path, full_username);
   }
+  std::vector<uint8_t> salt;
+  if (save_credentials && !password.empty()) {
+    // Only generate a salt if threre's a password and we've been asked to save
+    // credentials. If there is no password, there's nothing for smbfs to store
+    // and the salt is unused.
+    salt.resize(kSaltLength);
+    crypto::RandBytes(salt);
+  }
   SmbShareInfo info(parsed_url, options.display_name, username, workgroup,
-                    use_kerberos);
+                    use_kerberos, salt);
   MountInternal(provider_options, info, password, save_credentials,
                 false /* skip_connect */,
                 base::BindOnce(&SmbService::MountInternalDone,
@@ -412,6 +447,11 @@ void SmbService::MountInternal(
     smbfs_options.password = password;
     smbfs_options.allow_ntlm = IsNTLMAuthenticationEnabled();
     smbfs_options.skip_connect = skip_connect;
+    if (save_credentials && !info.password_salt().empty()) {
+      smbfs_options.save_restore_password = true;
+      smbfs_options.account_hash = user->username_hash();
+      smbfs_options.password_salt = info.password_salt();
+    }
     if (info.use_kerberos()) {
       if (user->IsActiveDirectoryUser()) {
         smbfs_options.kerberos_options =
@@ -444,7 +484,7 @@ void SmbService::MountInternal(
                                     mount_id, std::move(callback)));
   } else {
     // If using kerberos, the hostname should not be resolved since kerberos
-    // service tickets are keyed on hosname.
+    // service tickets are keyed on hostname.
     const SmbUrl url = info.use_kerberos()
                            ? info.share_url()
                            : share_finder_->GetResolvedUrl(info.share_url());
@@ -638,7 +678,7 @@ void SmbService::Remount(const ProvidedFileSystemInfo& file_system_info) {
   }
 
   // If using kerberos, the hostname should not be resolved since kerberos
-  // service tickets are keyed on hosname.
+  // service tickets are keyed on hostname.
   const SmbUrl resolved_url = is_kerberos_chromad
                                   ? parsed_url
                                   : share_finder_->GetResolvedUrl(parsed_url);
@@ -684,7 +724,7 @@ void SmbService::OnRemountResponse(const std::string& file_system_id,
 void SmbService::MountSavedSmbfsShare(const SmbShareInfo& info) {
   MountInternal(
       {} /* fsp::MountOptions, ignored by smbfs */, info, "" /* password */,
-      false /* save_credentials */, true /* skip_connect */,
+      true /* save_credentials */, true /* skip_connect */,
       base::BindOnce(
           [](SmbMountResult result, const base::FilePath& mount_path) {
             LOG_IF(ERROR, result != SmbMountResult::kSuccess)
@@ -850,6 +890,12 @@ bool SmbService::IsShareMounted(const SmbUrl& share) const {
       return true;
     }
   }
+
+  for (const auto& entry : smbfs_shares_) {
+    if (entry.second->share_url().ToString() == share.ToString()) {
+      return true;
+    }
+  }
   return false;
 }
 
@@ -1002,10 +1048,21 @@ void SmbService::OnSuspendUnmountDone(
       power_manager_suspend_token);
 }
 
-void SmbService::SuspendDone(const base::TimeDelta& sleep_duration) {
-  for (auto it = smbfs_shares_.begin(); it != smbfs_shares_.end(); ++it) {
-    SmbFsShare* share = it->second.get();
-    const std::string mount_id = share->mount_id();
+void SmbService::SuspendDone(base::TimeDelta sleep_duration) {
+  // Don't iterate directly over the share map during the remount
+  // process as shares can be removed on failure in OnSmbfsMountDone.
+  std::vector<std::string> mount_ids;
+  for (const auto& s : smbfs_shares_)
+    mount_ids.push_back(s.first);
+
+  for (const auto& mount_id : mount_ids) {
+    auto share_it = smbfs_shares_.find(mount_id);
+    if (share_it == smbfs_shares_.end()) {
+      LOG(WARNING) << "Smbfs mount id " << mount_id
+                   << " no longer present during remount after suspend";
+      continue;
+    }
+    SmbFsShare* share = share_it->second.get();
 
     // Don't try to reconnect as we race the network stack in getting an IP
     // address.

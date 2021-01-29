@@ -2,7 +2,24 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromeos/ui_mode.gni")
 import("//net/features.gni")
+
+# This target provides a net::CertVerifier that transparently proxies cert
+# verification requests over a Mojo connection to the actual service, which is
+# implemented in terms of concrete implementations of net::CertVerifier.
+source_set("mojo_cert_verifier") {
+  sources = [
+    "mojo_cert_verifier.cc",
+    "mojo_cert_verifier.h",
+  ]
+
+  deps = [
+    "//base",
+    "//net",
+    "//services/network/public/mojom",
+  ]
+}
 
 source_set("cert_verifier_creation") {
   sources = [
@@ -10,10 +27,8 @@ source_set("cert_verifier_creation") {
     "cert_verifier_creation.h",
   ]
 
-  if (is_chromeos) {
+  if (is_chromeos_ash) {
     sources += [
-      "cert_verify_proc_chromeos.cc",
-      "cert_verify_proc_chromeos.h",
       "system_trust_store_provider_chromeos.cc",
       "system_trust_store_provider_chromeos.h",
     ]
@@ -28,27 +43,33 @@ source_set("cert_verifier_creation") {
 
   deps = [
     "//base",
+    "//build:chromeos_buildflags",
     "//net",
     "//services/network/public/mojom",
   ]
+
+  public_deps = [ "//services/network/public/mojom" ]
 }
 
-source_set("cert_verifier_creation_tests") {
+source_set("cert_verifier_tests") {
   testonly = true
   sources = []
 
   deps = [
     ":cert_verifier_creation",
+    ":mojo_cert_verifier",
     "//base",
+    "//base/test:test_support",
+    "//mojo/public/cpp/test_support:test_utils",
     "//net",
     "//net:test_support",
     "//testing/gtest",
   ]
 
-  if (is_chromeos) {
-    sources += [ "cert_verify_proc_chromeos_unittest.cc" ]
-    deps += [ "//crypto:test_support" ]
-  }
+  sources += [
+    "cert_verifier_mojom_traits_unittest.cc",
+    "mojo_cert_verifier_unittest.cc",
+  ]
 
   if (trial_comparison_cert_verifier_supported) {
     sources += [ "trial_comparison_cert_verifier_mojo_unittest.cc" ]

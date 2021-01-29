@@ -10,6 +10,7 @@
 // Accessibility IDs for the table view in various kinds of popup menus.
 extern NSString* const kPopupMenuToolsMenuTableViewId;
 extern NSString* const kPopupMenuNavigationTableViewId;
+extern NSString* const kPopupMenuTabGridMenuTableViewId;
 
 // Accessibility IDs for the Tools Menu items.
 // Downloads item accessibility Identifier.
@@ -21,7 +22,7 @@ extern NSString* const kToolsMenuStop;
 // New Tab item accessibility Identifier.
 extern NSString* const kToolsMenuNewTabId;
 // New Tab item accessibility Identifier.
-extern NSString* const kToolsMenuNewWindow;
+extern NSString* const kToolsMenuNewWindowId;
 // New incognito Tab item accessibility Identifier.
 extern NSString* const kToolsMenuNewIncognitoTabId;
 // Close all Tabs item accessibility Identifier.
@@ -74,5 +75,7 @@ extern NSString* const kToolsMenuQRCodeSearch;
 extern NSString* const kToolsMenuCopiedImageSearch;
 // Text Zoom item accessibility identifier.
 extern NSString* const kToolsMenuTextZoom;
+// Text Enterprise info item accessibility identifier.
+extern NSString* const kTextMenuEnterpriseInfo;
 
 #endif  // IOS_CHROME_BROWSER_UI_POPUP_MENU_POPUP_MENU_CONSTANTS_H_

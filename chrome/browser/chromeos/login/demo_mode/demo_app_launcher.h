@@ -10,7 +10,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "chrome/browser/chromeos/app_mode/kiosk_profile_loader.h"
+#include "chrome/browser/ash/app_mode/kiosk_profile_loader.h"
 
 class AccountId;
 
@@ -39,6 +39,7 @@ class DemoAppLauncher : public KioskProfileLoader::Delegate {
   // KioskProfileLoader::Delegate overrides:
   void OnProfileLoaded(Profile* profile) override;
   void OnProfileLoadFailed(KioskAppLaunchError::Error error) override;
+  void OnOldEncryptionDetected(const UserContext& user_context) override;
 
   std::unique_ptr<KioskProfileLoader> kiosk_profile_loader_;
 

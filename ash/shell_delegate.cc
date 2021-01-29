@@ -6,15 +6,38 @@
 
 namespace ash {
 
-bool ShellDelegate::CreateBrowserForTabDrop(
-    gfx::NativeWindow source_window,
-    const ui::OSExchangeData& drop_data) {
+void ShellDelegate::DesksStateChanged(int num_desks) const {
+  return;
+}
+
+bool ShellDelegate::AllowDefaultTouchActions(gfx::NativeWindow window) {
+  return true;
+}
+
+bool ShellDelegate::ShouldWaitForTouchPressAck(gfx::NativeWindow window) {
   return false;
 }
 
-media_session::mojom::MediaSessionService*
-ShellDelegate::GetMediaSessionService() {
+bool ShellDelegate::IsTabDrag(const ui::OSExchangeData& drop_data) {
+  return false;
+}
+
+aura::Window* ShellDelegate::CreateBrowserForTabDrop(
+    aura::Window* source_window,
+    const ui::OSExchangeData& drop_data) {
   return nullptr;
+}
+
+media_session::MediaSessionService* ShellDelegate::GetMediaSessionService() {
+  return nullptr;
+}
+
+bool ShellDelegate::IsUiDevToolsStarted() const {
+  return false;
+}
+
+int ShellDelegate::GetUiDevToolsPort() const {
+  return -1;
 }
 
 }  // namespace ash

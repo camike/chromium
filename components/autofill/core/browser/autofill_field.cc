@@ -11,6 +11,7 @@
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/proto/server.pb.h"
 #include "components/autofill/core/common/autofill_features.h"
+#include "components/autofill/core/common/signatures.h"
 
 namespace autofill {
 
@@ -19,11 +20,20 @@ AutofillField::AutofillField() = default;
 AutofillField::AutofillField(FieldSignature field_signature)
     : field_signature_(field_signature) {}
 
+AutofillField::AutofillField(const FormFieldData& field)
+    : FormFieldData(field),
+      parseable_name_(field.name),
+      parseable_label_(field.label) {
+  field_signature_ =
+      CalculateFieldSignatureByNameAndType(name, form_control_type);
+}
+
 AutofillField::AutofillField(const FormFieldData& field,
                              const base::string16& unique_name)
     : FormFieldData(field),
       unique_name_(unique_name),
-      parseable_name_(field.name) {
+      parseable_name_(field.name),
+      parseable_label_(field.label) {
   field_signature_ =
       CalculateFieldSignatureByNameAndType(name, form_control_type);
 }
@@ -128,26 +138,41 @@ AutofillType AutofillField::ComputedType() const {
     // decision to prefer the heuristics in these cases, but it looks like
     // it might be better to fix this server-side.
     // See http://crbug.com/429236 for background.
-    bool believe_server;
-    if (base::FeatureList::IsEnabled(
-            features::kAutofillPreferServerNamePredictions)) {
-      believe_server = true;
-    } else {
-      believe_server = !(server_type_ == NAME_FULL &&
-                         heuristic_type_ == CREDIT_CARD_NAME_FULL) &&
-                       !(server_type_ == CREDIT_CARD_NAME_FULL &&
-                         heuristic_type_ == NAME_FULL) &&
-                       !(server_type_ == NAME_FIRST &&
-                         heuristic_type_ == CREDIT_CARD_NAME_FIRST) &&
-                       !(server_type_ == NAME_LAST &&
-                         heuristic_type_ == CREDIT_CARD_NAME_LAST);
-    }
+    bool believe_server = !(server_type_ == NAME_FULL &&
+                            heuristic_type_ == CREDIT_CARD_NAME_FULL) &&
+                          !(server_type_ == CREDIT_CARD_NAME_FULL &&
+                            heuristic_type_ == NAME_FULL) &&
+                          !(server_type_ == NAME_FIRST &&
+                            heuristic_type_ == CREDIT_CARD_NAME_FIRST) &&
+                          !(server_type_ == NAME_LAST &&
+                            heuristic_type_ == CREDIT_CARD_NAME_LAST);
 
     // Either way, retain a preference for the the CVC heuristic over the
     // server's password predictions (http://crbug.com/469007)
     believe_server = believe_server &&
                      !(AutofillType(server_type_).group() == PASSWORD_FIELD &&
                        heuristic_type_ == CREDIT_CARD_VERIFICATION_CODE);
+
+    // For new name tokens the heuristic predictions get precedence over the
+    // server predictions.
+    // TODO(crbug.com/1098943): Remove feature check once launched.
+    believe_server =
+        believe_server &&
+        !(base::FeatureList::IsEnabled(
+              features::kAutofillEnableSupportForMoreStructureInNames) &&
+          (heuristic_type_ == NAME_LAST_SECOND ||
+           heuristic_type_ == NAME_LAST_FIRST));
+
+    // For new address tokens the heuristic predictions get precedence over the
+    // server predictions.
+    // TODO(crbug.com/1098943): Remove feature check once launched.
+    believe_server =
+        believe_server &&
+        !(base::FeatureList::IsEnabled(
+              features::kAutofillEnableSupportForMoreStructureInAddresses) &&
+          (heuristic_type_ == ADDRESS_HOME_STREET_NAME ||
+           heuristic_type_ == ADDRESS_HOME_HOUSE_NUMBER));
+
     if (believe_server)
       return AutofillType(server_type_);
   }
@@ -156,6 +181,14 @@ AutofillType AutofillField::ComputedType() const {
 }
 
 AutofillType AutofillField::Type() const {
+  // If the corresponding feature is enabled, server predictions that are an
+  // override are granted precedence unconditionally.
+  if (base::FeatureList::IsEnabled(
+          features::kAutofillServerTypeTakesPrecedence) &&
+      server_type_prediction_is_override_ && server_type_ != NO_SERVER_DATA) {
+    return AutofillType(server_type_);
+  }
+
   if (overall_type_.GetStorableType() != NO_SERVER_DATA) {
     return overall_type_;
   }
@@ -173,11 +206,15 @@ FieldSignature AutofillField::GetFieldSignature() const {
 }
 
 std::string AutofillField::FieldSignatureAsStr() const {
-  return base::NumberToString(GetFieldSignature());
+  return base::NumberToString(GetFieldSignature().value());
 }
 
 bool AutofillField::IsFieldFillable() const {
-  return !Type().IsUnknown();
+  if (!base::FeatureList::IsEnabled(features::kAutofillFixFillableFieldTypes))
+    return !Type().IsUnknown();
+
+  ServerFieldType field_type = Type().GetStorableType();
+  return IsFillableFieldType(field_type);
 }
 
 void AutofillField::SetPasswordRequirements(PasswordRequirementsSpec spec) {

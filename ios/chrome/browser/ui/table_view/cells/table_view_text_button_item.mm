@@ -10,6 +10,7 @@
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/UIColor+cr_semantic_colors.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/util/pointer_interaction_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -148,6 +149,15 @@ const NSTextAlignment kDefaultTextAlignment = NSTextAlignmentCenter;
     self.button.contentEdgeInsets = UIEdgeInsetsMake(
         kButtonTitleVerticalContentInset, kButtonTitleHorizontalContentInset,
         kButtonTitleVerticalContentInset, kButtonTitleHorizontalContentInset);
+
+    if (@available(iOS 13.4, *)) {
+        self.button.pointerInteractionEnabled = YES;
+        // This button's background color is configured whenever the cell is
+        // reused. The pointer style provider used here dynamically provides the
+        // appropriate style based on the background color at runtime.
+        self.button.pointerStyleProvider =
+            CreateOpaqueOrTransparentButtonPointerStyleProvider();
+    }
 
     // Vertical stackView to hold label and button.
     self.verticalStackView = [[UIStackView alloc]

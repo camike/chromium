@@ -19,6 +19,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "net/base/filename_util.h"
 #include "net/base/net_errors.h"
 #include "net/dns/public/resolve_error_info.h"
@@ -51,10 +52,9 @@ INSTANTIATE_TEST_SUITE_P(IPBTP,
 class LoadFailObserver : public content::WebContentsObserver {
  public:
   explicit LoadFailObserver(content::WebContents* contents)
-      : content::WebContentsObserver(contents),
-        failed_load_(false),
-        error_code_(net::OK),
-        resolve_error_info_(net::ResolveErrorInfo(net::OK)) {}
+      : content::WebContentsObserver(contents) {}
+  LoadFailObserver(const LoadFailObserver&) = delete;
+  LoadFailObserver& operator=(const LoadFailObserver&) = delete;
 
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override {
@@ -75,12 +75,10 @@ class LoadFailObserver : public content::WebContentsObserver {
   const GURL& validated_url() const { return validated_url_; }
 
  private:
-  bool failed_load_;
-  net::Error error_code_;
-  net::ResolveErrorInfo resolve_error_info_;
+  bool failed_load_ = false;
+  net::Error error_code_ = net::OK;
+  net::ResolveErrorInfo resolve_error_info_ = net::ResolveErrorInfo(net::OK);
   GURL validated_url_;
-
-  DISALLOW_COPY_AND_ASSIGN(LoadFailObserver);
 };
 
 // Tests that InProcessBrowserTest cannot resolve external host, in this case
@@ -113,7 +111,7 @@ IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, AfterStartupTaskUtils) {
 
 // On Mac this crashes inside cc::SingleThreadProxy::SetNeedsCommit. See
 // https://ci.chromium.org/b/8923336499994443392
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
 class SingleProcessBrowserTest : public InProcessBrowserTest {
  public:
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -121,15 +119,7 @@ class SingleProcessBrowserTest : public InProcessBrowserTest {
   }
 };
 
-#if defined(OS_LINUX) || defined(OS_WIN)
-// TODO(https://crbug.com/931233): Reenable on Linux.
-// TODO(https://crbug.com/987448): Reenable on Windows.
-#define MAYBE_Test DISABLED_Test
-#else
-#define MAYBE_Test Test
-#endif
-
-IN_PROC_BROWSER_TEST_F(SingleProcessBrowserTest, MAYBE_Test) {
+IN_PROC_BROWSER_TEST_F(SingleProcessBrowserTest, Test) {
   // Should not crash.
 }
 

@@ -2,11 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
+// #import {addSingletonGetter, sendWithPromise} from 'chrome://resources/js/cr.m.js';
+// #import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+// #import 'chrome://resources/cr_elements/cr_input/cr_input.m.js';
 
 // Identifiers for the default Crostini VM and container.
-/** @type {string} */ const DEFAULT_CROSTINI_VM = 'termina';
-/** @type {string} */ const DEFAULT_CROSTINI_CONTAINER = 'penguin';
+/** @type {string} */ /* #export */ const DEFAULT_CROSTINI_VM = 'termina';
+/** @type {string} */ /* #export */ const DEFAULT_CROSTINI_CONTAINER =
+    'penguin';
 
 
 /**
@@ -14,7 +17,7 @@
  * (chrome/browser/chromeos/crostini/crostini_port_forwarder.h).
  * @enum {number}
  */
-const CrostiniPortProtocol = {
+/* #export */ const CrostiniPortProtocol = {
   TCP: 0,
   UDP: 1,
 };
@@ -23,44 +26,62 @@ const CrostiniPortProtocol = {
  * @typedef {{path: string,
  *            pathDisplayText: string}}
  */
-let CrostiniSharedPath;
+/* #export */ let CrostiniSharedPath;
 
 /**
  * @typedef {{label: string,
  *            guid: string,
- *            shared: boolean}}
+ *            shared: boolean,
+ *            shareWillReassign: boolean}}
  */
-let CrostiniSharedUsbDevice;
+/* #export */ let CrostiniSharedUsbDevice;
 
 /**
  * @typedef {{label: string,
  *            port_number: number,
  *            protocol_type: !CrostiniPortProtocol}}
  */
-let CrostiniPortSetting;
+/* #export */ let CrostiniPortSetting;
 
 /**
  * @typedef {{succeeded: boolean,
  *            canResize: boolean,
  *            isUserChosenSize: boolean,
+ *            isLowSpaceAvailable: boolean,
  *            defaultIndex: number,
  *            ticks: !Array}}
  */
-let CrostiniDiskInfo;
+/* #export */ let CrostiniDiskInfo;
 
 /**
  * @typedef {{port_number: number,
  *            protocol_type: !CrostiniPortProtocol}}
  */
-let CrostiniPortActiveSetting;
+/* #export */ let CrostiniPortActiveSetting;
+
+/**
+ * @enum {string}
+ */
+/* #export */ const PortState = {
+  VALID: '',
+  INVALID: loadTimeData.getString('crostiniPortForwardingAddError'),
+  DUPLICATE: loadTimeData.getString('crostiniPortForwardingAddExisting'),
+};
+
+/* #export */ const MIN_VALID_PORT_NUMBER =
+    1024;  // Minimum 16-bit integer value.
+/* #export */ const MAX_VALID_PORT_NUMBER =
+    65535;  // Maximum 16-bit integer value.
+
 
 /**
  * @fileoverview A helper object used by the "Linux Apps" (Crostini) section
  * to install and uninstall Crostini.
  */
+
 cr.define('settings', function() {
   /** @interface */
-  class CrostiniBrowserProxy {
+  /* #export */ class CrostiniBrowserProxy {
     /* Show crostini installer. */
     requestCrostiniInstallerView() {}
 
@@ -74,9 +95,10 @@ cr.define('settings', function() {
     getCrostiniSharedPathsDisplayText(paths) {}
 
     /**
-     * @return {!Promise<!Array<CrostiniSharedUsbDevice>>}
+     * Called when page is ready.
+     * @return {!Promise<boolean>}
      */
-    getCrostiniSharedUsbDevices() {}
+    notifyCrostiniSharedUsbDevicesPageReady() {}
 
     /**
      * @param {string} guid Unique device identifier.
@@ -116,6 +138,9 @@ cr.define('settings', function() {
     /** Queries the current status of ARC ADB Sideloading. */
     requestArcAdbSideloadStatus() {}
 
+    /** Queries whether the user is allowed to enable ARC ADB Sideloading. */
+    getCanChangeArcAdbSideloading() {}
+
     /** Initiates the flow to enable ARC ADB Sideloading. */
     enableArcAdbSideload() {}
 
@@ -152,9 +177,12 @@ cr.define('settings', function() {
 
     /**
      * @param {string} vmName Name of the VM to get disk info for.
+     * @param {boolean} requestFullInfo Whether to request full disk info, which
+     *     can take several seconds because it requires starting the VM. Set to
+     *     false for the main Crostini pages and true for the resize dialog.
      * @return {!Promise<CrostiniDiskInfo>} The requested information.
      */
-    getCrostiniDiskInfo(vmName) {}
+    getCrostiniDiskInfo(vmName, requestFullInfo) {}
 
     /**
      * Resizes a preallocated user-chosen-size Crostini VM disk to the requested
@@ -226,10 +254,27 @@ cr.define('settings', function() {
      * @return {!Promise<boolean>}
      */
     checkCrostiniIsRunning() {}
+
+    /**
+     * Shuts Crostini (Termina VM) down.
+     */
+    shutdownCrostini() {}
+
+    /**
+     * @param {boolean} enabled Set Crostini's access to the mic.
+     */
+    setCrostiniMicSharingEnabled(enabled) {}
+
+    /**
+     * @return {!Promise<boolean>} Return Crostini's access to the mic.
+     */
+    getCrostiniMicSharingEnabled() {}
   }
 
-  /** @implements {settings.CrostiniBrowserProxy} */
-  class CrostiniBrowserProxyImpl {
+  /**
+   * @implements {settings.CrostiniBrowserProxy}
+   */
+  /* #export */ class CrostiniBrowserProxyImpl {
     /** @override */
     requestCrostiniInstallerView() {
       chrome.send('requestCrostiniInstallerView');
@@ -246,8 +291,8 @@ cr.define('settings', function() {
     }
 
     /** @override */
-    getCrostiniSharedUsbDevices() {
-      return cr.sendWithPromise('getCrostiniSharedUsbDevices');
+    notifyCrostiniSharedUsbDevicesPageReady() {
+      return cr.sendWithPromise('notifyCrostiniSharedUsbDevicesPageReady');
     }
 
     /** @override */
@@ -286,6 +331,11 @@ cr.define('settings', function() {
     }
 
     /** @override */
+    getCanChangeArcAdbSideloading() {
+      chrome.send('getCanChangeArcAdbSideloading');
+    }
+
+    /** @override */
     enableArcAdbSideload() {
       chrome.send('enableArcAdbSideload');
     }
@@ -318,8 +368,8 @@ cr.define('settings', function() {
     }
 
     /** @override */
-    getCrostiniDiskInfo(vmName) {
-      return cr.sendWithPromise('getCrostiniDiskInfo', vmName);
+    getCrostiniDiskInfo(vmName, fullInfo) {
+      return cr.sendWithPromise('getCrostiniDiskInfo', vmName, fullInfo);
     }
 
     /** @override */
@@ -366,6 +416,21 @@ cr.define('settings', function() {
     /** @override */
     checkCrostiniIsRunning() {
       return cr.sendWithPromise('checkCrostiniIsRunning');
+    }
+
+    /** @override */
+    shutdownCrostini() {
+      chrome.send('shutdownCrostini');
+    }
+
+    /** @override */
+    setCrostiniMicSharingEnabled(enabled) {
+      chrome.send('setCrostiniMicSharingEnabled', [enabled]);
+    }
+
+    /** @override */
+    getCrostiniMicSharingEnabled() {
+      return cr.sendWithPromise('getCrostiniMicSharingEnabled');
     }
   }
 

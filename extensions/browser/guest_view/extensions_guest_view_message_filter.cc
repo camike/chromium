@@ -9,8 +9,6 @@
 #include "base/bind.h"
 #include "base/guid.h"
 #include "base/stl_util.h"
-#include "base/task/post_task.h"
-#include "base/time/time.h"
 #include "components/guest_view/browser/bad_message.h"
 #include "components/guest_view/browser/guest_view_manager.h"
 #include "components/guest_view/browser/guest_view_manager_delegate.h"
@@ -48,7 +46,6 @@ namespace extensions {
 const uint32_t ExtensionsGuestViewMessageFilter::kFilteredMessageClasses[] = {
     GuestViewMsgStart, ExtensionsGuestViewMsgStart};
 
-
 ExtensionsGuestViewMessageFilter::ExtensionsGuestViewMessageFilter(
     int render_process_id,
     BrowserContext* context)
@@ -56,24 +53,7 @@ ExtensionsGuestViewMessageFilter::ExtensionsGuestViewMessageFilter(
                              base::size(kFilteredMessageClasses),
                              render_process_id,
                              context),
-      content::BrowserAssociatedInterface<mojom::GuestView>(this, this) {
-}
-
-ExtensionsGuestViewMessageFilter::~ExtensionsGuestViewMessageFilter() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-}
-
-void ExtensionsGuestViewMessageFilter::OverrideThreadForMessage(
-    const IPC::Message& message,
-    BrowserThread::ID* thread) {
-  switch (message.type()) {
-    case ExtensionsGuestViewHostMsg_ResizeGuest::ID:
-      *thread = BrowserThread::UI;
-      break;
-    default:
-      GuestViewMessageFilter::OverrideThreadForMessage(message, thread);
-  }
-}
+      content::BrowserAssociatedInterface<mojom::GuestView>(this) {}
 
 bool ExtensionsGuestViewMessageFilter::OnMessageReceived(
     const IPC::Message& message) {
@@ -81,7 +61,6 @@ bool ExtensionsGuestViewMessageFilter::OnMessageReceived(
   IPC_BEGIN_MESSAGE_MAP(ExtensionsGuestViewMessageFilter, message)
     IPC_MESSAGE_HANDLER(ExtensionsGuestViewHostMsg_CanExecuteContentScriptSync,
                         OnCanExecuteContentScript)
-    IPC_MESSAGE_HANDLER(ExtensionsGuestViewHostMsg_ResizeGuest, OnResizeGuest)
     IPC_MESSAGE_UNHANDLED(
         handled = GuestViewMessageFilter::OnMessageReceived(message))
   IPC_END_MESSAGE_MAP()
@@ -90,6 +69,7 @@ bool ExtensionsGuestViewMessageFilter::OnMessageReceived(
 
 GuestViewManager* ExtensionsGuestViewMessageFilter::
     GetOrCreateGuestViewManager() {
+  DCHECK(browser_context_);
   auto* manager = GuestViewManager::FromBrowserContext(browser_context_);
   if (!manager) {
     manager = GuestViewManager::CreateWithDelegate(
@@ -102,7 +82,7 @@ GuestViewManager* ExtensionsGuestViewMessageFilter::
 
 void ExtensionsGuestViewMessageFilter::OnCanExecuteContentScript(
     int render_view_id,
-    int script_id,
+    const std::string& script_id,
     bool* allowed) {
   WebViewRendererState::WebViewInfo info;
   WebViewRendererState::GetInstance()->GetInfo(render_process_id_,
@@ -119,8 +99,8 @@ void ExtensionsGuestViewMessageFilter::CreateMimeHandlerViewGuest(
     const gfx::Size& element_size,
     mojo::PendingRemote<mime_handler::BeforeUnloadControl>
         before_unload_control) {
-  base::PostTask(
-      FROM_HERE, {content::BrowserThread::UI},
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&ExtensionsGuestViewMessageFilter::
                          CreateMimeHandlerViewGuestOnUIThread,
                      this, render_frame_id, view_id, element_instance_id,
@@ -131,8 +111,8 @@ void ExtensionsGuestViewMessageFilter::ReadyToCreateMimeHandlerView(
     int32_t render_frame_id,
     bool success) {
   if (!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI)) {
-    base::PostTask(
-        FROM_HERE, {content::BrowserThread::UI},
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(
             &ExtensionsGuestViewMessageFilter::ReadyToCreateMimeHandlerView,
             this, render_frame_id, success));
@@ -154,6 +134,8 @@ void ExtensionsGuestViewMessageFilter::CreateMimeHandlerViewGuestOnUIThread(
         before_unload_control,
     bool is_full_page_plugin) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (!browser_context_)
+    return;
 
   auto* manager = GetOrCreateGuestViewManager();
 
@@ -175,38 +157,16 @@ void ExtensionsGuestViewMessageFilter::CreateMimeHandlerViewGuestOnUIThread(
                        create_params, std::move(callback));
 }
 
-void ExtensionsGuestViewMessageFilter::OnResizeGuest(
-    int render_frame_id,
-    int element_instance_id,
-    const gfx::Size& new_size) {
-  // We should have a GuestViewManager at this point. If we don't then the
-  // embedder is misbehaving.
-  auto* manager = GetGuestViewManagerOrKill();
-  if (!manager)
-    return;
-
-  auto* guest_web_contents =
-      manager->GetGuestByInstanceID(render_process_id_, element_instance_id);
-  auto* mhvg = MimeHandlerViewGuest::FromWebContents(guest_web_contents);
-  if (!mhvg)
-    return;
-
-  guest_view::SetSizeParams set_size_params;
-  set_size_params.enable_auto_size.reset(new bool(false));
-  set_size_params.normal_size.reset(new gfx::Size(new_size));
-  mhvg->SetSize(set_size_params);
-}
-
 void ExtensionsGuestViewMessageFilter::CreateEmbeddedMimeHandlerViewGuest(
     int32_t render_frame_id,
     int32_t tab_id,
     const GURL& original_url,
     int32_t element_instance_id,
     const gfx::Size& element_size,
-    content::mojom::TransferrableURLLoaderPtr transferrable_url_loader) {
+    blink::mojom::TransferrableURLLoaderPtr transferrable_url_loader) {
   if (!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI)) {
-    base::PostTask(FROM_HERE, {content::BrowserThread::UI},
-                   base::BindOnce(&ExtensionsGuestViewMessageFilter::
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&ExtensionsGuestViewMessageFilter::
                                       CreateEmbeddedMimeHandlerViewGuest,
                                   this, render_frame_id, tab_id, original_url,
                                   element_instance_id, element_size,
@@ -243,8 +203,8 @@ void ExtensionsGuestViewMessageFilter::CreateEmbeddedMimeHandlerViewGuest(
       std::move(transferrable_url_loader), original_url));
   MimeHandlerStreamManager::Get(browser_context)
       ->AddStream(view_id, std::move(stream_container),
-                  -1 /* frame_tree_node_id*/, render_process_id_,
-                  render_frame_id);
+                  content::RenderFrameHost::kNoFrameTreeNodeId,
+                  render_process_id_, render_frame_id);
 
   CreateMimeHandlerViewGuestOnUIThread(render_frame_id, view_id,
                                        element_instance_id, element_size,

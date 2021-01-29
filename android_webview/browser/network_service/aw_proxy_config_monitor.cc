@@ -11,6 +11,7 @@
 
 #include "base/barrier_closure.h"
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/no_destructor.h"
 #include "base/trace_event/trace_event.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -42,7 +43,7 @@ AwProxyConfigMonitor* AwProxyConfigMonitor::GetInstance() {
 }
 
 void AwProxyConfigMonitor::AddProxyToNetworkContextParams(
-    network::mojom::NetworkContextParamsPtr& network_context_params) {
+    network::mojom::NetworkContextParams* network_context_params) {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(kProxyServerSwitch)) {
@@ -94,9 +95,10 @@ std::string AwProxyConfigMonitor::SetProxyOverride(
     const std::vector<net::ProxyConfigServiceAndroid::ProxyOverrideRule>&
         proxy_rules,
     const std::vector<std::string>& bypass_rules,
+    const bool reverse_bypass,
     base::OnceClosure callback) {
   return proxy_config_service_android_->SetProxyOverride(
-      proxy_rules, bypass_rules,
+      proxy_rules, bypass_rules, reverse_bypass,
       base::BindOnce(&AwProxyConfigMonitor::FlushProxyConfig,
                      base::Unretained(this), std::move(callback)));
 }

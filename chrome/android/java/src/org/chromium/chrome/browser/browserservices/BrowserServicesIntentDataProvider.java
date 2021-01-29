@@ -23,6 +23,7 @@ import org.chromium.chrome.browser.customtabs.CustomButtonParams;
 import org.chromium.chrome.browser.flags.ActivityType;
 import org.chromium.chrome.browser.webapps.WebApkExtras;
 import org.chromium.chrome.browser.webapps.WebappExtras;
+import org.chromium.device.mojom.ScreenOrientationLockType;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -34,19 +35,28 @@ import java.util.List;
  */
 public abstract class BrowserServicesIntentDataProvider {
     // The type of UI for Custom Tab to use.
-    @IntDef({CustomTabsUiType.DEFAULT, CustomTabsUiType.MEDIA_VIEWER,
-            CustomTabsUiType.PAYMENT_REQUEST, CustomTabsUiType.INFO_PAGE,
+    @IntDef({CustomTabsUiType.DEFAULT, CustomTabsUiType.MEDIA_VIEWER, CustomTabsUiType.INFO_PAGE,
             CustomTabsUiType.READER_MODE, CustomTabsUiType.MINIMAL_UI_WEBAPP,
             CustomTabsUiType.OFFLINE_PAGE})
     @Retention(RetentionPolicy.SOURCE)
     public @interface CustomTabsUiType {
         int DEFAULT = 0;
         int MEDIA_VIEWER = 1;
-        int PAYMENT_REQUEST = 2;
-        int INFO_PAGE = 3;
-        int READER_MODE = 4;
-        int MINIMAL_UI_WEBAPP = 5;
-        int OFFLINE_PAGE = 6;
+        int INFO_PAGE = 2;
+        int READER_MODE = 3;
+        int MINIMAL_UI_WEBAPP = 4;
+        int OFFLINE_PAGE = 5;
+        int READ_LATER = 6;
+    }
+
+    // The type of Disclosure for TWAs to use.
+    @IntDef({TwaDisclosureUi.DEFAULT, TwaDisclosureUi.V1_INFOBAR,
+            TwaDisclosureUi.V2_NOTIFICATION_OR_SNACKBAR})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface TwaDisclosureUi {
+        int DEFAULT = -1;
+        int V1_INFOBAR = 0;
+        int V2_NOTIFICATION_OR_SNACKBAR = 1;
     }
 
     /**
@@ -157,6 +167,14 @@ public abstract class BrowserServicesIntentDataProvider {
      */
     @Nullable
     public Integer getNavigationBarColor() {
+        return null;
+    }
+
+    /**
+     * @return The navigation bar divider color specified in the intent, or null if not specified.
+     */
+    @Nullable
+    public Integer getNavigationBarDividerColor() {
         return null;
     }
 
@@ -342,6 +360,13 @@ public abstract class BrowserServicesIntentDataProvider {
     }
 
     /**
+     * Returns {@link ScreenOrientationLockType} supplied in the intent.
+     */
+    public int getDefaultOrientation() {
+        return ScreenOrientationLockType.DEFAULT;
+    }
+
+    /**
      * @return The component name of the module entry point, or null if not specified.
      */
     @Nullable
@@ -458,15 +483,60 @@ public abstract class BrowserServicesIntentDataProvider {
         return getUiType() == CustomTabsUiType.INFO_PAGE;
     }
 
-    /**
-     * @return Whether the Activity is for payment request.
-     */
-    public final boolean isForPaymentRequest() {
-        return getUiType() == CustomTabsUiType.PAYMENT_REQUEST;
-    }
-
     @Nullable
     public PendingIntent getFocusIntent() {
         return null;
+    }
+
+    @TwaDisclosureUi
+    public int getTwaDisclosureUi() {
+        return TwaDisclosureUi.DEFAULT;
+    }
+
+    @Nullable
+    public int[] getGsaExperimentIds() {
+        return null;
+    }
+
+    /**
+     * Returns true if omnibox should hide cct related visits.
+     */
+    public boolean shouldHideOmniboxSuggestionsForCctVisits() {
+        return false;
+    }
+
+    /**
+     * Returns true if visits from cct should be hidden.
+     */
+    public boolean shouldHideCctVisits() {
+        return false;
+    }
+
+    /**
+     * Returns true if new notification requests from cct should be blocked.
+     */
+    public boolean shouldBlockNewNotificationRequests() {
+        return false;
+    }
+
+    /**
+     * Returns true if 'open in chrome' should be shown in the tab context menu.
+     */
+    public boolean shouldShowOpenInChromeMenuItemInContextMenu() {
+        return true;
+    }
+
+    /**
+     * Returns true if 'open in chrome' should be shown in the app menu.
+     */
+    public boolean shouldShowOpenInChromeMenuItem() {
+        return true;
+    }
+
+    /**
+     * @return Whether the incognito icon in the toolbar should be hidden in cct-incognito mode.
+     */
+    public boolean shouldHideIncognitoIconOnToolbarInCct() {
+        return false;
     }
 }

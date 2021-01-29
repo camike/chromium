@@ -6,8 +6,10 @@
 
 // Polymer BrowserTest fixture.
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
+
+GEN('#include "chrome/browser/browser_features.h"');
 GEN('#include "chrome/browser/ui/ui_features.h"');
-GEN('#include "services/network/public/cpp/features.h"');
+GEN('#include "content/public/test/browser_test.h"');
 
 /** Test fixture for shared Polymer 3 components. */
 // eslint-disable-next-line no-var
@@ -15,14 +17,6 @@ var CrComponentsV3BrowserTest = class extends PolymerTest {
   /** @override */
   get browsePreload() {
     return 'chrome://dummyurl';
-  }
-
-  /** @override */
-  get extraLibraries() {
-    return [
-      '//third_party/mocha/mocha.js',
-      '//chrome/test/data/webui/mocha_adapter.js',
-    ];
   }
 
   /** @override */
@@ -36,7 +30,7 @@ var CrComponentsManagedFootnoteV3Test =
     class extends CrComponentsV3BrowserTest {
   /** @override */
   get browsePreload() {
-    return 'chrome://test?module=cr_components/managed_footnote_test.m.js';
+    return 'chrome://test/test_loader.html?module=cr_components/managed_footnote_test.m.js';
   }
 };
 
@@ -57,14 +51,6 @@ var CrComponentsCertificateManagerV3Test =
   get browsePreload() {
     return 'chrome://settings/test_loader.html?module=cr_components/certificate_manager_test.js';
   }
-
-  /** @override */
-  get featureList() {
-    return {
-      enabled: ['network::features::kOutOfBlinkCors'],
-      disabled: [],
-    };
-  }
 };
 
 TEST_F('CrComponentsCertificateManagerV3Test', 'All', function() {
@@ -72,3 +58,26 @@ TEST_F('CrComponentsCertificateManagerV3Test', 'All', function() {
 });
 
 GEN('#endif  // defined(USE_NSS_CERTS)');
+
+
+GEN('#if defined(USE_NSS_CERTS) && defined(OS_CHROMEOS)');
+
+/**
+ * ChromeOS specific test fixture for chrome://settings/certificates, testing
+ * the certificate provisioning UI. This tests the certificate-manager component
+ * in the context of the Settings privacy page.
+ */
+// eslint-disable-next-line no-var
+var CrComponentsCertificateManagerProvisioningV3Test =
+    class extends CrComponentsCertificateManagerV3Test {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://settings/test_loader.html?module=cr_components/certificate_manager_provisioning_test.js';
+  }
+};
+
+TEST_F('CrComponentsCertificateManagerProvisioningV3Test', 'All', function() {
+  mocha.run();
+});
+
+GEN('#endif  // defined(USE_NSS_CERTS) && defined(OS_CHROMEOS)');

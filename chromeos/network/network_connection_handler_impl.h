@@ -7,7 +7,6 @@
 
 #include "base/component_export.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
-#include "chromeos/login/login_state/login_state.h"
 #include "chromeos/network/network_cert_loader.h"
 #include "chromeos/network/network_connection_handler.h"
 #include "chromeos/network/network_state_handler_observer.h"
@@ -17,7 +16,6 @@ namespace chromeos {
 // Implementation of NetworkConnectionHandler.
 class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkConnectionHandlerImpl
     : public NetworkConnectionHandler,
-      public LoginState::Observer,
       public NetworkCertLoader::Observer,
       public NetworkStateHandlerObserver,
       public base::SupportsWeakPtr<NetworkConnectionHandlerImpl> {
@@ -28,20 +26,17 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkConnectionHandlerImpl
   // NetworkConnectionHandler:
   void ConnectToNetwork(const std::string& service_path,
                         base::OnceClosure success_callback,
-                        const network_handler::ErrorCallback& error_callback,
+                        network_handler::ErrorCallback error_callback,
                         bool check_error_state,
                         ConnectCallbackMode mode) override;
   void DisconnectNetwork(
       const std::string& service_path,
       base::OnceClosure success_callback,
-      const network_handler::ErrorCallback& error_callback) override;
+      network_handler::ErrorCallback error_callback) override;
 
   // NetworkStateHandlerObserver
   void NetworkListChanged() override;
   void NetworkPropertiesUpdated(const NetworkState* network) override;
-
-  // LoginState::Observer
-  void LoggedInStateChanged() override;
 
   // NetworkCertLoader::Observer
   void OnCertificatesLoaded() override;
@@ -57,7 +52,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkConnectionHandlerImpl
                    const std::string& service_path,
                    const std::string& profile_path,
                    base::OnceClosure success_callback,
-                   const network_handler::ErrorCallback& error);
+                   network_handler::ErrorCallback error);
     ~ConnectRequest();
     ConnectRequest(ConnectRequest&&);
 
@@ -86,7 +81,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkConnectionHandlerImpl
   // ConnectToNetwork(), see comment for info.
   void VerifyConfiguredAndConnect(bool check_error_state,
                                   const std::string& service_path,
-                                  const base::DictionaryValue& properties);
+                                  base::Optional<base::Value> properties);
 
   // Queues a connect request until certificates have loaded.
   void QueueConnectRequest(const std::string& service_path);
@@ -128,10 +123,9 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkConnectionHandlerImpl
                                       const std::string& error_name);
 
   // Calls Shill.Manager.Disconnect asynchronously.
-  void CallShillDisconnect(
-      const std::string& service_path,
-      base::OnceClosure success_callback,
-      const network_handler::ErrorCallback& error_callback);
+  void CallShillDisconnect(const std::string& service_path,
+                           base::OnceClosure success_callback,
+                           network_handler::ErrorCallback error_callback);
 
   // Handle success from Shill.Service.Disconnect.
   void HandleShillDisconnectSuccess(const std::string& service_path,
@@ -149,9 +143,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkConnectionHandlerImpl
   std::unique_ptr<ConnectRequest> queued_connect_;
 
   // Track certificate loading state.
-  bool logged_in_;
   bool certificates_loaded_;
-  base::TimeTicks logged_in_time_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkConnectionHandlerImpl);
 };

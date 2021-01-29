@@ -13,6 +13,7 @@
 #include "base/strings/string_util.h"
 #include "base/task/post_task.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/api/automation_internal/chrome_automation_internal_api_delegate.h"
 #include "chrome/browser/extensions/api/chrome_device_permissions_prompt.h"
 #include "chrome/browser/extensions/api/declarative_content/chrome_content_rules_registry.h"
@@ -27,7 +28,6 @@
 #include "chrome/browser/extensions/api/storage/managed_value_store_cache.h"
 #include "chrome/browser/extensions/api/storage/sync_value_store_cache.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
-#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_action_runner.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/system_display/display_info_provider.h"
@@ -46,28 +46,28 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/pdf/browser/pdf_web_contents_helper.h"
-#include "components/performance_manager/embedder/performance_manager_registry.h"
-#include "components/performance_manager/public/performance_manager.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
-#include "extensions/browser/api/management/supervised_user_service_delegate.h"
 #include "extensions/browser/api/system_display/display_info_provider.h"
 #include "extensions/browser/api/virtual_keyboard_private/virtual_keyboard_delegate.h"
 #include "extensions/browser/api/web_request/web_request_info.h"
 #include "extensions/browser/extension_action.h"
+#include "extensions/browser/extension_action_manager.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest.h"
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper.h"
+#include "extensions/browser/supervised_user_extensions_delegate.h"
 #include "extensions/browser/value_store/value_store_factory.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "printing/buildflags/buildflags.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "url/gurl.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/extensions/api/file_handlers/non_native_file_system_delegate_chromeos.h"
 #include "chrome/browser/extensions/api/media_perception_private/media_perception_api_delegate_chromeos.h"
 #include "chrome/browser/extensions/api/virtual_keyboard_private/chrome_virtual_keyboard_delegate.h"
@@ -81,7 +81,7 @@
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 // TODO(https://crbug.com/1060801): Here and elsewhere, possibly switch build
 // flag to #if defined(OS_CHROMEOS)
-#include "chrome/browser/supervised_user/supervised_user_service_management_api_delegate.h"
+#include "chrome/browser/supervised_user/supervised_user_extensions_delegate_impl.h"
 #endif
 
 namespace extensions {
@@ -116,10 +116,6 @@ void ChromeExtensionsAPIClient::AttachWebContentsHelpers(
 
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
       web_contents);
-  if (auto* performance_manager_registry =
-          performance_manager::PerformanceManagerRegistry::GetInstance()) {
-    performance_manager_registry->CreatePageNodeForWebContents(web_contents);
-  }
 }
 
 bool ChromeExtensionsAPIClient::ShouldHideResponseHeader(
@@ -144,7 +140,7 @@ bool ChromeExtensionsAPIClient::ShouldHideBrowserNetworkRequest(
   // Exclude main frame navigation requests.
   bool is_browser_request =
       request.render_process_id == -1 &&
-      request.type != blink::mojom::ResourceType::kMainFrame;
+      request.web_request_type != WebRequestResourceType::MAIN_FRAME;
 
   // Hide requests made by the Devtools frontend.
   bool is_sensitive_request =
@@ -315,8 +311,8 @@ ChromeExtensionsAPIClient::CreateContentRulesRegistry(
     RulesCacheDelegate* cache_delegate) const {
   return base::MakeRefCounted<ChromeContentRulesRegistry>(
       browser_context, cache_delegate,
-      base::Bind(&CreateDefaultContentPredicateEvaluators,
-                 base::Unretained(browser_context)));
+      base::BindOnce(&CreateDefaultContentPredicateEvaluators,
+                     base::Unretained(browser_context)));
 }
 
 std::unique_ptr<DevicePermissionsPrompt>
@@ -328,7 +324,7 @@ ChromeExtensionsAPIClient::CreateDevicePermissionsPrompt(
 std::unique_ptr<VirtualKeyboardDelegate>
 ChromeExtensionsAPIClient::CreateVirtualKeyboardDelegate(
     content::BrowserContext* browser_context) const {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   return std::make_unique<ChromeVirtualKeyboardDelegate>(browser_context);
 #else
   return nullptr;
@@ -340,10 +336,10 @@ ManagementAPIDelegate* ChromeExtensionsAPIClient::CreateManagementAPIDelegate()
   return new ChromeManagementAPIDelegate;
 }
 
-std::unique_ptr<SupervisedUserServiceDelegate>
-ChromeExtensionsAPIClient::CreateSupervisedUserServiceDelegate() const {
+std::unique_ptr<SupervisedUserExtensionsDelegate>
+ChromeExtensionsAPIClient::CreateSupervisedUserExtensionsDelegate() const {
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
-  return std::make_unique<SupervisedUserServiceManagementAPIDelegate>();
+  return std::make_unique<SupervisedUserExtensionsDelegateImpl>();
 #else
   return nullptr;
 #endif
@@ -362,7 +358,7 @@ MetricsPrivateDelegate* ChromeExtensionsAPIClient::GetMetricsPrivateDelegate() {
 
 NetworkingCastPrivateDelegate*
 ChromeExtensionsAPIClient::GetNetworkingCastPrivateDelegate() {
-#if defined(OS_CHROMEOS) || defined(OS_WIN) || defined(OS_MACOSX)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || defined(OS_WIN) || defined(OS_MAC)
   if (!networking_cast_private_delegate_)
     networking_cast_private_delegate_ =
         ChromeNetworkingCastPrivateDelegate::Create();
@@ -391,7 +387,7 @@ ChromeExtensionsAPIClient::GetFeedbackPrivateDelegate() {
   return feedback_private_delegate_.get();
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 MediaPerceptionAPIDelegate*
 ChromeExtensionsAPIClient::GetMediaPerceptionAPIDelegate() {
   if (!media_perception_api_delegate_) {
@@ -414,13 +410,13 @@ void ChromeExtensionsAPIClient::SaveImageDataToClipboard(
     const std::vector<char>& image_data,
     api::clipboard::ImageType type,
     AdditionalDataItemList additional_items,
-    const base::Closure& success_callback,
-    const base::Callback<void(const std::string&)>& error_callback) {
+    base::OnceClosure success_callback,
+    base::OnceCallback<void(const std::string&)> error_callback) {
   if (!clipboard_extension_helper_)
     clipboard_extension_helper_ = std::make_unique<ClipboardExtensionHelper>();
   clipboard_extension_helper_->DecodeAndSaveImageData(
-      image_data, type, std::move(additional_items), success_callback,
-      error_callback);
+      image_data, type, std::move(additional_items),
+      std::move(success_callback), std::move(error_callback));
 }
 #endif
 

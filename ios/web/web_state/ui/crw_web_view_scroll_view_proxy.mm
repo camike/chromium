@@ -169,6 +169,15 @@ static int gAnyContext = 0;
     // -asUIScrollView method.
     _underlyingScrollView = [[UIScrollView alloc] init];
 
+    // There are a few properties where the default WKWebView.scrollView has
+    // different values from a base UIScrollView. As _underlyingScrollView
+    // starts out as a base UIScrollView, the property preservation code will
+    // copy over these incorrect values and overwrite the default
+    // WKWebView.scrollView values for those properties. Instead, set those
+    // values to their WebKit defaults.
+    _underlyingScrollView.alwaysBounceVertical = YES;
+    _underlyingScrollView.directionalLockEnabled = YES;
+
     [self.class startObservingScrollView:_underlyingScrollView proxy:self];
   }
   return self;
@@ -242,7 +251,9 @@ static int gAnyContext = 0;
   //   - is a readwrite property
   //   - AND is supposed to be modified directly, considering it's a scroll
   //     view of a web view. e.g., |frame| and |subviews| do not meet this
-  //     condition because they are managed by the web view.
+  //     condition because they are managed by the web view.  |backgroundColor|
+  //     is also managed by WKWebView to match the page's background color, and
+  //     should not be set directly (see crbug.com/1078790).
   //
   // Properties not explicitly declared in CRWWebViewScrollViewProxy can still
   // be accessed via -asUIScrollView, so they should be preserved as well.
@@ -266,7 +277,6 @@ static int gAnyContext = 0;
   newScrollView.indicatorStyle = oldScrollView.indicatorStyle;
 
   // UIView properties.
-  newScrollView.backgroundColor = oldScrollView.backgroundColor;
   newScrollView.hidden = oldScrollView.hidden;
   newScrollView.alpha = oldScrollView.alpha;
   newScrollView.opaque = oldScrollView.opaque;

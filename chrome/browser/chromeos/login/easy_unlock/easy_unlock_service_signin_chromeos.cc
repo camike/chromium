@@ -49,52 +49,51 @@ uint32_t kMaxCryptohomeBackoffIntervalMs = 10000u;
 uint32_t kInitialCryptohomeBackoffIntervalMs = 200u;
 
 // Calculates the backoff interval that should be used next.
-// |backoff| The last backoff interval used.
+// `backoff` The last backoff interval used.
 uint32_t GetNextBackoffInterval(uint32_t backoff) {
   if (backoff == 0u)
     return kInitialCryptohomeBackoffIntervalMs;
   return backoff * 2;
 }
 
-void LoadDataForUser(
-    const AccountId& account_id,
-    uint32_t backoff_ms,
-    const EasyUnlockKeyManager::GetDeviceDataListCallback& callback);
+void LoadDataForUser(const AccountId& account_id,
+                     uint32_t backoff_ms,
+                     EasyUnlockKeyManager::GetDeviceDataListCallback callback);
 
-// Callback passed to |LoadDataForUser()|.
-// If |LoadDataForUser| function succeeded, it invokes |callback| with the
+// Callback passed to `LoadDataForUser()`.
+// If `LoadDataForUser` function succeeded, it invokes `callback` with the
 // results.
-// If |LoadDataForUser| failed and further retries are allowed, schedules new
-// |LoadDataForUser| call with some backoff. If no further retires are allowed,
-// it invokes |callback| with the |LoadDataForUser| results.
+// If `LoadDataForUser` failed and further retries are allowed, schedules new
+// `LoadDataForUser` call with some backoff. If no further retires are allowed,
+// it invokes `callback` with the `LoadDataForUser` results.
 void RetryDataLoadOnError(
     const AccountId& account_id,
     uint32_t backoff_ms,
-    const EasyUnlockKeyManager::GetDeviceDataListCallback& callback,
+    EasyUnlockKeyManager::GetDeviceDataListCallback callback,
     bool success,
     const EasyUnlockDeviceKeyDataList& data_list) {
   if (success) {
-    callback.Run(success, data_list);
+    std::move(callback).Run(success, data_list);
     return;
   }
 
   uint32_t next_backoff_ms = GetNextBackoffInterval(backoff_ms);
   if (next_backoff_ms > kMaxCryptohomeBackoffIntervalMs) {
-    callback.Run(false, data_list);
+    std::move(callback).Run(false, data_list);
     return;
   }
 
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
-      base::BindOnce(&LoadDataForUser, account_id, next_backoff_ms, callback),
+      base::BindOnce(&LoadDataForUser, account_id, next_backoff_ms,
+                     std::move(callback)),
       base::TimeDelta::FromMilliseconds(next_backoff_ms));
 }
 
 // Loads device data list associated with the user's Easy unlock keys.
-void LoadDataForUser(
-    const AccountId& account_id,
-    uint32_t backoff_ms,
-    const EasyUnlockKeyManager::GetDeviceDataListCallback& callback) {
+void LoadDataForUser(const AccountId& account_id,
+                     uint32_t backoff_ms,
+                     EasyUnlockKeyManager::GetDeviceDataListCallback callback) {
   EasyUnlockKeyManager* key_manager =
       UserSessionManager::GetInstance()->GetEasyUnlockKeyManager();
   DCHECK(key_manager);
@@ -103,8 +102,8 @@ void LoadDataForUser(
       user_manager::UserManager::Get()->FindUser(account_id);
   DCHECK(user);
   key_manager->GetDeviceDataList(
-      UserContext(*user),
-      base::Bind(&RetryDataLoadOnError, account_id, backoff_ms, callback));
+      UserContext(*user), base::BindOnce(&RetryDataLoadOnError, account_id,
+                                         backoff_ms, std::move(callback)));
 }
 
 // Deserializes a vector of BeaconSeeds. If an error occurs, an empty vector
@@ -183,11 +182,11 @@ void EasyUnlockServiceSignin::WrapChallengeForUserAndDevice(
     const AccountId& account_id,
     const std::string& device_public_key,
     const std::string& channel_binding_data,
-    base::Callback<void(const std::string& wraped_challenge)> callback) {
+    base::OnceCallback<void(const std::string& wraped_challenge)> callback) {
   auto it = user_data_.find(account_id);
   if (it == user_data_.end() || it->second->state != USER_DATA_STATE_LOADED) {
     PA_LOG(ERROR) << "TPM data not loaded for " << account_id.Serialize();
-    callback.Run(std::string());
+    std::move(callback).Run(std::string());
     return;
   }
 
@@ -202,14 +201,14 @@ void EasyUnlockServiceSignin::WrapChallengeForUserAndDevice(
       challenge_wrapper_.reset(new EasyUnlockChallengeWrapper(
           device_data.challenge, channel_binding_data, account_id,
           EasyUnlockTpmKeyManagerFactory::GetInstance()->Get(profile())));
-      challenge_wrapper_->WrapChallenge(callback);
+      challenge_wrapper_->WrapChallenge(std::move(callback));
       return;
     }
   }
 
   PA_LOG(ERROR) << "Unable to find device record for "
                 << account_id.Serialize();
-  callback.Run(std::string());
+  std::move(callback).Run(std::string());
 }
 
 proximity_auth::ProximityAuthPrefManager*
@@ -342,16 +341,6 @@ void EasyUnlockServiceSignin::OnSuspendDoneInternal() {
   // Ignored.
 }
 
-void EasyUnlockServiceSignin::OnBluetoothAdapterPresentChanged() {
-  // Because the BluetoothAdapter state change may change whether EasyUnlock is
-  // allowed, we want to treat the user pod as though it were focused for the
-  // first time. This allows the correct flow (loading cryptohome keys,
-  // initializing ProximityAuthSystem, etc.) to take place.
-  AccountId current_account_id = account_id_;
-  account_id_ = AccountId();
-  OnFocusedUserChanged(current_account_id);
-}
-
 void EasyUnlockServiceSignin::OnScreenDidLock(
     proximity_auth::ScreenlockBridge::LockHandler::ScreenType screen_type) {
   // In production code, the screen type should always be the signin screen; but
@@ -373,12 +362,11 @@ void EasyUnlockServiceSignin::OnScreenDidUnlock(
       proximity_auth::ScreenlockBridge::LockHandler::SIGNIN_SCREEN)
     return;
 
-  // Only record metrics for users who have enabled the feature.
+  // TODO(crbug.com/1171972): Deprecate this metric. Note also that checking
+  // IsEnabled() here often incorrectly returns false, because
+  // OnScreenDidUnlock() is occurring during user session startup. See
+  // https://crbug.com/1154766 for more.
   if (IsEnabled()) {
-    if (will_authenticate_using_easy_unlock()) {
-      SmartLockMetricsRecorder::RecordAuthResultSignInSuccess();
-    }
-
     SmartLockMetricsRecorder::RecordSmartLockSignInAuthMethodChoice(
         will_authenticate_using_easy_unlock()
             ? SmartLockMetricsRecorder::SmartLockAuthMethodChoice::kSmartLock
@@ -395,10 +383,6 @@ void EasyUnlockServiceSignin::OnFocusedUserChanged(
   if (account_id_ == account_id)
     return;
 
-  // Setting or clearing the account_id may changed |IsAllowed| value, so in
-  // these cases update the app state. Otherwise, it's enough to notify the app
-  // the user data has been updated.
-  const bool should_update_app_state = (account_id_ != account_id);
   account_id_ = account_id;
   pref_manager_->SetActiveUser(account_id);
   user_pod_last_focused_timestamp_ = base::TimeTicks::Now();
@@ -420,10 +404,7 @@ void EasyUnlockServiceSignin::OnFocusedUserChanged(
     return;
   }
 
-  if (should_update_app_state) {
-    UpdateAppState();
-  }
-
+  UpdateAppState();
   LoadCurrentUserDataIfNeeded();
 
   // Start loading TPM system token.
@@ -454,8 +435,8 @@ void EasyUnlockServiceSignin::LoadCurrentUserDataIfNeeded() {
   LoadDataForUser(
       account_id_,
       allow_cryptohome_backoff_ ? 0u : kMaxCryptohomeBackoffIntervalMs,
-      base::Bind(&EasyUnlockServiceSignin::OnUserDataLoaded,
-                 weak_ptr_factory_.GetWeakPtr(), account_id_));
+      base::BindOnce(&EasyUnlockServiceSignin::OnUserDataLoaded,
+                     weak_ptr_factory_.GetWeakPtr(), account_id_));
 }
 
 // TODO(crbug.com/856387): Write tests for device retrieval from the TPM.
@@ -517,7 +498,7 @@ void EasyUnlockServiceSignin::OnUserDataLoaded(
       PA_LOG(WARNING) << "No BeaconSeeds were loaded.";
     }
 
-    // Values such as the |instance_id| and |name| of the device are not
+    // Values such as the `instance_id` and `name` of the device are not
     // provided in the device dictionary that is persisted to the TPM during the
     // user session. However, in this particular scenario, we do not need these
     // values to safely construct and use the RemoteDevice objects.
@@ -525,7 +506,8 @@ void EasyUnlockServiceSignin::OnUserDataLoaded(
         account_id.GetUserEmail(), std::string() /* instance_id */,
         std::string() /* name */, std::string() /* pii_free_name */,
         decoded_public_key, decoded_psk /* persistent_symmetric_key */,
-        0L /* last_update_time_millis */, software_features, beacon_seeds);
+        0L /* last_update_time_millis */, software_features, beacon_seeds,
+        std::string() /* bluetooth_public_address */);
 
     remote_devices.push_back(remote_device);
     PA_LOG(VERBOSE) << "Loaded Remote Device:\n"

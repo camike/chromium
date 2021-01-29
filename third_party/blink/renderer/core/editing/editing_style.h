@@ -32,10 +32,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_EDITING_STYLE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_EDITING_STYLE_H_
 
+#include "mojo/public/mojom/base/text_direction.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
+#include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -58,7 +60,6 @@ class ComputedStyle;
 class CSSPropertyValueSet;
 enum class EditingTriState;
 enum class SecureContextMode;
-enum class WritingDirection;
 
 class CORE_EXPORT EditingStyle final : public GarbageCollected<EditingStyle> {
  public:
@@ -86,7 +87,7 @@ class CORE_EXPORT EditingStyle final : public GarbageCollected<EditingStyle> {
   EditingStyle(CSSPropertyID, const String& value, SecureContextMode);
 
   MutableCSSPropertyValueSet* Style() { return mutable_style_.Get(); }
-  bool GetTextDirection(WritingDirection&) const;
+  bool GetTextDirection(mojo_base::mojom::blink::TextDirection&) const;
   bool IsEmpty() const;
   void OverrideWithStyle(const CSSPropertyValueSet*);
   void Clear();
@@ -157,7 +158,7 @@ class CORE_EXPORT EditingStyle final : public GarbageCollected<EditingStyle> {
                    bool important,
                    SecureContextMode);
 
-  void Trace(Visitor*);
+  void Trace(Visitor*) const;
   static EditingTriState SelectionHasStyle(const LocalFrame&,
                                            CSSPropertyID,
                                            const String& value);

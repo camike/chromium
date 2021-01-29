@@ -7,12 +7,14 @@
 
 #include <vector>
 
+#include "base/optional.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_types.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/gfx/range/range.h"
 
 class Tab;
 class TabStrip;
@@ -98,6 +100,13 @@ class TabStripController {
   virtual void MoveGroup(const tab_groups::TabGroupId& group,
                          int final_index) = 0;
 
+  // Switches the collapsed state of a tab group. Returns false if the state was
+  // not successfully switched.
+  virtual bool ToggleTabGroupCollapsedState(
+      const tab_groups::TabGroupId group,
+      ToggleTabGroupCollapsedStateOrigin origin =
+          ToggleTabGroupCollapsedStateOrigin::kImplicitAction) = 0;
+
   // Shows a context menu for the tab at the specified point in screen coords.
   virtual void ShowContextMenuForTab(Tab* tab,
                                      const gfx::Point& p,
@@ -149,13 +158,33 @@ class TabStripController {
   virtual tab_groups::TabGroupColorId GetGroupColorId(
       const tab_groups::TabGroupId& group) const = 0;
 
+  // Returns the |group| collapsed state. Returns false if the group does not
+  // exist or is not collapsed.
+  virtual bool IsGroupCollapsed(const tab_groups::TabGroupId& group) const = 0;
+
   // Sets the title and color ID of the given |group|.
   virtual void SetVisualDataForGroup(
       const tab_groups::TabGroupId& group,
       const tab_groups::TabGroupVisualData& visual_data) = 0;
 
-  // Returns the list of tabs in the given |group|.
-  virtual std::vector<int> ListTabsInGroup(
+  // Gets the first tab index in |group|, or nullopt if the group is
+  // currently empty. This is always safe to call unlike
+  // ListTabsInGroup().
+  virtual base::Optional<int> GetFirstTabInGroup(
+      const tab_groups::TabGroupId& group) const = 0;
+
+  // Gets the last tab index in |group|, or nullopt if the group is
+  // currently empty. This is always safe to call unlike
+  // ListTabsInGroup().
+  virtual base::Optional<int> GetLastTabInGroup(
+      const tab_groups::TabGroupId& group) const = 0;
+
+  // Returns the range of tabs in the given |group|. This must not be
+  // called during intermediate states where the group is not
+  // contiguous. For example, if tabs elsewhere in the tab strip are
+  // being moved into |group| it may not be contiguous; this method
+  // cannot be called.
+  virtual gfx::Range ListTabsInGroup(
       const tab_groups::TabGroupId& group) const = 0;
 
   // Determines whether the top frame is condensed vertically, as when the

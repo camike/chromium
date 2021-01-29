@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.xsurface;
 
+import android.content.Context;
 import androidx.annotation.Nullable;
 
 /**
@@ -20,9 +21,22 @@ public interface ProcessScope {
     /**
      * Returns a SurfaceScope which should be one per Surface. That Surface can have multiple
      * HybridListRenderers and SurfaceRenderers within its UI.
+     *
+     * @param dependencyProvider Provider for activity-scoped dependencies.
      **/
     @Nullable
-    default SurfaceScope obtainSurfaceScope() {
+    default SurfaceScope obtainSurfaceScope(SurfaceScopeDependencyProvider dependencyProvider) {
+        return obtainSurfaceScope(dependencyProvider.getActivityContext());
+    }
+
+    @Nullable
+    @Deprecated
+    default SurfaceScope obtainSurfaceScope(Context activityContext) {
+        return null;
+    }
+
+    @Nullable
+    default ImagePrefetcher provideImagePrefetcher() {
         return null;
     }
 }

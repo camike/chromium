@@ -32,7 +32,8 @@ TEST_F(SyncChangeTest, LocalDelete) {
   SyncChange e(FROM_HERE, change_type,
                SyncData::CreateLocalDelete(tag, PREFERENCES));
   EXPECT_EQ(change_type, e.change_type());
-  EXPECT_EQ(tag, SyncDataLocal(e.sync_data()).GetTag());
+  EXPECT_EQ(ClientTagHash::FromUnhashed(PREFERENCES, tag),
+            e.sync_data().GetClientTagHash());
   EXPECT_EQ(PREFERENCES, e.sync_data().GetDataType());
 }
 
@@ -46,7 +47,8 @@ TEST_F(SyncChangeTest, LocalUpdate) {
   SyncChange e(FROM_HERE, change_type,
                SyncData::CreateLocalData(tag, title, specifics));
   EXPECT_EQ(change_type, e.change_type());
-  EXPECT_EQ(tag, SyncDataLocal(e.sync_data()).GetTag());
+  EXPECT_EQ(ClientTagHash::FromUnhashed(PREFERENCES, tag),
+            e.sync_data().GetClientTagHash());
   EXPECT_EQ(title, e.sync_data().GetTitle());
   EXPECT_EQ(PREFERENCES, e.sync_data().GetDataType());
   std::unique_ptr<base::DictionaryValue> ref_spec(
@@ -66,7 +68,8 @@ TEST_F(SyncChangeTest, LocalAdd) {
   SyncChange e(FROM_HERE, change_type,
                SyncData::CreateLocalData(tag, title, specifics));
   EXPECT_EQ(change_type, e.change_type());
-  EXPECT_EQ(tag, SyncDataLocal(e.sync_data()).GetTag());
+  EXPECT_EQ(ClientTagHash::FromUnhashed(PREFERENCES, tag),
+            e.sync_data().GetClientTagHash());
   EXPECT_EQ(title, e.sync_data().GetTitle());
   EXPECT_EQ(PREFERENCES, e.sync_data().GetDataType());
   std::unique_ptr<base::DictionaryValue> ref_spec(
@@ -86,15 +89,14 @@ TEST_F(SyncChangeTest, SyncerChanges) {
   pref_specifics->set_name("update");
   change_list.push_back(
       SyncChange(FROM_HERE, SyncChange::ACTION_UPDATE,
-                 SyncData::CreateRemoteData(1, update_specifics)));
+                 SyncData::CreateRemoteData(update_specifics)));
 
   // Create an add.
   sync_pb::EntitySpecifics add_specifics;
   pref_specifics = add_specifics.mutable_preference();
   pref_specifics->set_name("add");
-  change_list.push_back(
-      SyncChange(FROM_HERE, SyncChange::ACTION_ADD,
-                 SyncData::CreateRemoteData(2, add_specifics)));
+  change_list.push_back(SyncChange(FROM_HERE, SyncChange::ACTION_ADD,
+                                   SyncData::CreateRemoteData(add_specifics)));
 
   // Create a delete.
   sync_pb::EntitySpecifics delete_specifics;
@@ -102,7 +104,7 @@ TEST_F(SyncChangeTest, SyncerChanges) {
   pref_specifics->set_name("add");
   change_list.push_back(
       SyncChange(FROM_HERE, SyncChange::ACTION_DELETE,
-                 SyncData::CreateRemoteData(3, delete_specifics)));
+                 SyncData::CreateRemoteData(delete_specifics)));
 
   ASSERT_EQ(3U, change_list.size());
 

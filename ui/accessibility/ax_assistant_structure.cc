@@ -134,8 +134,7 @@ base::string16 GetValue(const AXNode* node, bool show_password) {
 bool HasOnlyTextAndImageChildren(const AXNode* node) {
   for (size_t i = 0; i < node->GetUnignoredChildCount(); ++i) {
     AXNode* child = node->GetUnignoredChildAtIndex(i);
-    if (child->data().role != ax::mojom::Role::kStaticText &&
-        child->data().role != ax::mojom::Role::kImage) {
+    if (!child->IsText() && !ui::IsImage(child->data().role)) {
       return false;
     }
   }
@@ -145,7 +144,8 @@ bool HasOnlyTextAndImageChildren(const AXNode* node) {
 bool IsFocusable(const AXNode* node) {
   if (node->data().role == ax::mojom::Role::kIframe ||
       node->data().role == ax::mojom::Role::kIframePresentational ||
-      (node->data().role == ax::mojom::Role::kRootWebArea &&
+      ((node->data().role == ax::mojom::Role::kRootWebArea ||
+        node->data().role == ax::mojom::Role::kPdfRoot) &&
        node->GetUnignoredParent())) {
     return node->data().HasStringAttribute(ax::mojom::StringAttribute::kName);
   }
@@ -153,7 +153,7 @@ bool IsFocusable(const AXNode* node) {
 }
 
 base::string16 GetText(const AXNode* node, bool show_password) {
-  if (node->data().role == ax::mojom::Role::kWebArea ||
+  if (node->data().role == ax::mojom::Role::kPdfRoot ||
       node->data().role == ax::mojom::Role::kIframe ||
       node->data().role == ax::mojom::Role::kIframePresentational) {
     return base::string16();
@@ -207,8 +207,10 @@ base::string16 GetText(const AXNode* node, bool show_password) {
   if (text.empty())
     text = value;
 
-  if (node->data().role == ax::mojom::Role::kRootWebArea)
+  if (node->data().role == ax::mojom::Role::kRootWebArea ||
+      node->data().role == ax::mojom::Role::kPdfRoot) {
     return text;
+  }
 
   if (text.empty() &&
       (HasOnlyTextChildren(node) ||
@@ -426,11 +428,9 @@ const char* AXRoleToAndroidClassName(ax::mojom::Role role, bool has_parent) {
     case ax::mojom::Role::kColorWell:
     case ax::mojom::Role::kComboBoxMenuButton:
     case ax::mojom::Role::kDate:
-    case ax::mojom::Role::kPopUpButton:
     case ax::mojom::Role::kInputTime:
       return kAXSpinnerClassname;
     case ax::mojom::Role::kButton:
-    case ax::mojom::Role::kMenuButton:
     case ax::mojom::Role::kPdfActionableHighlight:
       return kAXButtonClassname;
     case ax::mojom::Role::kCheckBox:
@@ -456,6 +456,7 @@ const char* AXRoleToAndroidClassName(ax::mojom::Role role, bool has_parent) {
     case ax::mojom::Role::kList:
     case ax::mojom::Role::kListBox:
     case ax::mojom::Role::kDescriptionList:
+    case ax::mojom::Role::kDirectory:
       return kAXListViewClassname;
     case ax::mojom::Role::kDialog:
       return kAXDialogClassname;

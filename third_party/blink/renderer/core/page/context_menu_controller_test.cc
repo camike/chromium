@@ -4,16 +4,18 @@
 
 #include "third_party/blink/renderer/core/page/context_menu_controller.h"
 
+#include "base/optional.h"
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/context_menu_data/context_menu_data.h"
 #include "third_party/blink/public/common/context_menu_data/edit_flags.h"
+#include "third_party/blink/public/common/input/web_keyboard_event.h"
 #include "third_party/blink/public/common/input/web_menu_source_type.h"
-#include "third_party/blink/public/platform/web_media_stream.h"
-#include "third_party/blink/public/platform/web_media_stream_track.h"
-#include "third_party/blink/public/platform/web_rect.h"
-#include "third_party/blink/public/web/web_context_menu_data.h"
+#include "third_party/blink/public/mojom/context_menu/context_menu.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/xml_document.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
+#include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
@@ -22,6 +24,8 @@
 #include "third_party/blink/renderer/core/page/context_menu_controller.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
 #include "third_party/blink/renderer/platform/testing/empty_web_media_player.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
@@ -45,25 +49,28 @@ class MockWebMediaPlayerForContextMenu : public EmptyWebMediaPlayer {
 
 class TestWebFrameClientImpl : public frame_test_helpers::TestWebFrameClient {
  public:
-  void ShowContextMenu(const WebContextMenuData& data) override {
+  void ShowContextMenu(const ContextMenuData& data,
+                       const base::Optional<gfx::Point>&) override {
     context_menu_data_ = data;
   }
 
-  WebMediaPlayer* CreateMediaPlayer(const WebMediaPlayerSource&,
-                                    WebMediaPlayerClient*,
-                                    blink::MediaInspectorContext*,
-                                    WebMediaPlayerEncryptedMediaClient*,
-                                    WebContentDecryptionModule*,
-                                    const WebString& sink_id) override {
+  WebMediaPlayer* CreateMediaPlayer(
+      const WebMediaPlayerSource&,
+      WebMediaPlayerClient*,
+      blink::MediaInspectorContext*,
+      WebMediaPlayerEncryptedMediaClient*,
+      WebContentDecryptionModule*,
+      const WebString& sink_id,
+      const cc::LayerTreeSettings& settings) override {
     return new MockWebMediaPlayerForContextMenu();
   }
 
-  const WebContextMenuData& GetContextMenuData() const {
+  const ContextMenuData& GetContextMenuData() const {
     return context_menu_data_;
   }
 
  private:
-  WebContextMenuData context_menu_data_;
+  ContextMenuData context_menu_data_;
 };
 
 }  // anonymous namespace
@@ -74,7 +81,8 @@ class ContextMenuControllerTest : public testing::Test {
     web_view_helper_.Initialize(&web_frame_client_);
 
     WebLocalFrameImpl* local_main_frame = web_view_helper_.LocalMainFrame();
-    local_main_frame->ViewImpl()->MainFrameWidget()->Resize(WebSize(640, 480));
+    local_main_frame->ViewImpl()->MainFrameViewWidget()->Resize(
+        gfx::Size(640, 480));
     local_main_frame->ViewImpl()->MainFrameWidget()->UpdateAllLifecyclePhases(
         DocumentUpdateReason::kTest);
   }
@@ -151,26 +159,26 @@ TEST_F(ContextMenuControllerTest, VideoNotLoaded) {
   EXPECT_TRUE(ShowContextMenu(location, kMenuSourceMouse));
 
   // Context menu info are sent to the WebLocalFrameClient.
-  WebContextMenuData context_menu_data =
-      GetWebFrameClient().GetContextMenuData();
-  EXPECT_EQ(ContextMenuDataMediaType::kVideo, context_menu_data.media_type);
-  EXPECT_EQ(video_url, context_menu_data.src_url.GetString());
+  ContextMenuData context_menu_data = GetWebFrameClient().GetContextMenuData();
+  EXPECT_EQ(mojom::blink::ContextMenuDataMediaType::kVideo,
+            context_menu_data.media_type);
+  EXPECT_EQ(video_url, context_menu_data.src_url.spec());
 
-  const Vector<std::pair<WebContextMenuData::MediaFlags, bool>>
+  const Vector<std::pair<ContextMenuData::MediaFlags, bool>>
       expected_media_flags = {
-          {WebContextMenuData::kMediaInError, false},
-          {WebContextMenuData::kMediaPaused, true},
-          {WebContextMenuData::kMediaMuted, false},
-          {WebContextMenuData::kMediaLoop, false},
-          {WebContextMenuData::kMediaCanSave, true},
-          {WebContextMenuData::kMediaHasAudio, false},
-          {WebContextMenuData::kMediaCanToggleControls, false},
-          {WebContextMenuData::kMediaControls, false},
-          {WebContextMenuData::kMediaCanPrint, false},
-          {WebContextMenuData::kMediaCanRotate, false},
-          {WebContextMenuData::kMediaCanPictureInPicture, false},
-          {WebContextMenuData::kMediaPictureInPicture, false},
-          {WebContextMenuData::kMediaCanLoop, true},
+          {ContextMenuData::kMediaInError, false},
+          {ContextMenuData::kMediaPaused, true},
+          {ContextMenuData::kMediaMuted, false},
+          {ContextMenuData::kMediaLoop, false},
+          {ContextMenuData::kMediaCanSave, true},
+          {ContextMenuData::kMediaHasAudio, false},
+          {ContextMenuData::kMediaCanToggleControls, false},
+          {ContextMenuData::kMediaControls, false},
+          {ContextMenuData::kMediaCanPrint, false},
+          {ContextMenuData::kMediaCanRotate, false},
+          {ContextMenuData::kMediaCanPictureInPicture, false},
+          {ContextMenuData::kMediaPictureInPicture, false},
+          {ContextMenuData::kMediaCanLoop, true},
       };
 
   for (const auto& expected_media_flag : expected_media_flags) {
@@ -212,26 +220,26 @@ TEST_F(ContextMenuControllerTest, VideoWithAudioOnly) {
   EXPECT_TRUE(ShowContextMenu(location, kMenuSourceMouse));
 
   // Context menu info are sent to the WebLocalFrameClient.
-  WebContextMenuData context_menu_data =
-      GetWebFrameClient().GetContextMenuData();
-  EXPECT_EQ(ContextMenuDataMediaType::kAudio, context_menu_data.media_type);
-  EXPECT_EQ(video_url, context_menu_data.src_url.GetString());
+  ContextMenuData context_menu_data = GetWebFrameClient().GetContextMenuData();
+  EXPECT_EQ(mojom::blink::ContextMenuDataMediaType::kAudio,
+            context_menu_data.media_type);
+  EXPECT_EQ(video_url, context_menu_data.src_url.spec());
 
-  const Vector<std::pair<WebContextMenuData::MediaFlags, bool>>
+  const Vector<std::pair<ContextMenuData::MediaFlags, bool>>
       expected_media_flags = {
-          {WebContextMenuData::kMediaInError, false},
-          {WebContextMenuData::kMediaPaused, true},
-          {WebContextMenuData::kMediaMuted, false},
-          {WebContextMenuData::kMediaLoop, false},
-          {WebContextMenuData::kMediaCanSave, true},
-          {WebContextMenuData::kMediaHasAudio, true},
-          {WebContextMenuData::kMediaCanToggleControls, false},
-          {WebContextMenuData::kMediaControls, false},
-          {WebContextMenuData::kMediaCanPrint, false},
-          {WebContextMenuData::kMediaCanRotate, false},
-          {WebContextMenuData::kMediaCanPictureInPicture, false},
-          {WebContextMenuData::kMediaPictureInPicture, false},
-          {WebContextMenuData::kMediaCanLoop, true},
+          {ContextMenuData::kMediaInError, false},
+          {ContextMenuData::kMediaPaused, true},
+          {ContextMenuData::kMediaMuted, false},
+          {ContextMenuData::kMediaLoop, false},
+          {ContextMenuData::kMediaCanSave, true},
+          {ContextMenuData::kMediaHasAudio, true},
+          {ContextMenuData::kMediaCanToggleControls, false},
+          {ContextMenuData::kMediaControls, false},
+          {ContextMenuData::kMediaCanPrint, false},
+          {ContextMenuData::kMediaCanRotate, false},
+          {ContextMenuData::kMediaCanPictureInPicture, false},
+          {ContextMenuData::kMediaPictureInPicture, false},
+          {ContextMenuData::kMediaCanLoop, true},
       };
 
   for (const auto& expected_media_flag : expected_media_flags) {
@@ -269,26 +277,26 @@ TEST_F(ContextMenuControllerTest, PictureInPictureEnabledVideoLoaded) {
   EXPECT_TRUE(ShowContextMenu(location, kMenuSourceMouse));
 
   // Context menu info are sent to the WebLocalFrameClient.
-  WebContextMenuData context_menu_data =
-      GetWebFrameClient().GetContextMenuData();
-  EXPECT_EQ(ContextMenuDataMediaType::kVideo, context_menu_data.media_type);
-  EXPECT_EQ(video_url, context_menu_data.src_url.GetString());
+  ContextMenuData context_menu_data = GetWebFrameClient().GetContextMenuData();
+  EXPECT_EQ(mojom::blink::ContextMenuDataMediaType::kVideo,
+            context_menu_data.media_type);
+  EXPECT_EQ(video_url, context_menu_data.src_url.spec());
 
-  const Vector<std::pair<WebContextMenuData::MediaFlags, bool>>
+  const Vector<std::pair<ContextMenuData::MediaFlags, bool>>
       expected_media_flags = {
-          {WebContextMenuData::kMediaInError, false},
-          {WebContextMenuData::kMediaPaused, true},
-          {WebContextMenuData::kMediaMuted, false},
-          {WebContextMenuData::kMediaLoop, false},
-          {WebContextMenuData::kMediaCanSave, true},
-          {WebContextMenuData::kMediaHasAudio, false},
-          {WebContextMenuData::kMediaCanToggleControls, true},
-          {WebContextMenuData::kMediaControls, false},
-          {WebContextMenuData::kMediaCanPrint, false},
-          {WebContextMenuData::kMediaCanRotate, false},
-          {WebContextMenuData::kMediaCanPictureInPicture, true},
-          {WebContextMenuData::kMediaPictureInPicture, false},
-          {WebContextMenuData::kMediaCanLoop, true},
+          {ContextMenuData::kMediaInError, false},
+          {ContextMenuData::kMediaPaused, true},
+          {ContextMenuData::kMediaMuted, false},
+          {ContextMenuData::kMediaLoop, false},
+          {ContextMenuData::kMediaCanSave, true},
+          {ContextMenuData::kMediaHasAudio, false},
+          {ContextMenuData::kMediaCanToggleControls, true},
+          {ContextMenuData::kMediaControls, false},
+          {ContextMenuData::kMediaCanPrint, false},
+          {ContextMenuData::kMediaCanRotate, false},
+          {ContextMenuData::kMediaCanPictureInPicture, true},
+          {ContextMenuData::kMediaPictureInPicture, false},
+          {ContextMenuData::kMediaCanLoop, true},
       };
 
   for (const auto& expected_media_flag : expected_media_flags) {
@@ -326,26 +334,26 @@ TEST_F(ContextMenuControllerTest, PictureInPictureDisabledVideoLoaded) {
   EXPECT_TRUE(ShowContextMenu(location, kMenuSourceMouse));
 
   // Context menu info are sent to the WebLocalFrameClient.
-  WebContextMenuData context_menu_data =
-      GetWebFrameClient().GetContextMenuData();
-  EXPECT_EQ(ContextMenuDataMediaType::kVideo, context_menu_data.media_type);
-  EXPECT_EQ(video_url, context_menu_data.src_url.GetString());
+  ContextMenuData context_menu_data = GetWebFrameClient().GetContextMenuData();
+  EXPECT_EQ(mojom::blink::ContextMenuDataMediaType::kVideo,
+            context_menu_data.media_type);
+  EXPECT_EQ(video_url, context_menu_data.src_url.spec());
 
-  const Vector<std::pair<WebContextMenuData::MediaFlags, bool>>
+  const Vector<std::pair<ContextMenuData::MediaFlags, bool>>
       expected_media_flags = {
-          {WebContextMenuData::kMediaInError, false},
-          {WebContextMenuData::kMediaPaused, true},
-          {WebContextMenuData::kMediaMuted, false},
-          {WebContextMenuData::kMediaLoop, false},
-          {WebContextMenuData::kMediaCanSave, true},
-          {WebContextMenuData::kMediaHasAudio, false},
-          {WebContextMenuData::kMediaCanToggleControls, true},
-          {WebContextMenuData::kMediaControls, false},
-          {WebContextMenuData::kMediaCanPrint, false},
-          {WebContextMenuData::kMediaCanRotate, false},
-          {WebContextMenuData::kMediaCanPictureInPicture, false},
-          {WebContextMenuData::kMediaPictureInPicture, false},
-          {WebContextMenuData::kMediaCanLoop, true},
+          {ContextMenuData::kMediaInError, false},
+          {ContextMenuData::kMediaPaused, true},
+          {ContextMenuData::kMediaMuted, false},
+          {ContextMenuData::kMediaLoop, false},
+          {ContextMenuData::kMediaCanSave, true},
+          {ContextMenuData::kMediaHasAudio, false},
+          {ContextMenuData::kMediaCanToggleControls, true},
+          {ContextMenuData::kMediaControls, false},
+          {ContextMenuData::kMediaCanPrint, false},
+          {ContextMenuData::kMediaCanRotate, false},
+          {ContextMenuData::kMediaCanPictureInPicture, false},
+          {ContextMenuData::kMediaPictureInPicture, false},
+          {ContextMenuData::kMediaCanLoop, true},
       };
 
   for (const auto& expected_media_flag : expected_media_flags) {
@@ -365,10 +373,10 @@ TEST_F(ContextMenuControllerTest, MediaStreamVideoLoaded) {
   // Setup video element.
   Persistent<HTMLVideoElement> video =
       MakeGarbageCollected<HTMLVideoElement>(*GetDocument());
-  blink::WebMediaStream web_media_stream;
-  blink::WebVector<blink::WebMediaStreamTrack> dummy_tracks;
-  web_media_stream.Initialize(dummy_tracks, dummy_tracks);
-  video->SetSrcObject(web_media_stream);
+  MediaStreamComponentVector dummy_components;
+  auto* media_stream_descriptor = MakeGarbageCollected<MediaStreamDescriptor>(
+      dummy_components, dummy_components);
+  video->SetSrcObject(media_stream_descriptor);
   GetDocument()->body()->AppendChild(video);
   test::RunPendingTasks();
   SetReadyState(video.Get(), HTMLMediaElement::kHaveMetadata);
@@ -385,25 +393,25 @@ TEST_F(ContextMenuControllerTest, MediaStreamVideoLoaded) {
   EXPECT_TRUE(ShowContextMenu(location, kMenuSourceMouse));
 
   // Context menu info are sent to the WebLocalFrameClient.
-  WebContextMenuData context_menu_data =
-      GetWebFrameClient().GetContextMenuData();
-  EXPECT_EQ(ContextMenuDataMediaType::kVideo, context_menu_data.media_type);
+  ContextMenuData context_menu_data = GetWebFrameClient().GetContextMenuData();
+  EXPECT_EQ(mojom::blink::ContextMenuDataMediaType::kVideo,
+            context_menu_data.media_type);
 
-  const Vector<std::pair<WebContextMenuData::MediaFlags, bool>>
+  const Vector<std::pair<ContextMenuData::MediaFlags, bool>>
       expected_media_flags = {
-          {WebContextMenuData::kMediaInError, false},
-          {WebContextMenuData::kMediaPaused, true},
-          {WebContextMenuData::kMediaMuted, false},
-          {WebContextMenuData::kMediaLoop, false},
-          {WebContextMenuData::kMediaCanSave, false},
-          {WebContextMenuData::kMediaHasAudio, false},
-          {WebContextMenuData::kMediaCanToggleControls, true},
-          {WebContextMenuData::kMediaControls, false},
-          {WebContextMenuData::kMediaCanPrint, false},
-          {WebContextMenuData::kMediaCanRotate, false},
-          {WebContextMenuData::kMediaCanPictureInPicture, true},
-          {WebContextMenuData::kMediaPictureInPicture, false},
-          {WebContextMenuData::kMediaCanLoop, false},
+          {ContextMenuData::kMediaInError, false},
+          {ContextMenuData::kMediaPaused, true},
+          {ContextMenuData::kMediaMuted, false},
+          {ContextMenuData::kMediaLoop, false},
+          {ContextMenuData::kMediaCanSave, false},
+          {ContextMenuData::kMediaHasAudio, false},
+          {ContextMenuData::kMediaCanToggleControls, true},
+          {ContextMenuData::kMediaControls, false},
+          {ContextMenuData::kMediaCanPrint, false},
+          {ContextMenuData::kMediaCanRotate, false},
+          {ContextMenuData::kMediaCanPictureInPicture, true},
+          {ContextMenuData::kMediaPictureInPicture, false},
+          {ContextMenuData::kMediaCanLoop, false},
       };
 
   for (const auto& expected_media_flag : expected_media_flags) {
@@ -447,26 +455,26 @@ TEST_F(ContextMenuControllerTest, InfiniteDurationVideoLoaded) {
   EXPECT_TRUE(ShowContextMenu(location, kMenuSourceMouse));
 
   // Context menu info are sent to the WebLocalFrameClient.
-  WebContextMenuData context_menu_data =
-      GetWebFrameClient().GetContextMenuData();
-  EXPECT_EQ(ContextMenuDataMediaType::kVideo, context_menu_data.media_type);
-  EXPECT_EQ(video_url, context_menu_data.src_url.GetString());
+  ContextMenuData context_menu_data = GetWebFrameClient().GetContextMenuData();
+  EXPECT_EQ(mojom::blink::ContextMenuDataMediaType::kVideo,
+            context_menu_data.media_type);
+  EXPECT_EQ(video_url, context_menu_data.src_url.spec());
 
-  const Vector<std::pair<WebContextMenuData::MediaFlags, bool>>
+  const Vector<std::pair<ContextMenuData::MediaFlags, bool>>
       expected_media_flags = {
-          {WebContextMenuData::kMediaInError, false},
-          {WebContextMenuData::kMediaPaused, true},
-          {WebContextMenuData::kMediaMuted, false},
-          {WebContextMenuData::kMediaLoop, false},
-          {WebContextMenuData::kMediaCanSave, false},
-          {WebContextMenuData::kMediaHasAudio, false},
-          {WebContextMenuData::kMediaCanToggleControls, true},
-          {WebContextMenuData::kMediaControls, false},
-          {WebContextMenuData::kMediaCanPrint, false},
-          {WebContextMenuData::kMediaCanRotate, false},
-          {WebContextMenuData::kMediaCanPictureInPicture, true},
-          {WebContextMenuData::kMediaPictureInPicture, false},
-          {WebContextMenuData::kMediaCanLoop, false},
+          {ContextMenuData::kMediaInError, false},
+          {ContextMenuData::kMediaPaused, true},
+          {ContextMenuData::kMediaMuted, false},
+          {ContextMenuData::kMediaLoop, false},
+          {ContextMenuData::kMediaCanSave, false},
+          {ContextMenuData::kMediaHasAudio, false},
+          {ContextMenuData::kMediaCanToggleControls, true},
+          {ContextMenuData::kMediaControls, false},
+          {ContextMenuData::kMediaCanPrint, false},
+          {ContextMenuData::kMediaCanRotate, false},
+          {ContextMenuData::kMediaCanPictureInPicture, true},
+          {ContextMenuData::kMediaPictureInPicture, false},
+          {ContextMenuData::kMediaCanLoop, false},
       };
 
   for (const auto& expected_media_flag : expected_media_flags) {
@@ -503,9 +511,9 @@ TEST_F(ContextMenuControllerTest, EditingActionsEnabledInSVGDocument) {
   selection.SelectSubString(*text_element, 4, 8);
   EXPECT_TRUE(ShowContextMenuForElement(text_element, kMenuSourceMouse));
 
-  WebContextMenuData context_menu_data =
-      GetWebFrameClient().GetContextMenuData();
-  EXPECT_EQ(context_menu_data.media_type, ContextMenuDataMediaType::kNone);
+  ContextMenuData context_menu_data = GetWebFrameClient().GetContextMenuData();
+  EXPECT_EQ(context_menu_data.media_type,
+            mojom::blink::ContextMenuDataMediaType::kNone);
   EXPECT_EQ(context_menu_data.edit_flags, ContextMenuDataEditFlags::kCanCopy);
   EXPECT_EQ(context_menu_data.selected_text, "able tex");
 
@@ -515,7 +523,8 @@ TEST_F(ContextMenuControllerTest, EditingActionsEnabledInSVGDocument) {
   EXPECT_TRUE(ShowContextMenuForElement(editable_element, kMenuSourceMouse));
 
   context_menu_data = GetWebFrameClient().GetContextMenuData();
-  EXPECT_EQ(context_menu_data.media_type, ContextMenuDataMediaType::kNone);
+  EXPECT_EQ(context_menu_data.media_type,
+            mojom::blink::ContextMenuDataMediaType::kNone);
   EXPECT_EQ(context_menu_data.edit_flags,
             ContextMenuDataEditFlags::kCanCut |
                 ContextMenuDataEditFlags::kCanCopy |
@@ -545,9 +554,9 @@ TEST_F(ContextMenuControllerTest, EditingActionsEnabledInXMLDocument) {
   selection.SelectAll();
   EXPECT_TRUE(ShowContextMenuForElement(text_element, kMenuSourceMouse));
 
-  WebContextMenuData context_menu_data =
-      GetWebFrameClient().GetContextMenuData();
-  EXPECT_EQ(context_menu_data.media_type, ContextMenuDataMediaType::kNone);
+  ContextMenuData context_menu_data = GetWebFrameClient().GetContextMenuData();
+  EXPECT_EQ(context_menu_data.media_type,
+            mojom::blink::ContextMenuDataMediaType::kNone);
   EXPECT_EQ(context_menu_data.edit_flags, ContextMenuDataEditFlags::kCanCopy);
   EXPECT_EQ(context_menu_data.selected_text, "Blue text");
 }
@@ -567,18 +576,17 @@ TEST_F(ContextMenuControllerTest, ShowNonLocatedContextMenuEvent) {
       base::TimeTicks::Now(), WebGestureDevice::kTouchscreen);
   gesture_event.SetPositionInWidget(gfx::PointF(rect->left(), rect->top()));
   GetWebView()->MainFrameWidget()->HandleInputEvent(
-      WebCoalescedInputEvent(gesture_event));
+      WebCoalescedInputEvent(gesture_event, ui::LatencyInfo()));
 
-  WebContextMenuData context_menu_data =
-      GetWebFrameClient().GetContextMenuData();
+  ContextMenuData context_menu_data = GetWebFrameClient().GetContextMenuData();
   EXPECT_EQ(context_menu_data.selected_text, "Sample");
 
   // Adjust the selection from the start of |input| to the middle.
-  LayoutPoint middle_point((rect->left() + rect->right()) / 2,
-                           (rect->top() + rect->bottom()) / 2);
-  LocalMainFrame()->MoveRangeSelectionExtent(
-      gfx::Point(middle_point.X().ToInt(), middle_point.Y().ToInt()));
-  GetWebView()->MainFrameWidget()->ShowContextMenu(kMenuSourceTouchHandle);
+  gfx::Point middle_point((rect->left() + rect->right()) / 2,
+                          (rect->top() + rect->bottom()) / 2);
+  LocalMainFrame()->MoveRangeSelectionExtent(middle_point);
+  LocalMainFrame()->LocalRootFrameWidget()->ShowContextMenu(
+      ui::mojom::MenuSourceType::TOUCH_HANDLE, middle_point);
 
   context_menu_data = GetWebFrameClient().GetContextMenuData();
   EXPECT_NE(context_menu_data.selected_text, "");
@@ -590,11 +598,45 @@ TEST_F(ContextMenuControllerTest, ShowNonLocatedContextMenuEvent) {
   // invisible.
   LocalMainFrame()->MoveRangeSelectionExtent(
       gfx::Point(rect->right(), rect->bottom()));
-  GetWebView()->MainFrameWidget()->ShowContextMenu(kMenuSourceTouchHandle);
+  LocalMainFrame()->LocalRootFrameWidget()->ShowContextMenu(
+      ui::mojom::MenuSourceType::TOUCH_HANDLE,
+      gfx::Point(rect->right() / 2, rect->bottom() / 2));
 
   context_menu_data = GetWebFrameClient().GetContextMenuData();
   EXPECT_EQ(context_menu_data.selected_text, "Sample Input Text");
 }
+
+#if !defined(OS_MAC)
+// Mac has no way to open a context menu based on a keyboard event.
+TEST_F(ContextMenuControllerTest,
+       ValidateNonLocatedContextMenuOnLargeImageElement) {
+  GetDocument()->documentElement()->setInnerHTML(
+      "<img src=\"http://example.test/cat.jpg\" id=\"sample_image\" "
+      "width=\"200\" height=\"10000\" tabindex=\"-1\" />");
+
+  Document* document = GetDocument();
+  Element* image_element = document->getElementById("sample_image");
+  // Set focus on the image element.
+  image_element->focus();
+  document->UpdateStyleAndLayout(DocumentUpdateReason::kTest);
+
+  // Simulate Shift + F10 key event.
+  WebKeyboardEvent key_event(WebInputEvent::Type::kRawKeyDown,
+                             WebInputEvent::kShiftKey,
+                             WebInputEvent::GetStaticTimeStampForTests());
+
+  key_event.windows_key_code = ui::VKEY_F10;
+  GetWebView()->MainFrameWidget()->HandleInputEvent(
+      WebCoalescedInputEvent(key_event, ui::LatencyInfo()));
+  key_event.SetType(WebInputEvent::Type::kKeyUp);
+  GetWebView()->MainFrameWidget()->HandleInputEvent(
+      WebCoalescedInputEvent(key_event, ui::LatencyInfo()));
+
+  ContextMenuData context_menu_data = GetWebFrameClient().GetContextMenuData();
+  EXPECT_EQ(context_menu_data.media_type,
+            mojom::blink::ContextMenuDataMediaType::kImage);
+}
+#endif
 
 TEST_F(ContextMenuControllerTest, SelectionRectClipped) {
   GetDocument()->documentElement()->setInnerHTML(
@@ -612,10 +654,9 @@ TEST_F(ContextMenuControllerTest, SelectionRectClipped) {
       base::TimeTicks::Now(), WebGestureDevice::kTouchscreen);
   gesture_event.SetPositionInWidget(gfx::PointF(rect->left(), rect->top()));
   GetWebView()->MainFrameWidget()->HandleInputEvent(
-      WebCoalescedInputEvent(gesture_event));
+      WebCoalescedInputEvent(gesture_event, ui::LatencyInfo()));
 
-  WebContextMenuData context_menu_data =
-      GetWebFrameClient().GetContextMenuData();
+  ContextMenuData context_menu_data = GetWebFrameClient().GetContextMenuData();
   EXPECT_EQ(context_menu_data.selected_text, "Sample");
 
   // The selection rect is not clipped.
@@ -627,7 +668,7 @@ TEST_F(ContextMenuControllerTest, SelectionRectClipped) {
   int top = std::min(focus.Y(), anchor.Y());
   int right = std::max(focus.MaxX(), anchor.MaxX());
   int bottom = std::max(focus.MaxY(), anchor.MaxY());
-  WebRect selection_rect(left, top, right - left, bottom - top);
+  gfx::Rect selection_rect(left, top, right - left, bottom - top);
   EXPECT_EQ(context_menu_data.selection_rect, selection_rect);
 
   // Select all the content of |textarea|.
@@ -646,7 +687,7 @@ TEST_F(ContextMenuControllerTest, SelectionRectClipped) {
   top = std::max(clip_bound.Y(), std::min(focus.Y(), anchor.Y()));
   right = std::min(clip_bound.MaxX(), std::max(focus.MaxX(), anchor.MaxX()));
   bottom = std::min(clip_bound.MaxY(), std::max(focus.MaxY(), anchor.MaxY()));
-  selection_rect = WebRect(left, top, right - left, bottom - top);
+  selection_rect = gfx::Rect(left, top, right - left, bottom - top);
   EXPECT_EQ(context_menu_data.selection_rect, selection_rect);
 }
 

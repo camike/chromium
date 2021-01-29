@@ -26,7 +26,7 @@ class SequencedTaskRunner;
 }
 
 namespace feedback {
-class AnonymizerTool;
+class RedactionTool;
 }
 
 namespace policy {
@@ -41,7 +41,7 @@ class SystemLogUploader : public UploadJob::Delegate {
 
   // Remove lines from |data| that contain common PII (IP addresses, BSSIDs,
   // SSIDs, URLs, e-mail addresses).
-  static std::string RemoveSensitiveData(feedback::AnonymizerTool* anonymizer,
+  static std::string RemoveSensitiveData(feedback::RedactionTool* redactor,
                                          const std::string& data);
 
   // Refresh constants.
@@ -180,9 +180,8 @@ class SystemLogUploader : public UploadJob::Delegate {
   // use the last-known trusted values.
   bool upload_enabled_;
 
-  // Observer to changes in system log upload settings.
-  std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>
-      upload_enabled_observer_;
+  // Subscription for callback on changes in system log upload settings.
+  base::CallbackListSubscription upload_enabled_subscription_;
 
   base::ThreadChecker thread_checker_;
 

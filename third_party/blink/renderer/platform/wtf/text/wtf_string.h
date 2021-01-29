@@ -27,6 +27,8 @@
 // on systems without case-sensitive file systems.
 
 #include <iosfwd>
+#include <type_traits>
+
 #include "base/containers/span.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -80,6 +82,10 @@ class WTF_EXPORT String {
 
   // Construct a string with UTF-16 data, from a null-terminated source.
   String(const UChar*);
+  // TODO(crbug.com/911896): Remove this constructor once `UChar` is `char16_t`
+  // on all platforms.
+  template <typename UCharT = UChar,
+            typename = std::enable_if_t<!std::is_same<UCharT, char16_t>::value>>
   String(const char16_t* chars)
       : String(reinterpret_cast<const UChar*>(chars)) {}
 
@@ -102,6 +108,14 @@ class WTF_EXPORT String {
   // Construct a string referencing an existing StringImpl.
   String(StringImpl* impl) : impl_(impl) {}
   String(scoped_refptr<StringImpl> impl) : impl_(std::move(impl)) {}
+
+  // Copying a String is a relatively inexpensive, since the underlying data is
+  // immutable and refcounted.
+  String(const String&) = default;
+  String& operator=(const String&) = default;
+
+  String(String&&) noexcept = default;
+  String& operator=(String&&) = default;
 
   void swap(String& o) { impl_.swap(o.impl_); }
 
@@ -206,6 +220,8 @@ class WTF_EXPORT String {
                   unsigned start = 0) const {
     return impl_ ? impl_->Find(match_function, start) : kNotFound;
   }
+  wtf_size_t Find(base::RepeatingCallback<bool(UChar)> match_callback,
+                  wtf_size_t index = 0) const;
 
   // Find substrings.
   wtf_size_t Find(
@@ -634,6 +650,11 @@ inline bool CodeUnitCompareLessThan(const String& a, const String& b) {
 }
 
 WTF_EXPORT int CodeUnitCompareIgnoringASCIICase(const String&, const char*);
+
+inline bool CodeUnitCompareIgnoringASCIICaseLessThan(const String& a,
+                                                     const String& b) {
+  return CodeUnitCompareIgnoringASCIICase(a.Impl(), b.Impl()) < 0;
+}
 
 template <bool isSpecialCharacter(UChar)>
 inline bool String::IsAllSpecialCharacters() const {

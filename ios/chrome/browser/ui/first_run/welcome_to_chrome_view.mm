@@ -4,13 +4,16 @@
 
 #import "ios/chrome/browser/ui/first_run/welcome_to_chrome_view.h"
 
-#include "base/feature_list.h"
+#import <MaterialComponents/MaterialTypography.h>
+
+#include "base/check_op.h"
 #include "base/i18n/rtl.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/strings/sys_string_conversions.h"
+#import "components/policy/core/common/policy_loader_ios_constants.h"
+#import "ios/chrome/browser/ui/elements/text_view_selection_disabled.h"
 #include "ios/chrome/browser/ui/fancy_ui/primary_action_button.h"
 #include "ios/chrome/browser/ui/first_run/first_run_util.h"
-#include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/CRUILabel+AttributeUtils.h"
 #import "ios/chrome/browser/ui/util/label_link_controller.h"
 #import "ios/chrome/browser/ui/util/label_observer.h"
@@ -20,7 +23,6 @@
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
-#import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
@@ -63,9 +65,10 @@ const CGFloat kContainerViewCompactWidthPercentage = 0.8;
 
 // Layout constants.
 const CGFloat kImageTopPadding[SIZE_CLASS_COUNT] = {32.0, 50.0};
-const CGFloat kTOSLabelTopPadding[SIZE_CLASS_COUNT] = {34.0, 40.0};
+const CGFloat kTOSTextViewTopPadding[SIZE_CLASS_COUNT] = {34.0, 40.0};
 const CGFloat kOptInLabelPadding[SIZE_CLASS_COUNT] = {10.0, 14.0};
 const CGFloat kCheckBoxPadding[SIZE_CLASS_COUNT] = {10.0, 16.0};
+const CGFloat kManagedLabelPadding[SIZE_CLASS_COUNT] = {14.0, 20.0};
 const CGFloat kOKButtonBottomPadding[SIZE_CLASS_COUNT] = {32.0, 32.0};
 const CGFloat kOKButtonHeight[SIZE_CLASS_COUNT] = {36.0, 54.0};
 // Multiplier matches that used in LaunchScreen.xib to determine size of logo.
@@ -73,10 +76,12 @@ const CGFloat kAppLogoProportionMultiplier = 0.381966;
 
 // Font sizes.
 const CGFloat kTitleLabelFontSize[SIZE_CLASS_COUNT] = {24.0, 36.0};
-const CGFloat kTOSLabelFontSize[SIZE_CLASS_COUNT] = {14.0, 21.0};
-const CGFloat kTOSLabelLineHeight[SIZE_CLASS_COUNT] = {20.0, 32.0};
+const CGFloat kTOSTOSTextViewFontSize[SIZE_CLASS_COUNT] = {14.0, 21.0};
+const CGFloat kLegacyTOSLabelLineHeight[SIZE_CLASS_COUNT] = {20.0, 32.0};
 const CGFloat kOptInLabelFontSize[SIZE_CLASS_COUNT] = {13.0, 19.0};
 const CGFloat kOptInLabelLineHeight[SIZE_CLASS_COUNT] = {18.0, 26.0};
+const CGFloat kManagedLabelFontSize[SIZE_CLASS_COUNT] = {13.0, 19.0};
+const CGFloat kManagedLabelLineHeight[SIZE_CLASS_COUNT] = {18.0, 26.0};
 const CGFloat kOKButtonTitleLabelFontSize[SIZE_CLASS_COUNT] = {14.0, 20.0};
 
 // Animation constants
@@ -88,24 +93,35 @@ const CGFloat kAnimationDelay = .5;
 NSString* const kAppLogoImageName = @"launchscreen_app_logo";
 NSString* const kCheckBoxImageName = @"checkbox";
 NSString* const kCheckBoxCheckedImageName = @"checkbox_checked";
+NSString* const kEnterpriseIconImageName = @"enterprise_icon";
 
 // Constant for the Terms of Service URL in the first run experience.
 const char kTermsOfServiceUrl[] = "internal://terms-of-service";
 
 }  // namespace
 
-@interface WelcomeToChromeView () {
+@interface WelcomeToChromeView () <UITextViewDelegate> {
   UIView* _containerView;
   UILabel* _titleLabel;
   UIImageView* _imageView;
-  UILabel* _TOSLabel;
-  LabelLinkController* _TOSLabelLinkController;
   UIButton* _checkBoxButton;
   UILabel* _optInLabel;
+  UILabel* _managedLabel;
+  UIImageView* _enterpriseIcon;
   PrimaryActionButton* _OKButton;
+
+  // Used for iOS 12 compatibility.
+  UILabel* _legacyTOSLabel;
+  LabelLinkController* _legacyTOSLabelLinkController;
 }
 
 // Subview properties are lazily instantiated upon their first use.
+
+// The "Terms of Service" legacy label used for iOS 12 compatibility.
+@property(strong, nonatomic, readonly) UILabel* legacyTOSLabel;
+// Legacy observer for setting the size of the TOSLabel with cr_lineHeight used
+// for iOS 12 compatibility.
+@property(strong, nonatomic) LabelObserver* legacyTOSObserver;
 
 // A container view used to layout and center subviews.
 @property(strong, nonatomic, readonly) UIView* containerView;
@@ -113,16 +129,18 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
 @property(strong, nonatomic, readonly) UILabel* titleLabel;
 // The Chrome logo image view.
 @property(strong, nonatomic, readonly) UIImageView* imageView;
-// The "Terms of Service" label.
-@property(strong, nonatomic, readonly) UILabel* TOSLabel;
-// Observer for setting the size of the TOSLabel with cr_lineHeight.
-@property(strong, nonatomic) LabelObserver* TOSObserver;
+// The "Terms of Service" text view.
+@property(strong, nonatomic) TextViewSelectionDisabled* TOSTextView;
 // The stats reporting opt-in label.
 @property(strong, nonatomic, readonly) UILabel* optInLabel;
 // Observer for setting the size of the optInLabel with cr_lineHeight.
 @property(strong, nonatomic) LabelObserver* optInObserver;
 // The stats reporting opt-in checkbox button.
 @property(strong, nonatomic, readonly) UIButton* checkBoxButton;
+// Observer for setting the size of the managedLabel with cr_lineHeight.
+@property(strong, nonatomic) LabelObserver* managedObserver;
+// The Chrome logo image view.
+@property(strong, nonatomic, readonly) UIImageView* enterpriseIcon;
 // The "Accept & Continue" button.
 @property(strong, nonatomic, readonly) PrimaryActionButton* OKButton;
 
@@ -130,9 +148,11 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
 // subsequent subview layouts depend on the layouts that precede them.
 - (void)layoutTitleLabel;
 - (void)layoutImageView;
-- (void)layoutTOSLabel;
+- (void)layoutTOSTextView;
 - (void)layoutOptInLabel;
 - (void)layoutCheckBoxButton;
+- (void)layoutManagedLabel;
+- (void)layoutEnterpriseIcon;
 - (void)layoutContainerView;
 - (void)layoutOKButton;
 
@@ -142,8 +162,9 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
 // Subview configuration methods.
 - (void)configureTitleLabel;
 - (void)configureImageView;
-- (void)configureTOSLabel;
+- (void)configureTOSTextView;
 - (void)configureOptInLabel;
+- (void)configureManagedLabel;
 - (void)configureContainerView;
 - (void)configureOKButton;
 
@@ -156,10 +177,6 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
 @end
 
 @implementation WelcomeToChromeView
-
-@synthesize delegate = _delegate;
-@synthesize TOSObserver = _TOSObserver;
-@synthesize optInObserver = _optInObserver;
 
 - (instancetype)initWithFrame:(CGRect)frame {
   self = [super initWithFrame:frame];
@@ -175,9 +192,12 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
   // Prepare for animation by making views (except for the logo) transparent
   // and finding the initial and final location of the logo.
   self.titleLabel.alpha = 0.0;
-  self.TOSLabel.alpha = 0.0;
+  self.TOSTextView.alpha = 0.0;
+  self.legacyTOSLabel.alpha = 0.0;
   self.optInLabel.alpha = 0.0;
   self.checkBoxButton.alpha = 0.0;
+  self.managedLabel.alpha = 0.0;
+  self.enterpriseIcon.alpha = 0.0;
   self.OKButton.alpha = 0.0;
 
   // Get final location of logo based on result from previously run
@@ -196,8 +216,11 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
                    animations:^{
                      [weakSelf imageView].frame = finalLogoFrame;
                      [weakSelf titleLabel].alpha = 1.0;
-                     [weakSelf TOSLabel].alpha = 1.0;
+                     [weakSelf TOSTextView].alpha = 1.0;
+                     [weakSelf legacyTOSLabel].alpha = 1.0;
                      [weakSelf optInLabel].alpha = 1.0;
+                     [weakSelf managedLabel].alpha = 1.0;
+                     [weakSelf enterpriseIcon].alpha = 1.0;
                      [weakSelf checkBoxButton].alpha = 1.0;
                      [weakSelf OKButton].alpha = 1.0;
                    }
@@ -205,7 +228,8 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
 }
 
 - (void)dealloc {
-  [self.TOSObserver stopObserving];
+  [self.legacyTOSObserver stopObserving];
+
   [self.optInObserver stopObserving];
 }
 
@@ -247,17 +271,24 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
   return _imageView;
 }
 
-- (UILabel*)TOSLabel {
-  if (!_TOSLabel) {
-    _TOSLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    // Add an observer to the label to be able to keep the cr_lineHeight.
-    self.TOSObserver = [LabelObserver observerForLabel:_TOSLabel];
-    [self.TOSObserver startObserving];
-
-    [_TOSLabel setNumberOfLines:0];
-    [_TOSLabel setTextAlignment:NSTextAlignmentCenter];
+- (TextViewSelectionDisabled*)TOSTextView {
+  if (!_TOSTextView) {
+    _TOSTextView = [[TextViewSelectionDisabled alloc] initWithFrame:CGRectZero];
   }
-  return _TOSLabel;
+  return _TOSTextView;
+}
+
+- (UILabel*)legacyTOSLabel {
+  if (!_legacyTOSLabel) {
+    _legacyTOSLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    // Add an observer to the label to be able to keep the cr_lineHeight.
+    self.legacyTOSObserver = [LabelObserver observerForLabel:_legacyTOSLabel];
+    [self.legacyTOSObserver startObserving];
+
+    [_legacyTOSLabel setNumberOfLines:0];
+    [_legacyTOSLabel setTextAlignment:NSTextAlignmentCenter];
+  }
+  return _legacyTOSLabel;
 }
 
 - (UILabel*)optInLabel {
@@ -292,15 +323,31 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
     UIImage* selectedImage = [[UIImage imageNamed:kCheckBoxCheckedImageName]
         imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
     [_checkBoxButton setImage:selectedImage forState:UIControlStateSelected];
-#if defined(__IPHONE_13_4)
-    if (@available(iOS 13.4, *)) {
-      if (base::FeatureList::IsEnabled(kPointerSupport)) {
-        _checkBoxButton.pointerInteractionEnabled = YES;
-      }
-    }
-#endif  // defined(__IPHONE_13_4)
   }
   return _checkBoxButton;
+}
+
+- (UILabel*)managedLabel {
+  if (!_managedLabel) {
+    _managedLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    // Add an observer to the label to be able to keep the cr_lineHeight.
+    self.managedObserver = [LabelObserver observerForLabel:_managedLabel];
+    [self.managedObserver startObserving];
+
+    [_managedLabel setNumberOfLines:0];
+    [_managedLabel
+        setText:l10n_util::GetNSString(IDS_IOS_FIRSTRUN_BROWSER_MANAGED)];
+    [_managedLabel setTextAlignment:NSTextAlignmentNatural];
+  }
+  return _managedLabel;
+}
+
+- (UIImageView*)enterpriseIcon {
+  if (!_enterpriseIcon) {
+    UIImage* image = [UIImage imageNamed:kEnterpriseIconImageName];
+    _enterpriseIcon = [[UIImageView alloc] initWithImage:image];
+  }
+  return _enterpriseIcon;
 }
 
 - (PrimaryActionButton*)OKButton {
@@ -317,15 +364,13 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
     // First Run UI when it shows up.
     SetA11yLabelAndUiAutomationName(
         _OKButton, IDS_IOS_FIRSTRUN_OPT_IN_ACCEPT_BUTTON, @"Accept & Continue");
-#if defined(__IPHONE_13_4)
-    if (@available(iOS 13.4, *)) {
-      if (base::FeatureList::IsEnabled(kPointerSupport)) {
-        _OKButton.pointerInteractionEnabled = YES;
-      }
-    }
-#endif  // defined(__IPHONE_13_4)
   }
   return _OKButton;
+}
+
+- (BOOL)isBrowserManaged {
+  return [[[NSUserDefaults standardUserDefaults]
+             dictionaryForKey:kPolicyLoaderIOSConfigurationKey] count] > 0;
 }
 
 #pragma mark - Layout
@@ -342,9 +387,17 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
   [self addSubview:self.containerView];
   [self.containerView addSubview:self.titleLabel];
   [self.containerView addSubview:self.imageView];
-  [self.containerView addSubview:self.TOSLabel];
+  if (@available(iOS 13.5, *)) {
+    [self.containerView addSubview:self.TOSTextView];
+  } else {
+    [self.containerView addSubview:self.legacyTOSLabel];
+  }
   [self.containerView addSubview:self.optInLabel];
   [self.containerView addSubview:self.checkBoxButton];
+  if ([self isBrowserManaged]) {
+    [self.containerView addSubview:self.managedLabel];
+    [self.containerView addSubview:self.enterpriseIcon];
+  }
   [self addSubview:self.OKButton];
   [self configureSubviews];
 }
@@ -355,12 +408,24 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
 }
 
 - (void)layoutSubviews {
+  // TODO(crbug.com/1157934): This page should support dynamic type to respect
+  // the user's chosen font size. This layout might need to be changed for
+  // smaller screen sizes and large fonts, as it might not fit a single screen,
+  // especially with the "managed by organization" enterprise notice.
   [super layoutSubviews];
   [self layoutTitleLabel];
   [self layoutImageView];
-  [self layoutTOSLabel];
+  if (@available(iOS 13.5, *)) {
+    [self layoutTOSTextView];
+  } else {
+    [self layoutLegacyTOSLabel];
+  }
   [self layoutOptInLabel];
   [self layoutCheckBoxButton];
+  if ([self isBrowserManaged]) {
+    [self layoutManagedLabel];
+    [self layoutEnterpriseIcon];
+  }
   [self layoutOKButtonAndContainerView];
 }
 
@@ -392,12 +457,27 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
       imageViewSize.width, imageViewSize.height));
 }
 
-- (void)layoutTOSLabel {
+- (void)layoutTOSTextView {
+  // The TOSTextView is centered and laid out below |imageView| as specified by
+  // kTOSTextViewTopPadding.
+  CGSize containerSize = self.containerView.bounds.size;
+  containerSize.height = CGFLOAT_MAX;
+  CGSize TOSTextViewSize = [self.TOSTextView sizeThatFits:containerSize];
+  CGFloat TOSTextViewTopPadding =
+      kTOSTextViewTopPadding[[self heightSizeClassIdiom]];
+  CGRect frame =
+      CGRectMake((containerSize.width - TOSTextViewSize.width) / 2.0,
+                 CGRectGetMaxY(self.imageView.frame) + TOSTextViewTopPadding,
+                 TOSTextViewSize.width, TOSTextViewSize.height);
+  self.TOSTextView.frame = AlignRectOriginAndSizeToPixels(frame);
+}
+
+- (void)layoutLegacyTOSLabel {
   // The TOS label is centered and laid out below |imageView| as specified by
   // kTOSLabelTopPadding.
   CGSize containerSize = self.containerView.bounds.size;
   containerSize.height = CGFLOAT_MAX;
-  self.TOSLabel.frame = {CGPointZero, containerSize};
+  self.legacyTOSLabel.frame = {CGPointZero, containerSize};
   NSString* TOSText = l10n_util::GetNSString(IDS_IOS_FIRSTRUN_AGREE_TO_TERMS);
   NSRange tosLinkTextRange = NSMakeRange(NSNotFound, 0);
   TOSText = ParseStringWithTag(TOSText, &tosLinkTextRange,
@@ -406,7 +486,7 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
   DCHECK_NE(NSNotFound, static_cast<NSInteger>(tosLinkTextRange.location));
   DCHECK_NE(0u, tosLinkTextRange.length);
 
-  self.TOSLabel.text = TOSText;
+  self.legacyTOSLabel.text = TOSText;
 
   __weak WelcomeToChromeView* weakSelf = self;
   ProceduralBlockWithURL action = ^(const GURL& url) {
@@ -420,15 +500,16 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
     }
   };
 
-  _TOSLabelLinkController =
-      [[LabelLinkController alloc] initWithLabel:_TOSLabel action:action];
-  [_TOSLabelLinkController addLinkWithRange:tosLinkTextRange
-                                        url:GURL(kTermsOfServiceUrl)];
-  [_TOSLabelLinkController setLinkColor:[UIColor colorNamed:kBlueColor]];
+  _legacyTOSLabelLinkController =
+      [[LabelLinkController alloc] initWithLabel:_legacyTOSLabel action:action];
+  [_legacyTOSLabelLinkController addLinkWithRange:tosLinkTextRange
+                                              url:GURL(kTermsOfServiceUrl)];
+  [_legacyTOSLabelLinkController setLinkColor:[UIColor colorNamed:kBlueColor]];
 
-  CGSize TOSLabelSize = [self.TOSLabel sizeThatFits:containerSize];
-  CGFloat TOSLabelTopPadding = kTOSLabelTopPadding[[self heightSizeClassIdiom]];
-  self.TOSLabel.frame = AlignRectOriginAndSizeToPixels(
+  CGSize TOSLabelSize = [self.legacyTOSLabel sizeThatFits:containerSize];
+  CGFloat TOSLabelTopPadding =
+      kTOSTextViewTopPadding[[self heightSizeClassIdiom]];
+  self.legacyTOSLabel.frame = AlignRectOriginAndSizeToPixels(
       CGRectMake((containerSize.width - TOSLabelSize.width) / 2.0,
                  CGRectGetMaxY(self.imageView.frame) + TOSLabelTopPadding,
                  TOSLabelSize.width, TOSLabelSize.height));
@@ -449,10 +530,17 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
       kOptInLabelPadding[[self heightSizeClassIdiom]];
   CGFloat optInLabelOriginX =
       base::i18n::IsRTL() ? 0.0f : optInLabelSidePadding;
-  self.optInLabel.frame = AlignRectOriginAndSizeToPixels(
-      CGRectMake(optInLabelOriginX,
-                 CGRectGetMaxY(self.TOSLabel.frame) + optInLabelTopPadding,
-                 optInLabelSize.width, optInLabelSize.height));
+  if (@available(iOS 13.5, *)) {
+    self.optInLabel.frame = AlignRectOriginAndSizeToPixels(
+        CGRectMake(optInLabelOriginX,
+                   CGRectGetMaxY(self.TOSTextView.frame) + optInLabelTopPadding,
+                   optInLabelSize.width, optInLabelSize.height));
+  } else {
+    self.optInLabel.frame = AlignRectOriginAndSizeToPixels(CGRectMake(
+        optInLabelOriginX,
+        CGRectGetMaxY(self.legacyTOSLabel.frame) + optInLabelTopPadding,
+        optInLabelSize.width, optInLabelSize.height));
+  }
 }
 
 - (void)layoutCheckBoxButton {
@@ -482,15 +570,62 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
       base::i18n::IsRTL() ? smallHorizontalInset : largeHorizontalInset);
 }
 
-- (void)layoutContainerView {
-  // The container view is resized according to the final layout of
-  // |checkBoxButton|, which is its lowest subview.  The resized view is then
-  // centered horizontally and vertically. If necessary, it is shifted up to
-  // allow |kOptInLabelPadding| between |optInLabel| and |OKButton|.
-  CGSize containerViewSize = self.containerView.bounds.size;
-  containerViewSize.height = CGRectGetMaxY(self.checkBoxButton.frame);
+- (void)layoutManagedLabel {
+  // The managed label is laid out to the right (or left in RTL) of the
+  // enterprise icon and below |optInLabel| as specified by
+  // kManagedLabelPadding. It is aligned horizontally with |optInLabel|.
+  CGSize checkBoxSize =
+      [self.checkBoxButton imageForState:self.checkBoxButton.state].size;
+  CGFloat checkBoxPadding = kCheckBoxPadding[[self widthSizeClassIdiom]];
+  CGFloat managedLabelSidePadding = checkBoxSize.width + 2.0 * checkBoxPadding;
+  CGSize managedLabelSize = [self.managedLabel
+      sizeThatFits:CGSizeMake(CGRectGetWidth(self.optInLabel.bounds),
+                              CGFLOAT_MAX)];
+  CGFloat managedLabelTopPadding =
+      kManagedLabelPadding[[self heightSizeClassIdiom]];
+  CGFloat managedLabelOriginX =
+      base::i18n::IsRTL()
+          ? self.optInLabel.bounds.size.width - managedLabelSize.width
+          : managedLabelSidePadding;
 
-  CGFloat padding = kOptInLabelPadding[[self heightSizeClassIdiom]];
+  self.managedLabel.frame = AlignRectOriginAndSizeToPixels(CGRectMake(
+      managedLabelOriginX,
+      CGRectGetMaxY(self.checkBoxButton.frame) + managedLabelTopPadding,
+      managedLabelSize.width, managedLabelSize.height));
+}
+
+- (void)layoutEnterpriseIcon {
+  // The enterprise icon is laid out to the left of and is centered vertically
+  // with |managedLabel|, and is aligned horizontally with the checkbox image
+  // inside |checkBoxButton|.
+  CGSize enterpriseIconSize = self.enterpriseIcon.bounds.size;
+  CGFloat enterpriseIconOriginX =
+      CGRectGetMidX(self.checkBoxButton.imageView.frame) -
+      enterpriseIconSize.height / 2.0;
+  CGFloat enterpriseIconOriginY =
+      CGRectGetMidY(self.managedLabel.frame) - enterpriseIconSize.height / 2.0;
+
+  self.enterpriseIcon.frame = AlignRectOriginAndSizeToPixels(
+      CGRectMake(enterpriseIconOriginX, enterpriseIconOriginY,
+                 enterpriseIconSize.width, enterpriseIconSize.height));
+}
+
+- (void)layoutContainerView {
+  // The container view is resized according to the final layout of its lowest
+  // subview, which is |managedLabel| if the browser is managed and
+  // |checkBoxButton| if not. The resized view is then centered horizontally and
+  // vertically. If necessary, it is shifted up to allow either
+  // |kmanagedLabelPadding| or |kOptInLabelPadding| (depending if the browser is
+  // managed) between |optInLabel| and |OKButton|.
+  CGSize containerViewSize = self.containerView.bounds.size;
+  containerViewSize.height = [self isBrowserManaged]
+                                 ? CGRectGetMaxY(self.managedLabel.frame)
+                                 : CGRectGetMaxY(self.checkBoxButton.frame);
+
+  CGFloat padding = [self isBrowserManaged]
+                        ? kManagedLabelPadding[[self heightSizeClassIdiom]]
+                        : kOptInLabelPadding[[self heightSizeClassIdiom]];
+
   CGFloat originY = fmin(
       (CGRectGetHeight(self.bounds) - containerViewSize.height) / 2.0,
       CGRectGetMinY(self.OKButton.frame) - padding - containerViewSize.height);
@@ -524,8 +659,15 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
   [self configureContainerView];
   [self configureTitleLabel];
   [self configureImageView];
-  [self configureTOSLabel];
+  if (@available(iOS 13.5, *)) {
+    [self configureTOSTextView];
+  } else {
+    [self configureLegacyTOSLabel];
+  }
   [self configureOptInLabel];
+  if ([self isBrowserManaged]) {
+    [self configureManagedLabel];
+  }
   [self configureOKButton];
   [self setNeedsLayout];
 }
@@ -547,10 +689,45 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
                  sideLength, sideLength));
 }
 
-- (void)configureTOSLabel {
-  self.TOSLabel.font = [[MDCTypography fontLoader]
-      regularFontOfSize:kTOSLabelFontSize[[self widthSizeClassIdiom]]];
-  self.TOSLabel.cr_lineHeight = kTOSLabelLineHeight[[self widthSizeClassIdiom]];
+- (void)configureTOSTextView {
+  self.TOSTextView.scrollEnabled = NO;
+  self.TOSTextView.editable = NO;
+  self.TOSTextView.adjustsFontForContentSizeCategory = YES;
+  self.TOSTextView.delegate = self;
+  self.TOSTextView.backgroundColor = UIColor.clearColor;
+  self.TOSTextView.linkTextAttributes =
+      @{NSForegroundColorAttributeName : [UIColor colorNamed:kBlueColor]};
+
+  NSString* TOSText = l10n_util::GetNSString(IDS_IOS_FIRSTRUN_AGREE_TO_TERMS);
+  NSRange tosLinkTextRange = NSMakeRange(NSNotFound, 0);
+  TOSText = ParseStringWithTag(TOSText, &tosLinkTextRange,
+                               @"BEGIN_LINK_TOS[ \t]*", @"[ \t]*END_LINK_TOS");
+
+  DCHECK_NE(NSNotFound, static_cast<NSInteger>(tosLinkTextRange.location));
+  DCHECK_NE(0u, tosLinkTextRange.length);
+
+  NSRange fullRange = NSMakeRange(0, TOSText.length);
+  NSURL* URL =
+      [NSURL URLWithString:base::SysUTF8ToNSString(kTermsOfServiceUrl)];
+  UIFont* font = [[MDCTypography fontLoader]
+      regularFontOfSize:kTOSTOSTextViewFontSize[[self widthSizeClassIdiom]]];
+  NSMutableParagraphStyle* style =
+      [[NSParagraphStyle defaultParagraphStyle] mutableCopy];
+  style.alignment = NSTextAlignmentCenter;
+
+  NSMutableAttributedString* attributedText =
+      [[NSMutableAttributedString alloc] initWithString:TOSText];
+  [attributedText addAttributes:@{
+    NSForegroundColorAttributeName : [UIColor colorNamed:kTextPrimaryColor],
+    NSParagraphStyleAttributeName : style,
+    NSFontAttributeName : font
+  }
+                          range:fullRange];
+  [attributedText addAttribute:NSLinkAttributeName
+                         value:URL
+                         range:tosLinkTextRange];
+
+  self.TOSTextView.attributedText = attributedText;
 }
 
 - (void)configureOptInLabel {
@@ -558,6 +735,21 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
       regularFontOfSize:kOptInLabelFontSize[[self widthSizeClassIdiom]]];
   self.optInLabel.cr_lineHeight =
       kOptInLabelLineHeight[[self widthSizeClassIdiom]];
+}
+
+- (void)configureManagedLabel {
+  self.managedLabel.font = [[MDCTypography fontLoader]
+      regularFontOfSize:kManagedLabelFontSize[[self widthSizeClassIdiom]]];
+  self.managedLabel.cr_lineHeight =
+      kManagedLabelLineHeight[[self widthSizeClassIdiom]];
+  self.managedLabel.textColor = [UIColor colorNamed:kTextSecondaryColor];
+}
+
+- (void)configureLegacyTOSLabel {
+  self.legacyTOSLabel.font = [[MDCTypography fontLoader]
+      regularFontOfSize:kTOSTOSTextViewFontSize[[self widthSizeClassIdiom]]];
+  self.legacyTOSLabel.cr_lineHeight =
+      kLegacyTOSLabelLineHeight[[self widthSizeClassIdiom]];
 }
 
 - (void)configureContainerView {
@@ -582,7 +774,7 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
 }
 
 - (SizeClassIdiom)widthSizeClassIdiom {
-  UIWindow* keyWindow = [UIApplication sharedApplication].keyWindow;
+  UIWindow* keyWindow = GetAnyKeyWindow();
   UIUserInterfaceSizeClass sizeClass = self.traitCollection.horizontalSizeClass;
   if (sizeClass == UIUserInterfaceSizeClassUnspecified)
     sizeClass = keyWindow.traitCollection.horizontalSizeClass;
@@ -590,7 +782,7 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
 }
 
 - (SizeClassIdiom)heightSizeClassIdiom {
-  UIWindow* keyWindow = [UIApplication sharedApplication].keyWindow;
+  UIWindow* keyWindow = GetAnyKeyWindow();
   UIUserInterfaceSizeClass sizeClass = self.traitCollection.verticalSizeClass;
   if (sizeClass == UIUserInterfaceSizeClassUnspecified)
     sizeClass = keyWindow.traitCollection.verticalSizeClass;
@@ -609,6 +801,20 @@ const char kTermsOfServiceUrl[] = "internal://terms-of-service";
 
 - (void)OKButtonWasTapped {
   [self.delegate welcomeToChromeViewDidTapOKButton:self];
+}
+
+#pragma mark - UITextViewDelegate
+
+- (BOOL)textView:(TextViewSelectionDisabled*)textView
+    shouldInteractWithURL:(NSURL*)URL
+                  inRange:(NSRange)characterRange
+              interaction:(UITextItemInteraction)interaction {
+  DCHECK(textView == self.TOSTextView);
+  DCHECK(GURL(base::SysNSStringToUTF8(URL.absoluteString)) ==
+         kTermsOfServiceUrl);
+  [self.delegate welcomeToChromeViewDidTapTOSLink];
+  // Returns NO as the app is handling the opening of the URL.
+  return NO;
 }
 
 @end

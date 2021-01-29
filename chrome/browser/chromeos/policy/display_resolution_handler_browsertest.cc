@@ -25,6 +25,7 @@
 #include "chromeos/dbus/session_manager/session_manager_client.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "components/policy/proto/chrome_device_policy.pb.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/browser/api/system_display/display_info_provider.h"
 #include "extensions/common/api/system_display.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -109,7 +110,7 @@ void SetPolicyValue(em::ChromeDeviceSettingsProto* proto,
                     PolicyValue policy,
                     bool recommended) {
   std::vector<std::string> json_entries;
-  std::string json = "";
+  std::string json;
   if (policy.external_width) {
     json_entries.push_back("\"external_width\": " +
                            std::to_string(*policy.external_width));
@@ -341,7 +342,7 @@ IN_PROC_BROWSER_TEST_P(DisplayResolutionBootTest, PRE_Reboot) {
   em::ChromeDeviceSettingsProto& proto(device_policy->payload());
   SetPolicyValue(&proto, policy_value, true);
   base::RunLoop run_loop;
-  std::unique_ptr<chromeos::CrosSettings::ObserverSubscription> observer =
+  base::CallbackListSubscription subscription =
       chromeos::CrosSettings::Get()->AddSettingsObserver(
           chromeos::kDeviceDisplayResolution, run_loop.QuitClosure());
   device_policy->SetDefaultSigningKey();

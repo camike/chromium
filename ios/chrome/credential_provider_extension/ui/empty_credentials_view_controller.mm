@@ -8,12 +8,18 @@
 #error "This file requires ARC support."
 #endif
 
+namespace {
+constexpr CGFloat kStackViewSpacingAfterIllustration = 32;
+}  // namespace
+
 @implementation EmptyCredentialsViewController
 
 #pragma mark - Public
 
 - (void)loadView {
   self.image = [UIImage imageNamed:@"empty_credentials_illustration"];
+  self.customSpacingAfterImage = kStackViewSpacingAfterIllustration;
+
   self.helpButtonAvailable = NO;
   self.primaryActionAvailable = NO;
   NSString* titleString =
@@ -24,6 +30,11 @@
       @"The subtitle in the empty credentials screen.");
   self.titleString = titleString;
   self.subtitleString = subtitleString;
+
+  if (@available(iOS 13.4, *)) {
+    self.pointerInteractionEnabled = YES;
+  }
+
   [super loadView];
 }
 

@@ -18,7 +18,7 @@ namespace base {
 class ListValue;
 }  // namespace base
 
-namespace syncer {
+namespace invalidation {
 
 // A set of notifications with some helper methods to organize them by Topic
 // and version number.
@@ -26,6 +26,7 @@ class INVALIDATION_EXPORT TopicInvalidationMap {
  public:
   TopicInvalidationMap();
   TopicInvalidationMap(const TopicInvalidationMap& other);
+  TopicInvalidationMap& operator=(const TopicInvalidationMap& other);
   ~TopicInvalidationMap();
 
   // Returns set of Topics for which at least one invalidation is present.
@@ -54,7 +55,7 @@ class INVALIDATION_EXPORT TopicInvalidationMap {
   const SingleObjectInvalidationSet& ForTopic(Topic topic) const;
 
   // Returns the contents of this map in a single vector.
-  void GetAllInvalidations(std::vector<syncer::Invalidation>* out) const;
+  void GetAllInvalidations(std::vector<Invalidation>* out) const;
 
   // Call Acknowledge() on all contained Invalidations.
   void AcknowledgeAll() const;
@@ -64,11 +65,12 @@ class INVALIDATION_EXPORT TopicInvalidationMap {
   std::unique_ptr<base::ListValue> ToValue() const;
 
  private:
-  TopicInvalidationMap(const std::map<Topic, SingleObjectInvalidationSet>& map);
+  explicit TopicInvalidationMap(
+      const std::map<Topic, SingleObjectInvalidationSet>& map);
 
   std::map<Topic, SingleObjectInvalidationSet> map_;
 };
 
-}  // namespace syncer
+}  // namespace invalidation
 
 #endif  // COMPONENTS_INVALIDATION_PUBLIC_TOPIC_INVALIDATION_MAP_H_

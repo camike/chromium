@@ -13,7 +13,7 @@
 #include "ash/public/cpp/app_types.h"
 #include "base/containers/flat_set.h"
 #include "base/macros.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/user_activity/user_activity_detector.h"
 #include "ui/base/user_activity/user_activity_observer.h"
@@ -47,20 +47,31 @@ class ASH_EXPORT DemoSessionMetricsRecorder
     kCamera = 6,
     kFiles = 7,
     kGetHelp = 8,
-    kGoogleKeep = 9,
+    kGoogleKeepChromeApp = 9,
     kGooglePhotos = 10,
-    kGoogleSheets = 11,
-    kGoogleSlides = 12,
+    kGoogleSheetsAndroidApp = 11,
+    kGoogleSlidesAndroidApp = 12,
     kInfinitePainter = 13,  // Android painting app.
     kMyScriptNebo = 14,     // Android note-taking app.
     kPlayStore = 15,
     kSquid = 16,  // Android note-taking app.
     kWebStore = 17,
     kYouTube = 18,
-    kScreensaver = 19,  // Demo Mode screensaver app.
+    kScreensaver = 19,    // Demo Mode screensaver app.
+    kAsphalt9 = 20,       // Android racing game demo app.
+    kStardewValley = 21,  // Android farming game demo app.
+    kKinemaster = 22,     // Android video editing software demo app.
+    kGoogleKeepAndroidApp = 23,
+    kAutoCAD = 24,     // Android 2D/3D drawing software demo app.
+    kPixlr = 25,       // Android photo editing software demo app.
+    kCalculator = 26,  // Essential apps calculator.
+    kCalendar = 27,
+    kGoogleDocsChromeApp = 28,
+    kGoogleSheetsChromeApp = 29,
+    kGoogleSlidesChromeApp = 30,
     // Add future entries above this comment, in sync with enums.xml.
     // Update kMaxValue to the last value.
-    kMaxValue = kScreensaver,
+    kMaxValue = kGoogleSlidesChromeApp,
   };
 
   // The recorder will create a normal timer by default. Tests should provide a
@@ -128,8 +139,8 @@ class ASH_EXPORT DemoSessionMetricsRecorder
 
   std::unique_ptr<base::RepeatingTimer> timer_;
 
-  ScopedObserver<ui::UserActivityDetector, ui::UserActivityObserver> observer_{
-      this};
+  base::ScopedObservation<ui::UserActivityDetector, ui::UserActivityObserver>
+      observation_{this};
 
   class ActiveAppArcPackageNameObserver;
   class UniqueAppsLaunchedArcPackageNameObserver;

@@ -122,7 +122,8 @@ public class ContentShellActivity extends Activity {
         super.onSaveInstanceState(outState);
         WebContents webContents = getActiveWebContents();
         if (webContents != null) {
-            outState.putString(ACTIVE_SHELL_URL_KEY, webContents.getLastCommittedUrl());
+            // TODO(yfriedman): crbug/783819 - This should use GURL serialize/deserialize.
+            outState.putString(ACTIVE_SHELL_URL_KEY, webContents.getLastCommittedUrl().getSpec());
         }
 
         mWindowAndroid.saveInstanceState(outState);
@@ -181,6 +182,7 @@ public class ContentShellActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (mShellManager != null) mShellManager.destroy();
+        mWindowAndroid.destroy();
         super.onDestroy();
     }
 

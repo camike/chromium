@@ -4,8 +4,10 @@
 
 #import "ios/chrome/browser/ui/toolbar/adaptive_toolbar_view_controller.h"
 
-#include "base/logging.h"
+#import <MaterialComponents/MaterialProgressView.h>
+
 #include "base/metrics/user_metrics.h"
+#include "base/notreached.h"
 #import "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/commands/omnibox_commands.h"
 #import "ios/chrome/browser/ui/popup_menu/public/popup_menu_long_press_delegate.h"
@@ -15,14 +17,12 @@
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_configuration.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_tab_grid_button.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_tools_menu_button.h"
-#import "ios/chrome/browser/ui/toolbar/public/features.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
 #import "ios/chrome/browser/ui/ui_feature_flags.h"
 #include "ios/chrome/browser/ui/util/animation_util.h"
 #import "ios/chrome/browser/ui/util/force_touch_long_press_gesture_recognizer.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/material_timing.h"
-#import "ios/third_party/material_components_ios/src/components/ProgressView/src/MaterialProgressView.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -55,12 +55,6 @@ const CGFloat kTabGridAnimationsTotalDuration = 0.5;
 @synthesize isNTP = _isNTP;
 
 #pragma mark - Public
-
-- (BOOL)areAnimationsEnabled {
-  return base::FeatureList::IsEnabled(kDisableAnimationOnLowBattery)
-             ? [UIView areAnimationsEnabled]
-             : YES;
-}
 
 - (void)updateForSideSwipeSnapshotOnNTP:(BOOL)onNTP {
   self.view.progressBar.hidden = YES;
@@ -161,9 +155,7 @@ const CGFloat kTabGridAnimationsTotalDuration = 0.5;
 }
 
 - (void)setLoadingProgressFraction:(double)progress {
-  [self.view.progressBar setProgress:progress
-                            animated:[self areAnimationsEnabled]
-                          completion:nil];
+  [self.view.progressBar setProgress:progress animated:YES completion:nil];
 }
 
 - (void)setTabCount:(int)tabCount addedInBackground:(BOOL)inBackground {
@@ -172,6 +164,10 @@ const CGFloat kTabGridAnimationsTotalDuration = 0.5;
 
   CGFloat scaleSign = tabCount > self.view.tabGridButton.tabCount ? 1 : -1;
   self.view.tabGridButton.tabCount = tabCount;
+
+  if (IsRegularXRegularSizeClass(self))
+    // No animation on Regular x Regular.
+    return;
 
   CGFloat scaleFactor = 1 + scaleSign * kScaleFactorDiff;
 
@@ -234,7 +230,7 @@ const CGFloat kTabGridAnimationsTotalDuration = 0.5;
 - (void)stopProgressBar {
   __weak AdaptiveToolbarViewController* weakSelf = self;
   [self.view.progressBar setProgress:1
-                            animated:[self areAnimationsEnabled]
+                            animated:YES
                           completion:^(BOOL finished) {
                             [weakSelf updateProgressBarVisibility];
                           }];
@@ -322,13 +318,13 @@ const CGFloat kTabGridAnimationsTotalDuration = 0.5;
   __weak __typeof(self) weakSelf = self;
   if (self.loading && self.view.progressBar.hidden) {
     [self.view.progressBar setHidden:NO
-                            animated:[self areAnimationsEnabled]
+                            animated:YES
                           completion:^(BOOL finished) {
                             [weakSelf updateProgressBarVisibility];
                           }];
   } else if (!self.loading && !self.view.progressBar.hidden) {
     [self.view.progressBar setHidden:YES
-                            animated:[self areAnimationsEnabled]
+                            animated:YES
                           completion:^(BOOL finished) {
                             [weakSelf updateProgressBarVisibility];
                           }];

@@ -6,6 +6,8 @@
 
 #include <memory>
 
+#import <MaterialComponents/MaterialSnackbar.h>
+
 #include "base/mac/foundation_util.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
@@ -35,12 +37,15 @@
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_metrics_recorder.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_view_controller.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_view_controller_audience.h"
+#import "ios/chrome/browser/ui/content_suggestions/discover_feed_metrics_recorder.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_constant.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_consumer.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_metrics.h"
 #import "ios/chrome/browser/ui/content_suggestions/user_account_image_update_delegate.h"
+#import "ios/chrome/browser/ui/ntp/discover_feed_wrapper_view_controller.h"
 #include "ios/chrome/browser/ui/ntp/metrics.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_header_constants.h"
+#import "ios/chrome/browser/ui/ntp/new_tab_page_view_controller.h"
 #import "ios/chrome/browser/ui/ntp/notification_promo_whats_new.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/browser/url_loading/url_loading_browser_agent.h"
@@ -50,7 +55,6 @@
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #import "ios/public/provider/chrome/browser/signin/signin_resources_provider.h"
-#import "ios/third_party/material_components_ios/src/components/Snackbar/src/MaterialSnackbar.h"
 #import "ios/web/public/navigation/navigation_item.h"
 #import "ios/web/public/navigation/navigation_manager.h"
 #include "ios/web/public/navigation/referrer.h"
@@ -64,6 +68,15 @@
 #endif
 
 namespace {
+// URL for 'Manage Activity' item in the Discover feed menu.
+const char kFeedManageActivityURL[] =
+    "https://myactivity.google.com/myactivity?product=50";
+// URL for 'Manage Interests' item in the Discover feed menu.
+const char kFeedManageInterestsURL[] =
+    "https://google.com/preferences/interests";
+// URL for 'Learn More' item in the Discover feed menu;
+const char kFeedLearnMoreURL[] = "https://support.google.com/chrome/"
+                                 "?p=new_tab&co=GENIE.Platform%3DiOS&oco=1";
 // URL for the page displaying help for the NTP.
 const char kNTPHelpURL[] =
     "https://support.google.com/chrome/?p=ios_new_tab&ios=1";
@@ -368,6 +381,17 @@ const char kNTPHelpURL[] =
   if (notificationPromo->IsChromeCommandPromo()) {
     // "What's New" promo that runs a command can be added here by calling
     // self.dispatcher.
+    if (notificationPromo->command() == kSetDefaultBrowserCommand) {
+      base::RecordAction(
+          base::UserMetricsAction("IOS.DefaultBrowserNTPPromoTapped"));
+      [[UIApplication sharedApplication]
+                    openURL:
+                        [NSURL URLWithString:UIApplicationOpenSettingsURLString]
+                    options:{}
+          completionHandler:nil];
+      return;
+    }
+
     DCHECK_EQ(kTestWhatsNewCommand, notificationPromo->command())
         << "Promo command is not valid.";
     return;
@@ -375,12 +399,33 @@ const char kNTPHelpURL[] =
   NOTREACHED() << "Promo type is neither URL or command.";
 }
 
-- (void)handleLearnMoreTapped {
+// Opens web page for a menu item in the NTP.
+- (void)openMenuItemWebPage:(GURL)URL {
   NewTabPageTabHelper* NTPHelper =
       NewTabPageTabHelper::FromWebState(self.webState);
   if (NTPHelper && NTPHelper->IgnoreLoadRequests())
     return;
-  _URLLoader->Load(UrlLoadParams::InCurrentTab(GURL(kNTPHelpURL)));
+  _URLLoader->Load(UrlLoadParams::InCurrentTab(URL));
+  // TODO(crbug.com/1085419): Add metrics.
+}
+
+- (void)handleFeedManageActivityTapped {
+  [self openMenuItemWebPage:GURL(kFeedManageActivityURL)];
+  [self.discoverFeedMetrics recordHeaderMenuManageActivityTapped];
+}
+
+- (void)handleFeedManageInterestsTapped {
+  [self openMenuItemWebPage:GURL(kFeedManageInterestsURL)];
+  [self.discoverFeedMetrics recordHeaderMenuManageInterestsTapped];
+}
+
+- (void)handleFeedLearnMoreTapped {
+  [self openMenuItemWebPage:GURL(kFeedLearnMoreURL)];
+  [self.discoverFeedMetrics recordHeaderMenuLearnMoreTapped];
+}
+
+- (void)handleLearnMoreTapped {
+  [self openMenuItemWebPage:GURL(kNTPHelpURL)];
   [self.NTPMetrics recordAction:new_tab_page_uma::ACTION_OPENED_LEARN_MORE];
 }
 
@@ -474,7 +519,7 @@ const char kNTPHelpURL[] =
 }
 
 - (BOOL)isScrolledToTop {
-  return self.suggestionsViewController.scrolledToTop;
+  return self.primaryViewController.scrolledToTop;
 }
 
 - (void)registerImageUpdater:(id<UserAccountImageUpdateDelegate>)imageUpdater {
@@ -599,10 +644,17 @@ const char kNTPHelpURL[] =
   web::NavigationManager* manager = webState->GetNavigationManager();
   web::NavigationItem* item = manager->GetLastCommittedItem();
   web::PageDisplayState displayState;
-  UIEdgeInsets contentInset =
-      self.suggestionsViewController.collectionView.contentInset;
-  CGPoint contentOffset =
-      self.suggestionsViewController.collectionView.contentOffset;
+
+  // TODO(crbug.com/1114792): Create a protocol to stop having references to
+  // both of these ViewControllers directly.
+  UICollectionView* collectionView =
+      self.refactoredFeedVisible
+          ? self.ntpViewController.discoverFeedWrapperViewController
+                .feedCollectionView
+          : self.suggestionsViewController.collectionView;
+  UIEdgeInsets contentInset = collectionView.contentInset;
+  CGPoint contentOffset = collectionView.contentOffset;
+
   contentOffset.y -=
       self.headerCollectionInteractionHandler.collectionShiftingOffset;
   displayState.scroll_state() =
@@ -619,8 +671,15 @@ const char kNTPHelpURL[] =
   web::NavigationItem* item = navigationManager->GetVisibleItem();
   CGFloat offset =
       item ? item->GetPageDisplayState().scroll_state().content_offset().y : 0;
-  if (offset > 0)
-    [self.suggestionsViewController setContentOffset:offset];
+  if (offset > 0) {
+    // TODO(crbug.com/1114792): Create a protocol to stop having references to
+    // both of these ViewControllers directly.
+    if ([self isRefactoredFeedVisible]) {
+      [self.ntpViewController setContentOffset:offset];
+    } else {
+      [self.suggestionsViewController setContentOffset:offset];
+    }
+  }
 }
 
 // Fetches and update user's avatar on NTP, or use default avatar if user is
@@ -642,13 +701,14 @@ const char kNTPHelpURL[] =
       identityService->GetAvatarForIdentity(identity, nil);
     }
   } else {
-    // User is not signed in, show default avatar.
-    image = [self defaultAvatar];
+    // User is not signed in, don't show any avatar.
+    image = nil;
   }
   // TODO(crbug.com/965962): Use ResizedAvatarCache when it accepts the
   // specification of different image sizes.
   CGFloat dimension = ntp_home::kIdentityAvatarDimension;
-  if (image.size.width != dimension || image.size.height != dimension) {
+  if (image &&
+      (image.size.width != dimension || image.size.height != dimension)) {
     image = ResizeImage(image, CGSizeMake(dimension, dimension),
                         ProjectionMode::kAspectFit);
   }

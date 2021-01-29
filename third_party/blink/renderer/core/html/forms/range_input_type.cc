@@ -46,13 +46,14 @@
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_option_element.h"
 #include "third_party/blink/renderer/core/html/forms/slider_thumb_element.h"
+#include "third_party/blink/renderer/core/html/forms/slider_track_element.h"
 #include "third_party/blink/renderer/core/html/forms/step_range.h"
-#include "third_party/blink/renderer/core/html/html_div_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
-#include "third_party/blink/renderer/core/layout/layout_slider.h"
+#include "third_party/blink/renderer/core/layout/layout_block.h"
+#include "third_party/blink/renderer/core/layout/layout_object_factory.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
@@ -76,7 +77,7 @@ RangeInputType::RangeInputType(HTMLInputElement& element)
       InputTypeView(element),
       tick_mark_values_dirty_(true) {}
 
-void RangeInputType::Trace(Visitor* visitor) {
+void RangeInputType::Trace(Visitor* visitor) const {
   InputTypeView::Trace(visitor);
   InputType::Trace(visitor);
 }
@@ -193,12 +194,8 @@ void RangeInputType::HandleKeydownEvent(KeyboardEvent& event) {
       std::max((step_range.Maximum() - step_range.Minimum()) / 10, step);
 
   TextDirection dir = TextDirection::kLtr;
-  bool is_vertical = false;
   if (GetElement().GetLayoutObject()) {
     dir = ComputedTextDirection();
-    ControlPart part =
-        GetElement().GetLayoutObject()->Style()->EffectiveAppearance();
-    is_vertical = part == kSliderVerticalPart;
   }
 
   Decimal new_value;
@@ -207,19 +204,17 @@ void RangeInputType::HandleKeydownEvent(KeyboardEvent& event) {
   } else if (key == "ArrowDown") {
     new_value = current - step;
   } else if (key == "ArrowLeft") {
-    new_value = (is_vertical || dir == TextDirection::kRtl) ? current + step
-                                                            : current - step;
+    new_value = dir == TextDirection::kRtl ? current + step : current - step;
   } else if (key == "ArrowRight") {
-    new_value = (is_vertical || dir == TextDirection::kRtl) ? current - step
-                                                            : current + step;
+    new_value = dir == TextDirection::kRtl ? current - step : current + step;
   } else if (key == "PageUp") {
     new_value = current + big_step;
   } else if (key == "PageDown") {
     new_value = current - big_step;
   } else if (key == "Home") {
-    new_value = is_vertical ? step_range.Maximum() : step_range.Minimum();
+    new_value = step_range.Minimum();
   } else if (key == "End") {
-    new_value = is_vertical ? step_range.Minimum() : step_range.Maximum();
+    new_value = step_range.Maximum();
   } else {
     return;  // Did not match any key binding.
   }
@@ -244,9 +239,10 @@ void RangeInputType::CreateShadowSubtree() {
   DCHECK(IsShadowHost(GetElement()));
 
   Document& document = GetElement().GetDocument();
-  auto* track = MakeGarbageCollected<HTMLDivElement>(document);
-  track->SetShadowPseudoId(AtomicString("-webkit-slider-runnable-track"));
-  track->setAttribute(html_names::kIdAttr, shadow_element_names::SliderTrack());
+  auto* track = MakeGarbageCollected<blink::SliderTrackElement>(document);
+  track->SetShadowPseudoId(shadow_element_names::kPseudoSliderTrack);
+  track->setAttribute(html_names::kIdAttr,
+                      shadow_element_names::kIdSliderTrack);
   track->AppendChild(MakeGarbageCollected<SliderThumbElement>(document));
   auto* container = MakeGarbageCollected<SliderContainerElement>(document);
   container->AppendChild(track);
@@ -254,14 +250,18 @@ void RangeInputType::CreateShadowSubtree() {
 }
 
 bool RangeInputType::TypeShouldForceLegacyLayout() const {
+  if (RuntimeEnabledFeatures::LayoutNGForControlsEnabled())
+    return false;
+  UseCounter::Count(GetElement().GetDocument(),
+                    WebFeature::kLegacyLayoutBySlider);
   return true;
 }
 
-LayoutObject* RangeInputType::CreateLayoutObject(const ComputedStyle&,
-                                                 LegacyLayout) const {
-  UseCounter::Count(GetElement().GetDocument(),
-                    WebFeature::kLegacyLayoutBySlider);
-  return new LayoutSlider(&GetElement());
+LayoutObject* RangeInputType::CreateLayoutObject(const ComputedStyle& style,
+                                                 LegacyLayout legacy) const {
+  // TODO(crbug.com/1131352): input[type=range] should not use
+  // LayoutFlexibleBox.
+  return LayoutObjectFactory::CreateFlexibleBox(GetElement(), style, legacy);
 }
 
 Decimal RangeInputType::ParseToNumber(const String& src,
@@ -335,12 +335,12 @@ bool RangeInputType::ShouldRespectListAttribute() {
 inline SliderThumbElement* RangeInputType::GetSliderThumbElement() const {
   return To<SliderThumbElement>(
       GetElement().UserAgentShadowRoot()->getElementById(
-          shadow_element_names::SliderThumb()));
+          shadow_element_names::kIdSliderThumb));
 }
 
 inline Element* RangeInputType::SliderTrackElement() const {
   return GetElement().UserAgentShadowRoot()->getElementById(
-      shadow_element_names::SliderTrack());
+      shadow_element_names::kIdSliderTrack);
 }
 
 void RangeInputType::ListAttributeTargetChanged() {

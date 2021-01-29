@@ -11,6 +11,7 @@
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
 #include "services/device/geolocation/geolocation_provider.h"
@@ -23,7 +24,6 @@
 #include "services/device/public/mojom/geolocation_config.mojom.h"
 #include "services/device/public/mojom/geolocation_context.mojom.h"
 #include "services/device/public/mojom/geolocation_control.mojom.h"
-#include "services/device/public/mojom/nfc_provider.mojom.h"
 #include "services/device/public/mojom/power_monitor.mojom.h"
 #include "services/device/public/mojom/screen_orientation.mojom.h"
 #include "services/device/public/mojom/sensor_provider.mojom.h"
@@ -41,16 +41,17 @@
 
 #if defined(OS_ANDROID)
 #include "base/android/scoped_java_ref.h"
+#include "services/device/public/mojom/nfc_provider.mojom.h"
 #else
 #include "services/device/public/mojom/hid.mojom.h"
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "services/device/media_transfer_protocol/mtp_device_manager.h"
 #include "services/device/public/mojom/bluetooth_system.mojom.h"
 #endif
 
-#if defined(OS_LINUX) && defined(USE_UDEV)
+#if (defined(OS_LINUX) || defined(OS_CHROMEOS)) && defined(USE_UDEV)
 #include "services/device/public/mojom/input_service.mojom.h"
 #endif
 
@@ -148,15 +149,19 @@ class DeviceService : public mojom::DeviceService {
   void BindGeolocationControl(
       mojo::PendingReceiver<mojom::GeolocationControl> receiver) override;
 
-#if defined(OS_LINUX) && defined(USE_UDEV)
+#if (defined(OS_LINUX) || defined(OS_CHROMEOS)) && defined(USE_UDEV)
   void BindInputDeviceManager(
       mojo::PendingReceiver<mojom::InputDeviceManager> receiver) override;
 #endif
 
   void BindBatteryMonitor(
       mojo::PendingReceiver<mojom::BatteryMonitor> receiver) override;
+
+#if defined(OS_ANDROID)
   void BindNFCProvider(
       mojo::PendingReceiver<mojom::NFCProvider> receiver) override;
+#endif
+
   void BindVibrationManager(
       mojo::PendingReceiver<mojom::VibrationManager> receiver) override;
 
@@ -165,7 +170,7 @@ class DeviceService : public mojom::DeviceService {
       mojo::PendingReceiver<mojom::HidManager> receiver) override;
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   void BindBluetoothSystemFactory(
       mojo::PendingReceiver<mojom::BluetoothSystemFactory> receiver) override;
   void BindMtpManager(
@@ -225,7 +230,8 @@ class DeviceService : public mojom::DeviceService {
   service_manager::InterfaceProvider* GetJavaInterfaceProvider();
 
   // InterfaceProvider that is bound to the Java-side interface registry.
-  service_manager::InterfaceProvider java_interface_provider_;
+  service_manager::InterfaceProvider java_interface_provider_{
+      base::ThreadTaskRunnerHandle::Get()};
 
   bool java_interface_provider_initialized_;
 
@@ -234,8 +240,8 @@ class DeviceService : public mojom::DeviceService {
   std::unique_ptr<HidManagerImpl> hid_manager_;
 #endif
 
-#if (defined(OS_LINUX) && defined(USE_UDEV)) || defined(OS_WIN) || \
-    defined(OS_MACOSX)
+#if ((defined(OS_LINUX) || defined(OS_CHROMEOS)) && defined(USE_UDEV)) || \
+    defined(OS_WIN) || defined(OS_MAC)
   // Requests for the SerialPortManager interface must be bound to
   // |serial_port_manager_| on |serial_port_manager_task_runner_| and it will
   // be destroyed on that sequence.
@@ -243,7 +249,7 @@ class DeviceService : public mojom::DeviceService {
   scoped_refptr<base::SequencedTaskRunner> serial_port_manager_task_runner_;
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   std::unique_ptr<MtpDeviceManager> mtp_device_manager_;
 #endif
 

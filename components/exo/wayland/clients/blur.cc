@@ -13,8 +13,8 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkSurface.h"
-#include "third_party/skia/include/effects/SkBlurImageFilter.h"
-#include "third_party/skia/include/gpu/GrContext.h"
+#include "third_party/skia/include/effects/SkImageFilters.h"
+#include "third_party/skia/include/gpu/GrDirectContext.h"
 #include "ui/gl/gl_bindings.h"
 
 namespace exo {
@@ -131,8 +131,8 @@ void Blur::Run(double sigma_x,
   if (sigma_x > 0.0 || sigma_y > 0.0) {
     sigma_x = AdjustSigma(sigma_x, max_sigma, &blur_scale_factor_x);
     sigma_y = AdjustSigma(sigma_y, max_sigma, &blur_scale_factor_y);
-    blur_filter = SkBlurImageFilter::Make(sigma_x, sigma_y, nullptr, nullptr,
-                                          SkBlurImageFilter::kClamp_TileMode);
+    blur_filter = SkImageFilters::Blur(sigma_x, sigma_y, SkTileMode::kClamp,
+                                       nullptr, nullptr);
     auto size = SkISize::Make(size_.width() / blur_scale_factor_x,
                               size_.height() / blur_scale_factor_y);
     do {
@@ -184,9 +184,9 @@ void Blur::Run(double sigma_x,
       SkIRect subset;
       SkIPoint offset;
       sk_sp<SkImage> blur_image = content_surfaces.back()->makeImageSnapshot();
-      sk_sp<SkImage> blurred_image =
-          blur_image->makeWithFilter(blur_filter.get(), blur_image->bounds(),
-                                     blur_image->bounds(), &subset, &offset);
+      sk_sp<SkImage> blurred_image = blur_image->makeWithFilter(
+          gr_context_.get(), blur_filter.get(), blur_image->bounds(),
+          blur_image->bounds(), &subset, &offset);
       SkCanvas* canvas = buffer->sk_surface->getCanvas();
       canvas->save();
       SkSize size = SkSize::Make(size_.width(), size_.height());
@@ -215,7 +215,7 @@ void Blur::Run(double sigma_x,
     }
 
     if (gr_context_) {
-      gr_context_->flush();
+      gr_context_->flushAndSubmit();
       glFinish();
     }
 

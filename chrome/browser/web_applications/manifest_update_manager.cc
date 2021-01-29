@@ -4,7 +4,8 @@
 
 #include "chrome/browser/web_applications/manifest_update_manager.h"
 
-#include "base/metrics/histogram_macros.h"
+#include "base/command_line.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/util/values/values_util.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -17,58 +18,10 @@
 
 namespace web_app {
 
-namespace {
+constexpr const char kDisableManifestUpdateThrottle[] =
+    "disable-manifest-update-throttle";
 
-const char kLastUpdateCheckKey[] = "last_update_check";
-
-class AppPrefs {
- public:
-  AppPrefs(Profile* profile, const GURL& origin) {
-    settings_ = HostContentSettingsMapFactory::GetForProfile(profile);
-    if (!settings_)
-      return;
-    origin_data_ = settings_->GetWebsiteSetting(
-        origin, GURL(), ContentSettingsType::INSTALLED_WEB_APP_METADATA,
-        std::string(), nullptr);
-  }
-
-  bool IsAvailable() const { return settings_; }
-
-  const base::Value* GetAppData(const AppId& app_id) const {
-    if (!origin_data_)
-      return nullptr;
-    return origin_data_->FindKey(app_id);
-  }
-
-  base::Value& GetAppDataMutable(const AppId& app_id) {
-    DCHECK(IsAvailable());
-    if (!origin_data_)
-      origin_data_ =
-          std::make_unique<base::Value>(base::Value::Type::DICTIONARY);
-    base::Value* app_data = origin_data_->FindKey(app_id);
-    if (!app_data) {
-      app_data = origin_data_->SetKey(
-          app_id, base::Value(base::Value::Type::DICTIONARY));
-    }
-    return *app_data;
-  }
-
-  void Save(const GURL& origin) {
-    DCHECK(IsAvailable());
-    settings_->SetWebsiteSettingDefaultScope(
-        origin, GURL(), ContentSettingsType::INSTALLED_WEB_APP_METADATA,
-        std::string(), std::move(origin_data_));
-  }
-
- private:
-  HostContentSettingsMap* settings_ = nullptr;
-  std::unique_ptr<base::Value> origin_data_;
-};
-
-}  // namespace
-
-ManifestUpdateManager::ManifestUpdateManager(Profile* profile)
-    : profile_(profile) {}
+ManifestUpdateManager::ManifestUpdateManager() = default;
 
 ManifestUpdateManager::~ManifestUpdateManager() = default;
 
@@ -87,30 +40,37 @@ void ManifestUpdateManager::SetSubsystems(
 
 void ManifestUpdateManager::Start() {
   registrar_observer_.Add(registrar_);
+
+  DCHECK(!started_);
+  started_ = true;
 }
 
 void ManifestUpdateManager::Shutdown() {
   registrar_observer_.RemoveAll();
+
+  tasks_.clear();
+  started_ = false;
 }
 
 void ManifestUpdateManager::MaybeUpdate(const GURL& url,
                                         const AppId& app_id,
                                         content::WebContents* web_contents) {
-  if (!base::FeatureList::IsEnabled(features::kDesktopPWAsLocalUpdating))
+  if (!started_) {
     return;
+  }
 
   if (app_id.empty() || !registrar_->IsLocallyInstalled(app_id)) {
-    NotifyResult(url, ManifestUpdateResult::kNoAppInScope);
+    NotifyResult(url, app_id, ManifestUpdateResult::kNoAppInScope);
     return;
   }
 
   if (system_web_app_manager_->IsSystemWebApp(app_id)) {
-    NotifyResult(url, ManifestUpdateResult::kAppIsSystemWebApp);
+    NotifyResult(url, app_id, ManifestUpdateResult::kAppIsSystemWebApp);
     return;
   }
 
   if (registrar_->IsPlaceholderApp(app_id)) {
-    NotifyResult(url, ManifestUpdateResult::kAppIsPlaceholder);
+    NotifyResult(url, app_id, ManifestUpdateResult::kAppIsPlaceholder);
     return;
   }
 
@@ -118,7 +78,7 @@ void ManifestUpdateManager::MaybeUpdate(const GURL& url,
     return;
 
   if (!MaybeConsumeUpdateCheck(url.GetOrigin(), app_id)) {
-    NotifyResult(url, ManifestUpdateResult::kThrottled);
+    NotifyResult(url, app_id, ManifestUpdateResult::kThrottled);
     return;
   }
 
@@ -132,10 +92,13 @@ void ManifestUpdateManager::MaybeUpdate(const GURL& url,
 }
 
 // AppRegistrarObserver:
-void ManifestUpdateManager::OnWebAppUninstalled(const AppId& app_id) {
+void ManifestUpdateManager::OnWebAppWillBeUninstalled(const AppId& app_id) {
+  DCHECK(started_);
+
   auto it = tasks_.find(app_id);
   if (it != tasks_.end()) {
-    NotifyResult(it->second->url(), ManifestUpdateResult::kAppUninstalled);
+    NotifyResult(it->second->url(), app_id,
+                 ManifestUpdateResult::kAppUninstalled);
     tasks_.erase(it);
   }
   DCHECK(!tasks_.contains(app_id));
@@ -144,18 +107,19 @@ void ManifestUpdateManager::OnWebAppUninstalled(const AppId& app_id) {
 
 bool ManifestUpdateManager::MaybeConsumeUpdateCheck(const GURL& origin,
                                                     const AppId& app_id) {
+  constexpr base::TimeDelta kDelayBetweenChecks = base::TimeDelta::FromDays(1);
   base::Optional<base::Time> last_check_time =
       GetLastUpdateCheckTime(origin, app_id);
-  if (!last_check_time)
-    return false;
-
   base::Time now = time_override_for_testing_.value_or(base::Time::Now());
+
   // Throttling updates to at most once per day is consistent with Android.
   // See |UPDATE_INTERVAL| in WebappDataStorage.java.
-  constexpr base::TimeDelta kDelayBetweenChecks = base::TimeDelta::FromDays(1);
-  if (now < *last_check_time + kDelayBetweenChecks)
+  if (last_check_time.has_value() &&
+      now < *last_check_time + kDelayBetweenChecks &&
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
+          kDisableManifestUpdateThrottle)) {
     return false;
-
+  }
   SetLastUpdateCheckTime(origin, app_id, now);
   return true;
 }
@@ -163,43 +127,21 @@ bool ManifestUpdateManager::MaybeConsumeUpdateCheck(const GURL& origin,
 base::Optional<base::Time> ManifestUpdateManager::GetLastUpdateCheckTime(
     const GURL& origin,
     const AppId& app_id) const {
-  if (!base::FeatureList::IsEnabled(
-          features::kDesktopPWAsLocalUpdatingThrottlePersistence)) {
-    auto it = last_update_check_.find(app_id);
-    return it != last_update_check_.end() ? it->second : base::Time();
-  }
-
-  AppPrefs app_prefs(profile_, origin);
-  if (!app_prefs.IsAvailable())
-    return base::nullopt;
-  const base::Value* app_data = app_prefs.GetAppData(app_id);
-  if (!app_data)
-    return base::Time();
-  return util::ValueToTime(app_data->FindKey(kLastUpdateCheckKey))
-      .value_or(base::Time());
+  auto it = last_update_check_.find(app_id);
+  return it != last_update_check_.end() ? base::Optional<base::Time>(it->second)
+                                        : base::nullopt;
 }
 
 void ManifestUpdateManager::SetLastUpdateCheckTime(const GURL& origin,
                                                    const AppId& app_id,
                                                    base::Time time) {
-  if (!base::FeatureList::IsEnabled(
-          features::kDesktopPWAsLocalUpdatingThrottlePersistence)) {
-    last_update_check_[app_id] = time;
-    return;
-  }
-
-  AppPrefs app_prefs(profile_, origin);
-  if (!app_prefs.IsAvailable())
-    return;
-  base::Value& app_data = app_prefs.GetAppDataMutable(app_id);
-  app_data.SetKey(kLastUpdateCheckKey, util::TimeToValue(time));
-  app_prefs.Save(origin);
+  last_update_check_[app_id] = time;
 }
 
 void ManifestUpdateManager::OnUpdateStopped(const ManifestUpdateTask& task,
                                             ManifestUpdateResult result) {
   DCHECK_EQ(&task, tasks_[task.app_id()].get());
-  NotifyResult(task.url(), result);
+  NotifyResult(task.url(), task.app_id(), result);
   tasks_.erase(task.app_id());
 }
 
@@ -210,11 +152,17 @@ void ManifestUpdateManager::SetResultCallbackForTesting(
 }
 
 void ManifestUpdateManager::NotifyResult(const GURL& url,
+                                         const AppId& app_id,
                                          ManifestUpdateResult result) {
   // Don't log kNoAppInScope because it will be far too noisy (most page loads
   // will hit it).
   if (result != ManifestUpdateResult::kNoAppInScope) {
-    UMA_HISTOGRAM_ENUMERATION("Webapp.Update.ManifestUpdateResult", result);
+    base::UmaHistogramEnumeration("Webapp.Update.ManifestUpdateResult", result);
+    if (registrar_->HasExternalAppWithInstallSource(
+            app_id, ExternalInstallSource::kExternalDefault)) {
+      base::UmaHistogramEnumeration(
+          "Webapp.Update.ManifestUpdateResult.DefaultApp", result);
+    }
   }
   if (result_callback_for_testing_)
     std::move(result_callback_for_testing_).Run(url, result);

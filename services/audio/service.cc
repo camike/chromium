@@ -24,7 +24,7 @@
 #include "services/audio/service_metrics.h"
 #include "services/audio/system_info.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
 #include "media/audio/mac/audio_device_listener_mac.h"
 #endif
 
@@ -49,7 +49,7 @@ Service::Service(std::unique_ptr<AudioManagerAccessor> audio_manager_accessor,
     // created. This is required for in-process device notifications.
     InitializeDeviceMonitor();
   }
-  TRACE_EVENT0("audio", "audio::Service::OnStart")
+  TRACE_EVENT0("audio", "audio::Service::OnStart");
 
   // This will pre-create AudioManager if AudioManagerAccessor owns it.
   CHECK(audio_manager_accessor_->GetAudioManager());
@@ -158,7 +158,7 @@ void Service::BindTestingApi(
 
 void Service::InitializeDeviceMonitor() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
   if (audio_device_listener_mac_)
     return;
 

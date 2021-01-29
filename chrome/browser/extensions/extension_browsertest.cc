@@ -23,6 +23,7 @@
 #include "base/task/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
@@ -76,7 +77,7 @@
 #include "extensions/common/switches.h"
 #include "extensions/common/value_builder.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chromeos/constants/chromeos_switches.h"
 #endif
 
@@ -85,8 +86,27 @@ namespace extensions {
 namespace {
 
 // Maps all chrome-extension://<id>/_test_resources/foo requests to
-// chrome/test/data/extensions/foo. This is what allows us to share code between
-// tests without needing to duplicate files in each extension.
+// <test_dir_root>/foo or <test_dir_gen_root>/foo, where |test_dir_gen_root| is
+// inferred from <test_dir_root>. The latter is triggered only if the first path
+// does not correspond to an existing file. This is what allows us to share code
+// between tests without needing to duplicate files in each extension.
+// Example invocation #1, where the requested file exists in |test_dir_root|
+//   Input:
+//     test_dir_root: /abs/path/src/chrome/test/data
+//     directory_path: /abs/path/src/out/<out_dir>/resources/pdf
+//     relative_path: _test_resources/webui/test_browser_proxy.js
+//   Output:
+//     directory_path: /abs/path/src/chrome/test/data
+//     relative_path: webui/test_browser_proxy.js
+//
+// Example invocation #2, where the requested file exists in |test_dir_gen_root|
+//   Input:
+//     test_dir_root: /abs/path/src/chrome/test/data
+//     directory_path: /abs/path/src/out/<out_dir>/resources/pdf
+//     relative_path: _test_resources/webui/test_browser_proxy.js
+//   Output:
+//     directory_path: /abs/path/src/out/<out_dir>/gen/chrome/test/data
+//     relative_path: webui/test_browser_proxy.js
 void ExtensionProtocolTestResourcesHandler(const base::FilePath& test_dir_root,
                                            base::FilePath* directory_path,
                                            base::FilePath* relative_path) {
@@ -96,23 +116,56 @@ void ExtensionProtocolTestResourcesHandler(const base::FilePath& test_dir_root,
     return;
   }
 
-  // Replace _test_resources/foo with chrome/test/data/extensions/foo.
-  *directory_path = test_dir_root;
+  // Strip the '_test_resources/' prefix from |relative_path|.
   std::vector<base::FilePath::StringType> components;
   relative_path->GetComponents(&components);
   DCHECK_GT(components.size(), 1u);
   base::FilePath new_relative_path;
   for (size_t i = 1u; i < components.size(); ++i)
     new_relative_path = new_relative_path.Append(components[i]);
-
   *relative_path = new_relative_path;
+
+  // Check if the file exists in the |test_dir_root| folder first.
+  base::FilePath src_path = test_dir_root.Append(new_relative_path);
+  // Replace _test_resources/foo with <test_dir_root>/foo.
+  *directory_path = test_dir_root;
+  {
+    base::ScopedAllowBlockingForTesting scoped_allow_blocking;
+    if (base::PathExists(src_path)) {
+      return;
+    }
+  }
+
+  // Infer |test_dir_gen_root| from |test_dir_root|.
+  // E.g., if |test_dir_root| is /abs/path/src/chrome/test/data,
+  // |test_dir_gen_root| will be /abs/path/out/<out_dir>/gen/chrome/test/data.
+  base::FilePath dir_source_root;
+  base::PathService::Get(base::DIR_SOURCE_ROOT, &dir_source_root);
+  base::FilePath exe_dir;
+  base::PathService::Get(base::DIR_EXE, &exe_dir);
+  base::FilePath relative_root_path;
+  dir_source_root.AppendRelativePath(test_dir_root, &relative_root_path);
+  // TODO(dpapad): Add a new DIR_GEN key to PathService instead of manually
+  // appending "gen".
+  base::FilePath test_dir_gen_root =
+      exe_dir.AppendASCII("gen").Append(relative_root_path);
+
+  // Then check if the file exists in the |test_dir_gen_root| folder
+  // covering cases where the test file is generated at build time.
+  base::FilePath gen_path = test_dir_gen_root.Append(new_relative_path);
+  {
+    base::ScopedAllowBlockingForTesting scoped_allow_blocking;
+    if (base::PathExists(gen_path)) {
+      *directory_path = test_dir_gen_root;
+    }
+  }
 }
 
 }  // namespace
 
 ExtensionBrowserTest::ExtensionBrowserTest()
     :
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
       set_chromeos_user_(true),
 #endif
       // Default channel is STABLE but override with UNKNOWN so that unlaunched
@@ -128,7 +181,7 @@ ExtensionBrowserTest::ExtensionBrowserTest()
       start_menu_override_(base::DIR_START_MENU),
       common_start_menu_override_(base::DIR_COMMON_START_MENU),
 #endif
-      profile_(NULL),
+      profile_(nullptr),
       verifier_format_override_(crx_file::VerifierFormat::CRX3) {
   EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
 }
@@ -201,7 +254,7 @@ void ExtensionBrowserTest::SetUpCommandLine(base::CommandLine* command_line) {
         new ScopedInstallVerifierBypassForTest());
   }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (set_chromeos_user_) {
     // This makes sure that we create the Default profile first, with no
     // ExtensionService and then the real profile with one, as we do when
@@ -220,8 +273,8 @@ void ExtensionBrowserTest::SetUpOnMainThread() {
         test_extension_cache_.get());
   }
 
-  test_protocol_handler_ = base::Bind(&ExtensionProtocolTestResourcesHandler,
-                                      GetTestResourcesParentDir());
+  test_protocol_handler_ = base::BindRepeating(
+      &ExtensionProtocolTestResourcesHandler, GetTestResourcesParentDir());
   SetExtensionProtocolTestHandler(&test_protocol_handler_);
 }
 
@@ -233,53 +286,73 @@ void ExtensionBrowserTest::TearDownOnMainThread() {
 
 const Extension* ExtensionBrowserTest::LoadExtension(
     const base::FilePath& path) {
-  return LoadExtensionWithFlags(path, kFlagEnableFileAccess);
+  return LoadExtension(path, {});
 }
 
-const Extension* ExtensionBrowserTest::LoadExtensionIncognito(
-    const base::FilePath& path) {
-  return LoadExtensionWithFlags(path,
-                                kFlagEnableFileAccess | kFlagEnableIncognito);
-}
+const Extension* ExtensionBrowserTest::LoadExtension(
+    const base::FilePath& path,
+    const LoadOptions& options) {
+  ChromeTestExtensionLoader loader(profile());
+  loader.set_allow_incognito_access(options.allow_in_incognito);
+  loader.set_allow_file_access(options.allow_file_access);
+  loader.set_ignore_manifest_warnings(options.ignore_manifest_warnings);
+  loader.set_require_modern_manifest_version(
+      options.require_modern_manifest_version);
+  if (options.load_for_login_screen) {
+    loader.add_creation_flag(Extension::FOR_LOGIN_SCREEN);
+    loader.set_location(Manifest::EXTERNAL_POLICY);
+  }
+  loader.set_wait_for_renderers(options.wait_for_renderers);
 
-const Extension* ExtensionBrowserTest::LoadExtensionWithFlags(
-    const base::FilePath& path, int flags) {
+  if (options.install_param != nullptr) {
+    loader.set_install_param(options.install_param);
+  }
+  // Attempt to convert the extension to run as a Service Worker-based
+  // extension if requested.
   base::FilePath extension_path = path;
-  if (flags & kFlagRunAsServiceWorkerBasedExtension) {
+  if (options.load_as_service_worker) {
     if (!CreateServiceWorkerBasedExtension(path, &extension_path))
       return nullptr;
   }
-  return LoadExtensionWithInstallParam(extension_path, flags, std::string());
+
+  scoped_refptr<const Extension> extension =
+      loader.LoadExtension(extension_path);
+  if (extension)
+    observer_->set_last_loaded_extension_id(extension->id());
+  return extension.get();
 }
 
 const Extension* ExtensionBrowserTest::LoadExtensionWithInstallParam(
     const base::FilePath& path,
     int flags,
     const std::string& install_param) {
-  // Make sure there aren't any stray bits in "flags." This could happen
-  // if someone inadvertently used any of the ExtensionApiTest flag values.
-  CHECK_LT(flags, kFlagNextValue);
-  ChromeTestExtensionLoader loader(profile());
-  loader.set_require_modern_manifest_version(
-      (flags & kFlagAllowOldManifestVersions) == 0);
-  loader.set_ignore_manifest_warnings(flags & kFlagIgnoreManifestWarnings);
-  loader.set_allow_incognito_access(flags & kFlagEnableIncognito);
-  loader.set_allow_file_access(flags & kFlagEnableFileAccess);
-  loader.set_install_param(install_param);
-
-  // Note: Rely on the default value to wait for renderers unless otherwise
-  // specified.
-  if (flags & kFlagDontWaitForExtensionRenderers)
-    loader.set_wait_for_renderers(false);
-
-  if ((flags & kFlagLoadForLoginScreen) != 0) {
-    loader.add_creation_flag(Extension::FOR_LOGIN_SCREEN);
-    loader.set_location(Manifest::EXTERNAL_POLICY);
+  LoadOptions options;
+  if (flags & kFlagEnableIncognito) {
+    options.allow_in_incognito = true;
   }
-  scoped_refptr<const Extension> extension = loader.LoadExtension(path);
-  if (extension)
-    observer_->set_last_loaded_extension_id(extension->id());
-  return extension.get();
+  if (flags & kFlagEnableFileAccess) {
+    options.allow_file_access = true;
+  }
+  if (flags & kFlagIgnoreManifestWarnings) {
+    options.ignore_manifest_warnings = true;
+  }
+  if (flags & kFlagAllowOldManifestVersions) {
+    options.require_modern_manifest_version = false;
+  }
+  if (flags & kFlagLoadForLoginScreen) {
+    options.load_for_login_screen = true;
+  }
+  if (flags & kFlagRunAsServiceWorkerBasedExtension) {
+    options.load_as_service_worker = true;
+  }
+  if (flags & kFlagDontWaitForExtensionRenderers) {
+    options.wait_for_renderers = false;
+  }
+  if (!install_param.empty()) {
+    options.install_param = install_param.c_str();
+  }
+
+  return LoadExtension(path, options);
 }
 
 bool ExtensionBrowserTest::CreateServiceWorkerBasedExtension(
@@ -330,9 +403,10 @@ bool ExtensionBrowserTest::CreateServiceWorkerBasedExtension(
   {
     base::Value* background_persistent = background_dict->FindKeyOfType(
         "persistent", base::Value::Type::BOOLEAN);
-    if (!background_persistent || background_persistent->GetBool()) {
+    if (!background_persistent) {
       ADD_FAILURE() << path.value()
-                    << ": Only event pages can be loaded as SW extension.";
+                    << ": The \"persistent\" key must be specified to run as a "
+                       "Service Worker-based extension.";
       return false;
     }
   }
@@ -408,7 +482,7 @@ const Extension* ExtensionBrowserTest::LoadExtensionAsComponentWithManifest(
     return NULL;
   }
 
-  extension_service()->component_loader()->set_ignore_whitelist_for_testing(
+  extension_service()->component_loader()->set_ignore_allowlist_for_testing(
       true);
   std::string extension_id =
       extension_service()->component_loader()->Add(manifest, path);
@@ -438,7 +512,7 @@ const Extension* ExtensionBrowserTest::LoadAndLaunchApp(
   params.command_line = *base::CommandLine::ForCurrentProcess();
   apps::AppServiceProxyFactory::GetForProfile(profile())
       ->BrowserAppLauncher()
-      .LaunchAppWithParams(params);
+      ->LaunchAppWithParams(std::move(params));
   app_loaded_observer.Wait();
 
   return app;
@@ -453,7 +527,7 @@ base::FilePath ExtensionBrowserTest::PackExtension(
     int extra_run_flags) {
   base::ScopedAllowBlockingForTesting allow_blocking;
   base::FilePath crx_path = temp_dir_.GetPath().AppendASCII("temp.crx");
-  if (!base::DeleteFile(crx_path, false)) {
+  if (!base::DeleteFile(crx_path)) {
     ADD_FAILURE() << "Failed to delete crx: " << crx_path.value();
     return base::FilePath();
   }
@@ -466,7 +540,7 @@ base::FilePath ExtensionBrowserTest::PackExtension(
   if (!base::PathExists(pem_path)) {
     pem_path = base::FilePath();
     pem_path_out = crx_path.DirName().AppendASCII("temp.pem");
-    if (!base::DeleteFile(pem_path_out, false)) {
+    if (!base::DeleteFile(pem_path_out)) {
       ADD_FAILURE() << "Failed to delete pem: " << pem_path_out.value();
       return base::FilePath();
     }
@@ -739,7 +813,7 @@ ExtensionHost* ExtensionBrowserTest::FindHostWithPath(ProcessManager* manager,
   ExtensionHost* result_host = nullptr;
   int num_hosts = 0;
   for (ExtensionHost* host : manager->background_hosts()) {
-    if (host->GetURL().path() == path) {
+    if (host->GetLastCommittedURL().path() == path) {
       EXPECT_FALSE(result_host);
       result_host = host;
     }

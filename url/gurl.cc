@@ -288,7 +288,7 @@ GURL GURL::GetOrigin() const {
 }
 
 GURL GURL::GetAsReferrer() const {
-  if (!SchemeIsValidForReferrer())
+  if (!is_valid() || !IsReferrerScheme(spec_.data(), parsed_.scheme))
     return GURL();
 
   if (!has_ref() && !has_username() && !has_password())
@@ -352,10 +352,6 @@ bool GURL::SchemeIs(base::StringPiece lower_ascii_scheme) const {
 
 bool GURL::SchemeIsHTTPOrHTTPS() const {
   return SchemeIs(url::kHttpScheme) || SchemeIs(url::kHttpsScheme);
-}
-
-bool GURL::SchemeIsValidForReferrer() const {
-  return is_valid_ && IsReferrerScheme(spec_.data(), parsed_.scheme);
 }
 
 bool GURL::SchemeIsWSOrWSS() const {
@@ -489,17 +485,23 @@ bool GURL::IsAboutUrl(base::StringPiece allowed_path) const {
   if (has_host() || has_username() || has_password() || has_port())
     return false;
 
-  if (!path_piece().starts_with(allowed_path))
+  return IsAboutPath(path_piece(), allowed_path);
+}
+
+// static
+bool GURL::IsAboutPath(base::StringPiece actual_path,
+                       base::StringPiece allowed_path) {
+  if (!base::StartsWith(actual_path, allowed_path))
     return false;
 
-  if (path_piece().size() == allowed_path.size()) {
-    DCHECK_EQ(path_piece(), allowed_path);
+  if (actual_path.size() == allowed_path.size()) {
+    DCHECK_EQ(actual_path, allowed_path);
     return true;
   }
 
-  if ((path_piece().size() == allowed_path.size() + 1) &&
-      path_piece().back() == '/') {
-    DCHECK_EQ(path_piece(), allowed_path.as_string() + '/');
+  if ((actual_path.size() == allowed_path.size() + 1) &&
+      actual_path.back() == '/') {
+    DCHECK_EQ(actual_path, allowed_path.as_string() + '/');
     return true;
   }
 
@@ -519,7 +521,9 @@ bool operator!=(const GURL& x, const GURL& y) {
 }
 
 bool operator==(const GURL& x, const base::StringPiece& spec) {
-  DCHECK_EQ(GURL(spec).possibly_invalid_spec(), spec);
+  DCHECK_EQ(GURL(spec).possibly_invalid_spec(), spec)
+      << "Comparisons of GURLs and strings must ensure as a precondition that "
+         "the string is fully canonicalized.";
   return x.possibly_invalid_spec() == spec;
 }
 

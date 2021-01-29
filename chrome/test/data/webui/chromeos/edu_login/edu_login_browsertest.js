@@ -6,6 +6,8 @@
 
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
 
+GEN('#include "content/public/test/browser_test.h"');
+
 const EduLoginTest = class extends PolymerTest {
   /** @override */
   get browsePreload() {
@@ -14,14 +16,6 @@ const EduLoginTest = class extends PolymerTest {
 
   get suiteName() {
     throw 'this is abstract and should be overridden by subclasses';
-  }
-
-  /** @override */
-  get extraLibraries() {
-    return [
-      '//third_party/mocha/mocha.js',
-      '//chrome/test/data/webui/mocha_adapter.js',
-    ];
   }
 
   /** @param {string} testName The name of the test to run. */
@@ -96,6 +90,14 @@ TEST_F('EduLoginParentsTest', 'SelectedParent', function() {
   this.runMochaTest(edu_login_parents_tests.TestNames.SelectedParent);
 });
 
+TEST_F('EduLoginParentsTest', 'NoInternetError', function() {
+  this.runMochaTest(edu_login_parents_tests.TestNames.NoInternetError);
+});
+
+TEST_F('EduLoginParentsTest', 'CannotAddAccountError', function() {
+  this.runMochaTest(edu_login_parents_tests.TestNames.CannotAddAccountError);
+});
+
 var EduLoginParentSigninTest = class extends EduLoginTest {
   /** @override */
   get browsePreload() {
@@ -151,4 +153,8 @@ TEST_F('EduLoginSigninTest', 'WebUICallbacks', function() {
 
 TEST_F('EduLoginSigninTest', 'AuthExtHostCallbacks', function() {
   this.runMochaTest(edu_login_signin_tests.TestNames.AuthExtHostCallbacks);
+});
+
+TEST_F('EduLoginSigninTest', 'GoBackInWebview', function() {
+  this.runMochaTest(edu_login_signin_tests.TestNames.GoBackInWebview);
 });

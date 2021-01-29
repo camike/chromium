@@ -15,16 +15,17 @@
 #include "ash/public/cpp/app_list/app_list_features.h"
 #include "ash/public/cpp/app_list/app_list_switches.h"
 #include "ash/public/cpp/app_list/app_list_types.h"
+#include "ash/public/cpp/metrics_util.h"
 #include "ash/public/cpp/pagination/pagination_model.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/optional.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/window.h"
+#include "ui/compositor/animation_throughput_reporter.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/display/screen.h"
@@ -105,6 +106,7 @@ AppListPresenterImpl::~AppListPresenterImpl() {
     if (view_->GetWidget())
       view_->GetWidget()->CloseNow();
   }
+  CHECK(!IsInObserverList());
 }
 
 aura::Window* AppListPresenterImpl::GetWindow() const {
@@ -113,7 +115,8 @@ aura::Window* AppListPresenterImpl::GetWindow() const {
              : nullptr;
 }
 
-void AppListPresenterImpl::Show(int64_t display_id,
+void AppListPresenterImpl::Show(AppListViewState preferred_state,
+                                int64_t display_id,
                                 base::TimeTicks event_time_stamp) {
   if (is_target_visibility_show_) {
     // Launcher is always visible on the internal display when home launcher is
@@ -140,7 +143,7 @@ void AppListPresenterImpl::Show(int64_t display_id,
     SetView(view);
     view_->GetWidget()->GetNativeWindow()->TrackOcclusionState();
   }
-  delegate_->ShowForDisplay(display_id);
+  delegate_->ShowForDisplay(preferred_state, display_id);
 
   OnVisibilityChanged(GetTargetVisibility(), display_id);
 }
@@ -223,9 +226,9 @@ ShelfAction AppListPresenterImpl::ToggleAppList(
     Dismiss(event_time_stamp);
     return SHELF_ACTION_APP_LIST_DISMISSED;
   }
-  Show(display_id, event_time_stamp);
-  if (request_fullscreen)
-    view_->SetState(AppListViewState::kFullscreenAllApps);
+  Show(request_fullscreen ? AppListViewState::kFullscreenAllApps
+                          : AppListViewState::kPeeking,
+       display_id, event_time_stamp);
   return SHELF_ACTION_APP_LIST_SHOWN;
 }
 
@@ -258,70 +261,10 @@ void AppListPresenterImpl::EndDragFromShelf(AppListViewState app_list_state) {
 }
 
 void AppListPresenterImpl::ProcessMouseWheelOffset(
+    const gfx::Point& location,
     const gfx::Vector2d& scroll_offset_vector) {
   if (view_)
-    view_->HandleScroll(scroll_offset_vector, ui::ET_MOUSEWHEEL);
-}
-
-void AppListPresenterImpl::UpdateYPositionAndOpacityForHomeLauncher(
-    float y_position_in_screen,
-    float opacity,
-    base::Optional<TabletModeAnimationTransition> transition,
-    UpdateHomeLauncherAnimationSettingsCallback callback) {
-  if (!view_)
-    return;
-
-  // Manipulate the layer which contains the expand arrow, suggestion chips and
-  // apps grid in app_list_main_view, and the search box.
-  ui::Layer* layer = view_->GetWidget()->GetNativeWindow()->layer();
-  if (!delegate_->IsTabletMode()) {
-    // In clamshell mode, set the opacity of the AppList immediately to
-    // instantly hide it. Opacity of the AppList is reset when it is shown
-    // again.
-    layer->SetOpacity(opacity);
-    return;
-  }
-
-  const gfx::Transform translation(1.f, 0.f, 0.f, 1.f, 0.f,
-                                   y_position_in_screen);
-  if (layer->GetAnimator()->is_animating()) {
-    layer->GetAnimator()->StopAnimating();
-
-    // Reset the animation metrics reporter when the animation is interrupted.
-    view_->ResetTransitionMetricsReporter();
-  }
-
-  base::Optional<ui::ScopedLayerAnimationSettings> settings;
-  if (!callback.is_null()) {
-    settings.emplace(layer->GetAnimator());
-    callback.Run(&settings.value());
-
-    // Disable suggestion chips blur during animations to improve performance.
-    base::ScopedClosureRunner blur_disabler =
-        view_->app_list_main_view()
-            ->contents_view()
-            ->GetAppsContainerView()
-            ->DisableSuggestionChipsBlur();
-    // The observer will delete itself when the animations are completed.
-    settings->AddObserver(
-        new CallbackRunnerLayerAnimationObserver(std::move(blur_disabler)));
-  }
-
-  // The animation metrics reporter will run for opacity and transform
-  // animations separately - to avoid reporting duplicated values, add the
-  // reported for transform animation only.
-  layer->SetOpacity(opacity);
-
-  if (settings.has_value() && transition.has_value()) {
-    view_->OnTabletModeAnimationTransitionNotified(transition.value());
-    settings->SetAnimationMetricsReporter(
-        view_->GetStateTransitionMetricsReporter());
-  }
-
-  layer->SetTransform(translation);
-
-  // Update child views' y positions to target state to avoid stale positions.
-  view_->app_list_main_view()->contents_view()->UpdateYPositionAndOpacity();
+    view_->HandleScroll(location, scroll_offset_vector, ui::ET_MOUSEWHEEL);
 }
 
 void AppListPresenterImpl::UpdateScaleAndOpacityForHomeLauncher(
@@ -357,7 +300,7 @@ void AppListPresenterImpl::UpdateScaleAndOpacityForHomeLauncher(
     base::ScopedClosureRunner blur_disabler =
         view_->app_list_main_view()
             ->contents_view()
-            ->GetAppsContainerView()
+            ->apps_container_view()
             ->DisableSuggestionChipsBlur();
     // The observer will delete itself when the animations are completed.
     settings->AddObserver(
@@ -369,10 +312,12 @@ void AppListPresenterImpl::UpdateScaleAndOpacityForHomeLauncher(
   // reported for transform animation only.
   layer->SetOpacity(opacity);
 
+  base::Optional<ui::AnimationThroughputReporter> reporter;
   if (settings.has_value() && transition.has_value()) {
     view_->OnTabletModeAnimationTransitionNotified(*transition);
-    settings->SetAnimationMetricsReporter(
-        view_->GetStateTransitionMetricsReporter());
+    reporter.emplace(settings->GetAnimator(),
+                     metrics_util::ForSmoothness(
+                         view_->GetStateTransitionMetricsReportCallback()));
   }
 
   gfx::Transform transform =

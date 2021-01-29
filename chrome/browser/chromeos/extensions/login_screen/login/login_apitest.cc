@@ -18,9 +18,9 @@
 #include "chrome/browser/chromeos/login/lock/screen_locker_tester.h"
 #include "chrome/browser/chromeos/login/test/fake_gaia_mixin.h"
 #include "chrome/browser/chromeos/login/test/local_policy_test_server_mixin.h"
+#include "chrome/browser/chromeos/login/test/logged_in_user_mixin.h"
 #include "chrome/browser/chromeos/login/test/session_manager_state_waiter.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/supervised_user/logged_in_user_mixin.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/dbus/cryptohome/fake_cryptohome_client.h"
@@ -36,8 +36,10 @@
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/api/test/test_api.h"
+#include "extensions/browser/test_extension_registry_observer.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
 #include "extensions/test/extension_test_message_listener.h"
@@ -145,6 +147,16 @@ class LoginApitest : public LoginScreenApitestBase {
     run_loop.Run();
   }
 
+  std::unique_ptr<extensions::TestExtensionRegistryObserver>
+  GetTestExtensionRegistryObserver(const std::string& extension_id) {
+    const user_manager::User* active_user =
+        user_manager::UserManager::Get()->GetActiveUser();
+    Profile* profile =
+        chromeos::ProfileHelper::Get()->GetProfileByUser(active_user);
+    return std::make_unique<extensions::TestExtensionRegistryObserver>(
+        extensions::ExtensionRegistry::Get(profile), extension_id);
+  }
+
   virtual void SetUpInSessionExtension() {
     std::unique_ptr<policy::UserPolicyBuilder> user_policy_builder =
         MakeInSessionExtensionUserPolicyBuilder();
@@ -156,12 +168,17 @@ class LoginApitest : public LoginScreenApitestBase {
     policy_data.set_settings_entity_id(kAccountId);
     user_policy_builder->Build();
 
+    auto registry_observer =
+        GetTestExtensionRegistryObserver(kInSessionExtensionId);
+
     ASSERT_TRUE(local_policy_mixin_.server()->UpdatePolicy(
         policy::dm_protocol::kChromePublicAccountPolicyType, kAccountId,
         user_policy_builder->payload().SerializeAsString()));
     session_manager_client()->set_device_local_account_policy(
         kAccountId, user_policy_builder->GetBlob());
     RefreshPolicies();
+
+    registry_observer->WaitForExtensionReady();
   }
 
   void SetTestCustomArg(const std::string custom_arg) {
@@ -384,11 +401,7 @@ class LoginApitestWithEnterpriseUser : public LoginApitest {
 
   ~LoginApitestWithEnterpriseUser() override = default;
 
-  void LoginUser() {
-    logged_in_user_mixin_.LogInUser(/*issue_any_scope_token=*/false,
-                                    /*wait_for_active_session=*/true,
-                                    /*request_policy_update=*/true);
-  }
+  void LoginUser() { logged_in_user_mixin_.LogInUser(); }
 
   void SetUpInSessionExtension() override {
     AccountId account_id = logged_in_user_mixin_.GetAccountId();
@@ -401,6 +414,9 @@ class LoginApitestWithEnterpriseUser : public LoginApitest {
     policy_data.set_gaia_id(account_id.GetGaiaId());
     user_policy_builder->Build();
 
+    auto registry_observer =
+        GetTestExtensionRegistryObserver(kInSessionExtensionId);
+
     ASSERT_TRUE(
         logged_in_user_mixin_.GetLocalPolicyTestServerMixin()->UpdateUserPolicy(
             user_policy_builder->payload(), account_id.GetUserEmail()));
@@ -408,6 +424,8 @@ class LoginApitestWithEnterpriseUser : public LoginApitest {
         cryptohome::CreateAccountIdentifierFromAccountId(account_id),
         user_policy_builder->GetBlob());
     RefreshPolicies();
+
+    registry_observer->WaitForExtensionReady();
   }
 
  private:
@@ -440,7 +458,7 @@ IN_PROC_BROWSER_TEST_F(LoginApitestWithEnterpriseUser,
       kUnlockManagedGuestSessionNotManagedGuestSession);
 }
 
-// TODO(https://crbug.com/1075511) Flaky test
+// TODO(https://crbug.com/1075511) Flaky test.
 IN_PROC_BROWSER_TEST_F(LoginApitestWithEnterpriseUser,
                        DISABLED_LockManagedGuestSessionNotManagedGuestSession) {
   LoginUser();

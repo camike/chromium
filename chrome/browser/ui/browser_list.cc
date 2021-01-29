@@ -93,14 +93,14 @@ void BrowserList::AddBrowser(Browser* browser) {
   if (browser->window()->IsActive())
     SetLastActive(browser);
 
-  if (browser->profile()->IsGuestSession()) {
-    base::UmaHistogramCounts100(
-        "Browser.WindowCount.Guest",
-        GetIncognitoSessionsActiveForProfile(browser->profile()));
+  if (browser->profile()->IsGuestSession() ||
+      browser->profile()->IsEphemeralGuestProfile()) {
+    base::UmaHistogramCounts100("Browser.WindowCount.Guest",
+                                GetGuestBrowserCount());
   } else if (browser->profile()->IsIncognitoProfile()) {
     base::UmaHistogramCounts100(
         "Browser.WindowCount.Incognito",
-        GetIncognitoSessionsActiveForProfile(browser->profile()));
+        GetOffTheRecordBrowsersActiveForProfile(browser->profile()));
   }
 }
 
@@ -203,9 +203,10 @@ void BrowserList::TryToCloseBrowserList(const BrowserVector& browsers_to_close,
        ++it) {
     if ((*it)->TryToCloseWindow(
             skip_beforeunload,
-            base::Bind(&BrowserList::PostTryToCloseBrowserWindow,
-                       browsers_to_close, on_close_success, on_close_aborted,
-                       profile_path, skip_beforeunload))) {
+            base::BindRepeating(&BrowserList::PostTryToCloseBrowserWindow,
+                                browsers_to_close, on_close_success,
+                                on_close_aborted, profile_path,
+                                skip_beforeunload))) {
       return;
     }
   }
@@ -286,7 +287,7 @@ void BrowserList::SetLastActive(Browser* browser) {
          instance->end())
       << "SetLastActive called for a browser before the browser was added to "
          "the BrowserList.";
-  DCHECK(browser->window() != nullptr)
+  DCHECK(browser->window())
       << "SetLastActive called for a browser with no window set.";
 
   base::RecordAction(UserMetricsAction("ActiveBrowserChanged"));
@@ -305,7 +306,7 @@ void BrowserList::NotifyBrowserNoLongerActive(Browser* browser) {
          instance->end())
       << "NotifyBrowserNoLongerActive called for a browser before the browser "
          "was added to the BrowserList.";
-  DCHECK(browser->window() != nullptr)
+  DCHECK(browser->window())
       << "NotifyBrowserNoLongerActive called for a browser with no window set.";
 
   for (BrowserListObserver& observer : observers_.Get())
@@ -321,7 +322,7 @@ void BrowserList::NotifyBrowserCloseStarted(Browser* browser) {
 }
 
 // static
-bool BrowserList::IsIncognitoSessionActive() {
+bool BrowserList::IsOffTheRecordBrowserActive() {
   for (auto* browser : *BrowserList::GetInstance()) {
     if (browser->profile()->IsOffTheRecord())
       return true;
@@ -330,10 +331,10 @@ bool BrowserList::IsIncognitoSessionActive() {
 }
 
 // static
-int BrowserList::GetIncognitoSessionsActiveForProfile(Profile* profile) {
+int BrowserList::GetOffTheRecordBrowsersActiveForProfile(Profile* profile) {
   BrowserList* list = BrowserList::GetInstance();
   return std::count_if(list->begin(), list->end(), [profile](Browser* browser) {
-    return browser->profile()->IsSameProfile(profile) &&
+    return browser->profile()->IsSameOrParent(profile) &&
            browser->profile()->IsOffTheRecord() && !browser->is_type_devtools();
   });
 }
@@ -348,10 +349,20 @@ size_t BrowserList::GetIncognitoBrowserCount() {
 }
 
 // static
-bool BrowserList::IsIncognitoSessionInUse(Profile* profile) {
+size_t BrowserList::GetGuestBrowserCount() {
+  BrowserList* list = BrowserList::GetInstance();
+  return std::count_if(list->begin(), list->end(), [](Browser* browser) {
+    return (browser->profile()->IsGuestSession() ||
+            browser->profile()->IsEphemeralGuestProfile()) &&
+           !browser->is_type_devtools();
+  });
+}
+
+// static
+bool BrowserList::IsOffTheRecordBrowserInUse(Profile* profile) {
   BrowserList* list = BrowserList::GetInstance();
   return std::any_of(list->begin(), list->end(), [profile](Browser* browser) {
-    return browser->profile()->IsSameProfile(profile) &&
+    return browser->profile()->IsSameOrParent(profile) &&
            browser->profile()->IsOffTheRecord();
   });
 }

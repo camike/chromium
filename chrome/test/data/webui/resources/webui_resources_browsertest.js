@@ -7,6 +7,8 @@
 // Polymer BrowserTest fixture.
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
 
+GEN('#include "content/public/test/browser_test.h"');
+
 /**
  * Test fixture for Polymer Settings elements.
  * @constructor
@@ -15,7 +17,7 @@ GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
 function WebUIResourcesBrowserTest() {}
 
 WebUIResourcesBrowserTest.prototype = {
-  __proto__: PolymerTest.prototype,
+  __proto__: Polymer2DeprecatedTest.prototype,
 
   /** @override */
   get browsePreload() {

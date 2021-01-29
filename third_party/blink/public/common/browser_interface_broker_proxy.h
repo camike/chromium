@@ -18,8 +18,10 @@ namespace blink {
 class BLINK_COMMON_EXPORT BrowserInterfaceBrokerProxy {
  public:
   BrowserInterfaceBrokerProxy() = default;
-  void Bind(mojo::PendingRemote<blink::mojom::BrowserInterfaceBroker>);
-  mojo::PendingReceiver<blink::mojom::BrowserInterfaceBroker> Reset();
+  void Bind(mojo::PendingRemote<blink::mojom::BrowserInterfaceBroker> broker,
+            scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+  mojo::PendingReceiver<blink::mojom::BrowserInterfaceBroker> Reset(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
   // Asks the browser to bind the given receiver. If a non-null testing override
   // was set by |SetBinderForTesting()|, the request will be intercepted by that
@@ -39,7 +41,8 @@ class BLINK_COMMON_EXPORT BrowserInterfaceBrokerProxy {
   // named interface.
   bool SetBinderForTesting(
       const std::string& name,
-      base::RepeatingCallback<void(mojo::ScopedMessagePipeHandle)> binder);
+      base::RepeatingCallback<void(mojo::ScopedMessagePipeHandle)> binder)
+      const;
 
  private:
   mojo::Remote<blink::mojom::BrowserInterfaceBroker> broker_;
@@ -47,7 +50,7 @@ class BLINK_COMMON_EXPORT BrowserInterfaceBrokerProxy {
   using BinderMap =
       std::map<std::string,
                base::RepeatingCallback<void(mojo::ScopedMessagePipeHandle)>>;
-  BinderMap binder_map_for_testing_;
+  mutable BinderMap binder_map_for_testing_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserInterfaceBrokerProxy);
 };

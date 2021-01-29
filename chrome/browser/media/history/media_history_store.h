@@ -21,6 +21,7 @@
 #include "content/public/browser/media_player_watch_time.h"
 #include "sql/init_status.h"
 #include "sql/meta_table.h"
+#include "url/origin.h"
 
 namespace media_session {
 struct MediaImage;
@@ -41,7 +42,6 @@ class MediaHistorySessionImagesTable;
 class MediaHistoryImagesTable;
 class MediaHistoryFeedsTable;
 class MediaHistoryFeedItemsTable;
-class MediaHistoryFeedAssociatedOriginsTable;
 
 // Refcounted as it is created, initialized and destroyed on a different thread
 // from the DB sequence provided to the constructor of this class that is
@@ -59,6 +59,7 @@ class MediaHistoryStore : public base::RefCountedThreadSafe<MediaHistoryStore> {
                                    const base::TimeDelta& position)>;
 
   static const char kInitResultHistogramName[];
+  static const char kInitResultAfterDeleteHistogramName[];
   static const char kPlaybackWriteResultHistogramName[];
   static const char kSessionWriteResultHistogramName[];
   static const char kDatabaseSizeKbHistogramName[];
@@ -89,7 +90,8 @@ class MediaHistoryStore : public base::RefCountedThreadSafe<MediaHistoryStore> {
     kFailedToWriteOrigin = 2,
     kFailedToWritePlayback = 3,
     kFailedToIncrementAggreatedWatchtime = 4,
-    kMaxValue = kFailedToIncrementAggreatedWatchtime,
+    kFailedToWriteBadOrigin = 5,
+    kMaxValue = kFailedToWriteBadOrigin,
   };
 
   // If we write a session into the database then we record the result to
@@ -121,7 +123,7 @@ class MediaHistoryStore : public base::RefCountedThreadSafe<MediaHistoryStore> {
   // Returns a flag indicating whether the origin id was created successfully.
   bool CreateOriginId(const url::Origin& origin);
 
-  void SavePlayback(const content::MediaPlayerWatchTime& watch_time);
+  void SavePlayback(std::unique_ptr<content::MediaPlayerWatchTime> watch_time);
 
   mojom::MediaHistoryStatsPtr GetMediaHistoryStats();
   int GetTableRowCount(const std::string& table_name);
@@ -131,8 +133,14 @@ class MediaHistoryStore : public base::RefCountedThreadSafe<MediaHistoryStore> {
   std::vector<mojom::MediaHistoryPlaybackRowPtr>
   GetMediaHistoryPlaybackRowsForDebug();
 
+  std::vector<media_feeds::mojom::MediaFeedItemPtr> GetMediaFeedItems(
+      const MediaHistoryKeyedService::GetMediaFeedItemsRequest& request);
+
   std::vector<media_feeds::mojom::MediaFeedPtr> GetMediaFeeds(
       const MediaHistoryKeyedService::GetMediaFeedsRequest& request);
+
+  std::vector<url::Origin> GetHighWatchTimeOrigins(
+      const base::TimeDelta& audio_video_watchtime_min);
 
   void SavePlaybackSession(
       const GURL& url,
@@ -149,30 +157,35 @@ class MediaHistoryStore : public base::RefCountedThreadSafe<MediaHistoryStore> {
 
   std::set<GURL> GetURLsInTableForTest(const std::string& table);
 
-  void DiscoverMediaFeed(const GURL& url);
+  void DiscoverMediaFeed(const GURL& url, const base::Optional<GURL>& favicon);
 
   void StoreMediaFeedFetchResult(
-      const int64_t feed_id,
-      std::vector<media_feeds::mojom::MediaFeedItemPtr> items,
-      const media_feeds::mojom::FetchResult result,
-      const bool was_fetched_from_cache,
-      const std::vector<media_feeds::mojom::MediaImagePtr>& logos,
-      const std::string& display_name,
-      const std::vector<url::Origin>& associated_origins);
-
-  std::vector<media_feeds::mojom::MediaFeedItemPtr>
-  GetItemsForMediaFeedForDebug(const int64_t feed_id);
+      MediaHistoryKeyedService::MediaFeedFetchResult result);
 
   MediaHistoryKeyedService::PendingSafeSearchCheckList
   GetPendingSafeSearchCheckMediaFeedItems();
 
   void StoreMediaFeedItemSafeSearchResults(
-      std::map<int64_t, media_feeds::mojom::SafeSearchResult> results);
+      std::map<MediaHistoryKeyedService::SafeSearchID,
+               media_feeds::mojom::SafeSearchResult> results);
 
   void UpdateMediaFeedDisplayTime(const int64_t feed_id);
 
-  void ResetMediaFeed(const int64_t feed_id,
+  void ResetMediaFeed(const url::Origin& origin,
                       media_feeds::mojom::ResetReason reason);
+
+  void ResetMediaFeedDueToCookies(const url::Origin& origin,
+                                  const bool include_subdomains,
+                                  const std::string& name,
+                                  const net::CookieChangeCause& cause);
+
+  void ResetMediaFeedDueToCacheClearing(
+      const base::Time& start_time,
+      const base::Time& end_time,
+      MediaHistoryKeyedService::CacheClearingFilter filter);
+
+  bool ResetMediaFeedInternal(const std::set<int64_t>& feed_ids,
+                              media_feeds::mojom::ResetReason reason);
 
   // Cancels pending DB transactions. Should only be called on the UI thread.
   void SetCancelled();
@@ -183,10 +196,19 @@ class MediaHistoryStore : public base::RefCountedThreadSafe<MediaHistoryStore> {
 
   void DeleteMediaFeed(const int64_t feed_id);
 
+  base::Optional<MediaHistoryKeyedService::MediaFeedFetchDetails>
+  GetMediaFeedFetchDetails(const int64_t feed_id);
+
+  void UpdateFeedUserStatus(const int64_t feed_id,
+                            media_feeds::mojom::FeedUserStatus status);
+
  private:
   friend class base::RefCountedThreadSafe<MediaHistoryStore>;
 
   ~MediaHistoryStore();
+
+  void StoreMediaFeedFetchResultInternal(
+      MediaHistoryKeyedService::MediaFeedFetchResult result);
 
   bool CanAccessDatabase() const;
   bool IsCancelled() const;
@@ -202,7 +224,6 @@ class MediaHistoryStore : public base::RefCountedThreadSafe<MediaHistoryStore> {
   scoped_refptr<MediaHistoryImagesTable> images_table_;
   scoped_refptr<MediaHistoryFeedsTable> feeds_table_;
   scoped_refptr<MediaHistoryFeedItemsTable> feed_items_table_;
-  scoped_refptr<MediaHistoryFeedAssociatedOriginsTable> feed_origins_table_;
   bool initialization_successful_;
   base::AtomicFlag cancelled_;
 };

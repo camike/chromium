@@ -8,12 +8,14 @@
 #include "base/hash/sha1.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/values.h"
 #include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/apps/app_service/launch_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/customization/customization_wallpaper_util.h"
+#include "chrome/browser/chromeos/extensions/wallpaper_private_api.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -27,8 +29,10 @@
 #include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user_manager.h"
+#include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension.h"
 #include "ui/display/types/display_constants.h"
 
 namespace {
@@ -83,10 +87,12 @@ bool CanGetFilesId() {
 }
 
 // Calls |callback| when system salt is ready. (|CanGetFilesId| returns true.)
-void AddCanGetFilesIdCallback(const base::Closure& callback) {
+void AddCanGetFilesIdCallback(base::OnceClosure callback) {
   // System salt may not be initialized in tests.
-  if (chromeos::SystemSaltGetter::IsInitialized())
-    chromeos::SystemSaltGetter::Get()->AddOnSystemSaltReady(callback);
+  if (chromeos::SystemSaltGetter::IsInitialized()) {
+    chromeos::SystemSaltGetter::Get()->AddOnSystemSaltReady(
+        std::move(callback));
+  }
 }
 
 // Returns true if |users| contains users other than device local accounts.
@@ -262,8 +268,8 @@ void WallpaperControllerClient::SetDefaultWallpaper(const AccountId& account_id,
         << "Cannot get wallpaper files id in SetDefaultWallpaper. This "
            "should never happen under normal circumstances.";
     AddCanGetFilesIdCallback(
-        base::Bind(&WallpaperControllerClient::SetDefaultWallpaper,
-                   weak_factory_.GetWeakPtr(), account_id, show_wallpaper));
+        base::BindOnce(&WallpaperControllerClient::SetDefaultWallpaper,
+                       weak_factory_.GetWeakPtr(), account_id, show_wallpaper));
     return;
   }
 
@@ -287,7 +293,7 @@ void WallpaperControllerClient::SetPolicyWallpaper(
   // Postpone setting the wallpaper until we can get files id. See
   // https://crbug.com/615239.
   if (!CanGetFilesId()) {
-    AddCanGetFilesIdCallback(base::Bind(
+    AddCanGetFilesIdCallback(base::BindOnce(
         &WallpaperControllerClient::SetPolicyWallpaper,
         weak_factory_.GetWeakPtr(), account_id, base::Passed(std::move(data))));
     return;
@@ -352,8 +358,8 @@ void WallpaperControllerClient::RemoveUserWallpaper(
         << "Cannot get wallpaper files id in RemoveUserWallpaper. This "
            "should never happen under normal circumstances.";
     AddCanGetFilesIdCallback(
-        base::Bind(&WallpaperControllerClient::RemoveUserWallpaper,
-                   weak_factory_.GetWeakPtr(), account_id));
+        base::BindOnce(&WallpaperControllerClient::RemoveUserWallpaper,
+                       weak_factory_.GetWeakPtr(), account_id));
     return;
   }
 
@@ -372,8 +378,8 @@ void WallpaperControllerClient::RemovePolicyWallpaper(
         << "Cannot get wallpaper files id in RemovePolicyWallpaper. This "
            "should never happen under normal circumstances.";
     AddCanGetFilesIdCallback(
-        base::Bind(&WallpaperControllerClient::RemovePolicyWallpaper,
-                   weak_factory_.GetWeakPtr(), account_id));
+        base::BindOnce(&WallpaperControllerClient::RemovePolicyWallpaper,
+                       weak_factory_.GetWeakPtr(), account_id));
     return;
   }
 
@@ -485,7 +491,6 @@ void WallpaperControllerClient::OpenWallpaperPicker() {
   DCHECK(profile);
   apps::AppServiceProxy* proxy =
       apps::AppServiceProxyFactory::GetForProfile(profile);
-  DCHECK(proxy);
   if (proxy->AppRegistryCache().GetAppType(
           extension_misc::kWallpaperManagerId) ==
       apps::mojom::AppType::kUnknown) {
@@ -498,6 +503,21 @@ void WallpaperControllerClient::OpenWallpaperPicker() {
                           false /* preferred_containner */),
       apps::mojom::LaunchSource::kFromChromeInternal,
       display::kInvalidDisplayId);
+}
+
+void WallpaperControllerClient::MaybeClosePreviewWallpaper() {
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  DCHECK(profile);
+
+  extensions::EventRouter* event_router = extensions::EventRouter::Get(profile);
+
+  auto event_args = std::make_unique<base::ListValue>();
+  auto event = std::make_unique<extensions::Event>(
+      extensions::events::WALLPAPER_PRIVATE_ON_CLOSE_PREVIEW_WALLPAPER,
+      extensions::api::wallpaper_private::OnClosePreviewWallpaper::kEventName,
+      std::move(event_args));
+  event_router->DispatchEventToExtension(extension_misc::kWallpaperManagerId,
+                                         std::move(event));
 }
 
 bool WallpaperControllerClient::ShouldShowUserNamesOnLogin() const {

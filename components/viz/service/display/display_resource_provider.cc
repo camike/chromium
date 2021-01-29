@@ -24,6 +24,7 @@
 #include "gpu/command_buffer/common/shared_image_trace_utils.h"
 #include "gpu/ipc/scheduler_sequence.h"
 #include "third_party/skia/include/gpu/GrBackendSurface.h"
+#include "third_party/skia/include/gpu/GrDirectContext.h"
 #include "ui/gl/trace_util.h"
 
 using gpu::gles2::GLES2Interface;
@@ -108,7 +109,7 @@ DisplayResourceProvider::~DisplayResourceProvider() {
     gl->Finish();
 
   while (!resources_.empty())
-    DeleteResourceInternal(resources_.begin(), FOR_SHUTDOWN);
+    DeleteResourceInternal(resources_.begin());
 
   if (compositor_context_provider_) {
     // Check that all GL resources has been deleted.
@@ -180,47 +181,6 @@ bool DisplayResourceProvider::OnMemoryDump(
   }
 
   return true;
-}
-
-void DisplayResourceProvider::SendPromotionHints(
-    const std::map<ResourceId, gfx::RectF>& promotion_hints,
-    const ResourceIdSet& requestor_set) {
-#if defined(OS_ANDROID)
-  GLES2Interface* gl = ContextGL();
-  if (!gl)
-    return;
-
-  for (const auto& id : requestor_set) {
-    auto it = resources_.find(id);
-    if (it == resources_.end())
-      continue;
-
-    if (it->second.marked_for_deletion)
-      continue;
-
-    const ChildResource* resource = LockForRead(id);
-    // TODO(ericrk): We should never fail LockForRead, but we appear to be
-    // doing so on Android in rare cases. Handle this gracefully until a better
-    // solution can be found. https://crbug.com/811858
-    if (!resource)
-      return;
-
-    DCHECK(resource->transferable.wants_promotion_hint);
-
-    // Insist that this is backed by a GPU texture.
-    if (resource->is_gpu_resource_type()) {
-      DCHECK(resource->gl_id);
-      auto iter = promotion_hints.find(id);
-      bool promotable = iter != promotion_hints.end();
-      gl->OverlayPromotionHintCHROMIUM(resource->gl_id, promotable,
-                                       promotable ? iter->second.x() : 0,
-                                       promotable ? iter->second.y() : 0,
-                                       promotable ? iter->second.width() : 0,
-                                       promotable ? iter->second.height() : 0);
-    }
-    UnlockForRead(id);
-  }
-#endif
 }
 
 #if defined(OS_ANDROID)
@@ -310,15 +270,14 @@ void DisplayResourceProvider::WaitSyncToken(ResourceId id) {
 #endif
 }
 
-int DisplayResourceProvider::CreateChild(
-    const ReturnCallback& return_callback) {
+int DisplayResourceProvider::CreateChild(ReturnCallback return_callback) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  Child child_info;
-  child_info.return_callback = return_callback;
-  int child = next_child_++;
-  children_[child] = child_info;
-  return child;
+  int child_id = next_child_++;
+  Child& child = children_[child_id];
+  child.return_callback = std::move(return_callback);
+
+  return child_id;
 }
 
 void DisplayResourceProvider::DestroyChild(int child_id) {
@@ -341,8 +300,8 @@ void DisplayResourceProvider::ReceiveFromChild(
   CHECK(child_it != children_.end());
   Child& child_info = child_it->second;
   DCHECK(!child_info.marked_for_deletion);
-  for (auto it = resources.begin(); it != resources.end(); ++it) {
-    auto resource_in_map_it = child_info.child_to_parent_map.find(it->id);
+  for (const TransferableResource& resource : resources) {
+    auto resource_in_map_it = child_info.child_to_parent_map.find(resource.id);
     if (resource_in_map_it != child_info.child_to_parent_map.end()) {
       ChildResource* resource = GetResource(resource_in_map_it->second);
       resource->marked_for_deletion = false;
@@ -350,24 +309,18 @@ void DisplayResourceProvider::ReceiveFromChild(
       continue;
     }
 
-    if (it->is_software != IsSoftware() ||
-        it->mailbox_holder.mailbox.IsZero()) {
+    if (resource.is_software != IsSoftware() ||
+        resource.mailbox_holder.mailbox.IsZero()) {
       TRACE_EVENT0(
           "viz", "DisplayResourceProvider::ReceiveFromChild dropping invalid");
-      std::vector<ReturnedResource> to_return;
-      to_return.push_back(it->ToReturnedResource());
-      child_info.return_callback.Run(to_return);
+      child_info.return_callback.Run({resource.ToReturnedResource()});
       continue;
     }
 
     ResourceId local_id = next_id_++;
-    if (it->is_software) {
-      DCHECK(IsBitmapFormatSupported(it->format));
-      InsertResource(local_id, ChildResource(child_id, *it));
-    } else {
-      InsertResource(local_id, ChildResource(child_id, *it));
-    }
-    child_info.child_to_parent_map[it->id] = local_id;
+    DCHECK(!resource.is_software || IsBitmapFormatSupported(resource.format));
+    resources_.emplace(local_id, ChildResource(child_id, resource));
+    child_info.child_to_parent_map[resource.id] = local_id;
   }
 }
 
@@ -387,10 +340,9 @@ void DisplayResourceProvider::DeclareUsedResourcesFromChild(
   DCHECK(!child_info.marked_for_deletion);
 
   std::vector<ResourceId> unused;
-  for (auto it = child_info.child_to_parent_map.begin();
-       it != child_info.child_to_parent_map.end(); ++it) {
-    ResourceId local_id = it->second;
-    bool resource_is_in_use = resources_from_child.count(it->first) > 0;
+  for (auto& entry : child_info.child_to_parent_map) {
+    ResourceId local_id = entry.second;
+    bool resource_is_in_use = resources_from_child.count(entry.first) > 0;
     if (!resource_is_in_use)
       unused.push_back(local_id);
   }
@@ -416,15 +368,6 @@ DisplayResourceProvider::GetChildToParentMap(int child) const {
 bool DisplayResourceProvider::InUse(ResourceId id) {
   ChildResource* resource = GetResource(id);
   return resource->InUse();
-}
-
-DisplayResourceProvider::ChildResource* DisplayResourceProvider::InsertResource(
-    ResourceId id,
-    ChildResource resource) {
-  auto result =
-      resources_.insert(ResourceMap::value_type(id, std::move(resource)));
-  DCHECK(result.second);
-  return &result.first->second;
 }
 
 DisplayResourceProvider::ChildResource* DisplayResourceProvider::GetResource(
@@ -459,8 +402,7 @@ void DisplayResourceProvider::PopulateSkBitmapWithResource(
   DCHECK(pixels_installed);
 }
 
-void DisplayResourceProvider::DeleteResourceInternal(ResourceMap::iterator it,
-                                                     DeleteStyle style) {
+void DisplayResourceProvider::DeleteResourceInternal(ResourceMap::iterator it) {
   TRACE_EVENT0("viz", "DisplayResourceProvider::DeleteResourceInternal");
   ChildResource* resource = &it->second;
 
@@ -493,7 +435,7 @@ GLES2Interface* DisplayResourceProvider::ContextGL() const {
 }
 
 const DisplayResourceProvider::ChildResource*
-DisplayResourceProvider::LockForRead(ResourceId id) {
+DisplayResourceProvider::LockForRead(ResourceId id, bool overlay_only) {
   // TODO(ericrk): We should never fail TryGetResource, but we appear to be
   // doing so on Android in rare cases. Handle this gracefully until a better
   // solution can be found. https://crbug.com/811858
@@ -519,10 +461,27 @@ DisplayResourceProvider::LockForRead(ResourceId id) {
       }
       resource->SetLocallyUsed();
     }
-    if (mailbox.IsSharedImage() && enable_shared_images_ &&
-        resource->lock_for_read_count == 0) {
-      gl->BeginSharedImageAccessDirectCHROMIUM(
-          resource->gl_id, GL_SHARED_IMAGE_ACCESS_MODE_READ_CHROMIUM);
+    if (mailbox.IsSharedImage() && enable_shared_images_) {
+      if (overlay_only) {
+        if (resource->lock_for_overlay_count == 0) {
+          // If |lock_for_read_count| > 0, then BeginSharedImageAccess has
+          // already been called with READ, so don't re-lock with OVERLAY.
+          if (resource->lock_for_read_count == 0) {
+            gl->BeginSharedImageAccessDirectCHROMIUM(
+                resource->gl_id, GL_SHARED_IMAGE_ACCESS_MODE_OVERLAY_CHROMIUM);
+          }
+        }
+      } else {
+        if (resource->lock_for_read_count == 0) {
+          // If |lock_for_overlay_count| > 0, then we have already begun access
+          // for OVERLAY. End this access and "upgrade" it to READ.
+          // See https://crbug.com/1113925 for how this can go wrong.
+          if (resource->lock_for_overlay_count > 0)
+            gl->EndSharedImageAccessDirectCHROMIUM(resource->gl_id);
+          gl->BeginSharedImageAccessDirectCHROMIUM(
+              resource->gl_id, GL_SHARED_IMAGE_ACCESS_MODE_READ_CHROMIUM);
+        }
+      }
     }
   }
 
@@ -540,7 +499,10 @@ DisplayResourceProvider::LockForRead(ResourceId id) {
     }
   }
 
-  resource->lock_for_read_count++;
+  if (overlay_only)
+    resource->lock_for_overlay_count++;
+  else
+    resource->lock_for_read_count++;
   if (resource->transferable.read_lock_fences_enabled) {
     if (current_read_lock_fence_.get())
       current_read_lock_fence_->Set();
@@ -550,7 +512,7 @@ DisplayResourceProvider::LockForRead(ResourceId id) {
   return resource;
 }
 
-void DisplayResourceProvider::UnlockForRead(ResourceId id) {
+void DisplayResourceProvider::UnlockForRead(ResourceId id, bool overlay_only) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   auto it = resources_.find(id);
   // TODO(ericrk): We should never fail to find id, but we appear to be
@@ -560,16 +522,23 @@ void DisplayResourceProvider::UnlockForRead(ResourceId id) {
     return;
 
   ChildResource* resource = &it->second;
-  DCHECK_GT(resource->lock_for_read_count, 0);
   if (resource->transferable.mailbox_holder.mailbox.IsSharedImage() &&
-      resource->is_gpu_resource_type() && enable_shared_images_ &&
-      resource->lock_for_read_count == 1) {
-    DCHECK(resource->gl_id);
-    GLES2Interface* gl = ContextGL();
-    DCHECK(gl);
-    gl->EndSharedImageAccessDirectCHROMIUM(resource->gl_id);
+      resource->is_gpu_resource_type() && enable_shared_images_) {
+    // If this is the last READ or OVERLAY access, then end access.
+    if (resource->lock_for_read_count + resource->lock_for_overlay_count == 1) {
+      DCHECK(resource->gl_id);
+      GLES2Interface* gl = ContextGL();
+      DCHECK(gl);
+      gl->EndSharedImageAccessDirectCHROMIUM(resource->gl_id);
+    }
   }
-  resource->lock_for_read_count--;
+  if (overlay_only) {
+    DCHECK_GT(resource->lock_for_overlay_count, 0);
+    resource->lock_for_overlay_count--;
+  } else {
+    DCHECK_GT(resource->lock_for_read_count, 0);
+    resource->lock_for_read_count--;
+  }
   TryReleaseResource(id, resource);
 }
 
@@ -599,11 +568,12 @@ GLenum DisplayResourceProvider::BindForSampling(ResourceId resource_id,
   ScopedSetActiveTexture scoped_active_tex(gl, unit);
   GLenum target = resource->transferable.mailbox_holder.texture_target;
   gl->BindTexture(target, resource->gl_id);
-  if (filter != resource->filter) {
-    gl->TexParameteri(target, GL_TEXTURE_MIN_FILTER, filter);
-    gl->TexParameteri(target, GL_TEXTURE_MAG_FILTER, filter);
-    resource->filter = filter;
-  }
+
+  // Texture parameters can be modified by concurrent reads so reset them
+  // before binding the texture. See https://crbug.com/1092080.
+  gl->TexParameteri(target, GL_TEXTURE_MIN_FILTER, filter);
+  gl->TexParameteri(target, GL_TEXTURE_MAG_FILTER, filter);
+  resource->filter = filter;
 
   return target;
 }
@@ -614,8 +584,7 @@ bool DisplayResourceProvider::ReadLockFenceHasPassed(
 }
 
 #if defined(OS_ANDROID)
-void DisplayResourceProvider::DeletePromotionHint(ResourceMap::iterator it,
-                                                  DeleteStyle style) {
+void DisplayResourceProvider::DeletePromotionHint(ResourceMap::iterator it) {
   ChildResource* resource = &it->second;
   // If this resource was interested in promotion hints, then remove it from
   // the set of resources that we'll notify.
@@ -739,9 +708,9 @@ void DisplayResourceProvider::DeleteAndReturnUnusedResourcesToChild(
     child_info->child_to_parent_map.erase(child_id);
     resource.imported_count = 0;
 #if defined(OS_ANDROID)
-    DeletePromotionHint(it, style);
+    DeletePromotionHint(it);
 #endif
-    DeleteResourceInternal(it, style);
+    DeleteResourceInternal(it);
   }
 
   if (external_use_client_) {
@@ -788,11 +757,8 @@ void DisplayResourceProvider::DestroyChildInternal(ChildMap::iterator it,
   DCHECK(style == FOR_SHUTDOWN || !child.marked_for_deletion);
 
   std::vector<ResourceId> resources_for_child;
-
-  for (auto child_it = child.child_to_parent_map.begin();
-       child_it != child.child_to_parent_map.end(); ++child_it) {
-    ResourceId id = child_it->second;
-    resources_for_child.push_back(id);
+  for (auto& entry : child.child_to_parent_map) {
+    resources_for_child.push_back(entry.second);
   }
 
   child.marked_for_deletion = true;
@@ -824,17 +790,11 @@ void DisplayResourceProvider::TryFlushBatchedResources() {
 void DisplayResourceProvider::SetBatchReturnResources(bool batch) {
   if (batch) {
     DCHECK_GE(batch_return_resources_lock_count_, 0);
-    if (!scoped_batch_read_access_) {
-      scoped_batch_read_access_ =
-          std::make_unique<ScopedBatchReadAccess>(ContextGL());
-    }
     batch_return_resources_lock_count_++;
   } else {
     DCHECK_GT(batch_return_resources_lock_count_, 0);
     batch_return_resources_lock_count_--;
     if (batch_return_resources_lock_count_ == 0) {
-      DCHECK(scoped_batch_read_access_);
-      scoped_batch_read_access_.reset();
       TryFlushBatchedResources();
     }
   }
@@ -851,7 +811,8 @@ DisplayResourceProvider::ScopedReadLockGL::ScopedReadLockGL(
     DisplayResourceProvider* resource_provider,
     ResourceId resource_id)
     : resource_provider_(resource_provider), resource_id_(resource_id) {
-  const ChildResource* resource = resource_provider->LockForRead(resource_id);
+  const ChildResource* resource =
+      resource_provider->LockForRead(resource_id, false /* overlay_only */);
   // TODO(ericrk): We should never fail LockForRead, but we appear to be
   // doing so on Android in rare cases. Handle this gracefully until a better
   // solution can be found. https://crbug.com/811858
@@ -865,7 +826,23 @@ DisplayResourceProvider::ScopedReadLockGL::ScopedReadLockGL(
 }
 
 DisplayResourceProvider::ScopedReadLockGL::~ScopedReadLockGL() {
-  resource_provider_->UnlockForRead(resource_id_);
+  resource_provider_->UnlockForRead(resource_id_, false /* overlay_only */);
+}
+
+DisplayResourceProvider::ScopedOverlayLockGL::ScopedOverlayLockGL(
+    DisplayResourceProvider* resource_provider,
+    ResourceId resource_id)
+    : resource_provider_(resource_provider), resource_id_(resource_id) {
+  const ChildResource* resource =
+      resource_provider->LockForRead(resource_id, true /* overlay_only */);
+  if (!resource)
+    return;
+
+  texture_id_ = resource->gl_id;
+}
+
+DisplayResourceProvider::ScopedOverlayLockGL::~ScopedOverlayLockGL() {
+  resource_provider_->UnlockForRead(resource_id_, true /* overlay_only */);
 }
 
 DisplayResourceProvider::ScopedSamplerGL::ScopedSamplerGL(
@@ -893,7 +870,8 @@ DisplayResourceProvider::ScopedReadLockSkImage::ScopedReadLockSkImage(
     SkAlphaType alpha_type,
     GrSurfaceOrigin origin)
     : resource_provider_(resource_provider), resource_id_(resource_id) {
-  const ChildResource* resource = resource_provider->LockForRead(resource_id);
+  const ChildResource* resource =
+      resource_provider->LockForRead(resource_id, false /* overlay_only */);
   DCHECK(resource);
 
   // Use cached SkImage if possible.
@@ -942,7 +920,7 @@ DisplayResourceProvider::ScopedReadLockSkImage::ScopedReadLockSkImage(
 }
 
 DisplayResourceProvider::ScopedReadLockSkImage::~ScopedReadLockSkImage() {
-  resource_provider_->UnlockForRead(resource_id_);
+  resource_provider_->UnlockForRead(resource_id_, false /* overlay_only */);
 }
 
 DisplayResourceProvider::ScopedReadLockSharedImage::ScopedReadLockSharedImage(
@@ -967,16 +945,13 @@ DisplayResourceProvider::ScopedReadLockSharedImage::ScopedReadLockSharedImage(
 
 DisplayResourceProvider::ScopedReadLockSharedImage::
     ~ScopedReadLockSharedImage() {
-  if (!resource_provider_)
-    return;
-  DCHECK(resource_->lock_for_overlay_count);
-  resource_->lock_for_overlay_count--;
-  resource_provider_->TryReleaseResource(resource_id_, resource_);
+  Reset();
 }
 
 DisplayResourceProvider::ScopedReadLockSharedImage&
 DisplayResourceProvider::ScopedReadLockSharedImage::operator=(
     ScopedReadLockSharedImage&& other) {
+  Reset();
   resource_provider_ = other.resource_provider_;
   resource_id_ = other.resource_id_;
   resource_ = other.resource_;
@@ -984,6 +959,17 @@ DisplayResourceProvider::ScopedReadLockSharedImage::operator=(
   other.resource_id_ = kInvalidResourceId;
   other.resource_ = nullptr;
   return *this;
+}
+
+void DisplayResourceProvider::ScopedReadLockSharedImage::Reset() {
+  if (!resource_provider_)
+    return;
+  DCHECK(resource_->lock_for_overlay_count);
+  resource_->lock_for_overlay_count--;
+  resource_provider_->TryReleaseResource(resource_id_, resource_);
+  resource_provider_ = nullptr;
+  resource_id_ = kInvalidResourceId;
+  resource_ = nullptr;
 }
 
 DisplayResourceProvider::LockSetForExternalUse::LockSetForExternalUse(
@@ -1001,7 +987,9 @@ DisplayResourceProvider::LockSetForExternalUse::~LockSetForExternalUse() {
 ExternalUseClient::ImageContext*
 DisplayResourceProvider::LockSetForExternalUse::LockResource(
     ResourceId id,
-    bool is_video_plane) {
+    bool maybe_concurrent_reads,
+    bool is_video_plane,
+    const gfx::ColorSpace& color_space) {
   auto it = resource_provider_->resources_.find(id);
   DCHECK(it != resource_provider_->resources_.end());
 
@@ -1014,15 +1002,20 @@ DisplayResourceProvider::LockSetForExternalUse::LockResource(
 
     if (!resource.image_context) {
       sk_sp<SkColorSpace> image_color_space;
-      // Video color conversion is handled externally in SkiaRenderer using a
-      // special color filter.
-      if (!is_video_plane)
-        image_color_space = resource.transferable.color_space.ToSkColorSpace();
+      if (!is_video_plane) {
+        // HDR video color conversion is handled externally in SkiaRenderer
+        // using a special color filter and |color_space| is set to destination
+        // color space so that Skia doesn't perform implicit color conversion.
+        image_color_space =
+            color_space.IsValid()
+                ? color_space.ToSkColorSpace()
+                : resource.transferable.color_space.ToSkColorSpace();
+      }
       resource.image_context =
           resource_provider_->external_use_client_->CreateImageContext(
               resource.transferable.mailbox_holder, resource.transferable.size,
-              resource.transferable.format, resource.transferable.ycbcr_info,
-              std::move(image_color_space));
+              resource.transferable.format, maybe_concurrent_reads,
+              resource.transferable.ycbcr_info, std::move(image_color_space));
     }
     resource.locked_for_external_use = true;
 
@@ -1104,7 +1097,9 @@ DisplayResourceProvider::ScopedBatchReturnResources::
 }
 
 DisplayResourceProvider::Child::Child() = default;
-DisplayResourceProvider::Child::Child(const Child& other) = default;
+DisplayResourceProvider::Child::Child(Child&& other) = default;
+DisplayResourceProvider::Child& DisplayResourceProvider::Child::operator=(
+    Child&& other) = default;
 DisplayResourceProvider::Child::~Child() = default;
 
 DisplayResourceProvider::ChildResource::ChildResource(
@@ -1137,18 +1132,6 @@ void DisplayResourceProvider::ChildResource::UpdateSyncToken(
   // the gpu process or in case of context loss.
   sync_token_ = sync_token;
   synchronization_state_ = sync_token.HasData() ? NEEDS_WAIT : SYNCHRONIZED;
-}
-
-DisplayResourceProvider::ScopedBatchReadAccess::ScopedBatchReadAccess(
-    gpu::gles2::GLES2Interface* gl)
-    : gl_(gl) {
-  if (gl_)
-    gl_->BeginBatchReadAccessSharedImageCHROMIUM();
-}
-
-DisplayResourceProvider::ScopedBatchReadAccess::~ScopedBatchReadAccess() {
-  if (gl_)
-    gl_->EndBatchReadAccessSharedImageCHROMIUM();
 }
 
 }  // namespace viz

@@ -12,7 +12,7 @@
 #include "base/time/time.h"
 #include "url/gurl.h"
 
-namespace upboarding {
+namespace query_tiles {
 
 // Metadata of a tile image.
 struct ImageMetadata {
@@ -24,6 +24,21 @@ struct ImageMetadata {
 
   // URL of the image.
   GURL url;
+};
+
+// Stats of a tile, used for ranking.
+struct TileStats {
+  TileStats();
+  TileStats(base::Time last_clicked_time, double score);
+  ~TileStats();
+  TileStats(const TileStats& other);
+  bool operator==(const TileStats& other) const;
+
+  // Last clicked timestamp.
+  base::Time last_clicked_time;
+
+  // Score of the tile, used for ranking.
+  double score;
 };
 
 // Represents the in memory structure of Tile.
@@ -56,8 +71,14 @@ struct Tile {
 
   // A list of children of this tile.
   std::vector<std::unique_ptr<Tile>> sub_tiles;
+
+  // Additional params for search query.
+  std::vector<std::string> search_params;
+
+  // Print pretty formatted content in Tile struct.
+  std::string DebugString();
 };
 
-}  // namespace upboarding
+}  // namespace query_tiles
 
 #endif  // COMPONENTS_QUERY_TILES_TILE_H_

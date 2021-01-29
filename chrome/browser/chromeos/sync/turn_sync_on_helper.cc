@@ -86,7 +86,7 @@ TurnSyncOnHelper::TurnSyncOnHelper(Profile* profile,
       delegate_(std::move(delegate)) {
   DCHECK(profile_);
   DCHECK(identity_manager_);
-  DCHECK(chromeos::features::IsSplitSyncConsentEnabled());
+  DCHECK(chromeos::features::ShouldUseBrowserSyncConsent());
   Init();
 }
 
@@ -213,7 +213,8 @@ void TurnSyncOnHelper::FinishSyncSetup(
           account_id);
       break;
     }
-    case LoginUIService::ABORT_SIGNIN:
+    case LoginUIService::ABORT_SYNC:
+    case LoginUIService::UI_CLOSED:
       // Chrome OS users stay signed in even if sync setup is cancelled.
       break;
   }

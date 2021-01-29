@@ -2,10 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/logging.h"
 #include "base/macros.h"
+#include "base/strings/string_piece.h"
 #include "base/test/scoped_feature_list.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/webui/welcome/helpers.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -15,7 +20,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/common/content_features.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 
 namespace {
@@ -137,11 +142,40 @@ IN_PROC_BROWSER_TEST_F(ChromeURLDataManagerTest, LargeResourceScale) {
   EXPECT_NE(net::OK, observer.net_error());
 }
 
-class ChromeURLDataManagerTestWithWebUIReportOnlyTrustedTypesEnabled
-    : public InProcessBrowserTest {
+class ChromeURLDataManagerWebUITrustedTypesTest
+    : public InProcessBrowserTest,
+      public testing::WithParamInterface<const char*> {
  public:
-  ChromeURLDataManagerTestWithWebUIReportOnlyTrustedTypesEnabled() {
-    feature_list_.InitAndEnableFeature(features::kWebUIReportOnlyTrustedTypes);
+  ChromeURLDataManagerWebUITrustedTypesTest() {
+    std::vector<base::Feature> enabled_features;
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
+    if (GetParam() == std::string("chrome://welcome"))
+      enabled_features.push_back(welcome::kForceEnabled);
+#endif
+    feature_list_.InitWithFeatures(enabled_features, {});
+  }
+
+  void CheckTrustedTypesViolation(base::StringPiece url) {
+    std::string message_filter1 = "*This document requires*assignment*";
+    std::string message_filter2 = "*Refused to create a TrustedTypePolicy*";
+    content::WebContents* content =
+        browser()->tab_strip_model()->GetActiveWebContents();
+    content::WebContentsConsoleObserver console_observer(content);
+    console_observer.SetPattern(message_filter1);
+    console_observer.SetPattern(message_filter2);
+
+    ASSERT_TRUE(embedded_test_server()->Start());
+    ui_test_utils::NavigateToURL(browser(), GURL(url));
+
+    if (url == "chrome://network-error" || url == "chrome://dino") {
+      // We don't ASSERT_TRUE here because some WebUI pages are
+      // PAGE_TYPE_ERROR by design.
+      content::WaitForLoadStop(content);
+    } else {
+      ASSERT_TRUE(content::WaitForLoadStop(content));
+    }
+
+    EXPECT_TRUE(console_observer.messages().empty());
   }
 
  private:
@@ -149,19 +183,162 @@ class ChromeURLDataManagerTestWithWebUIReportOnlyTrustedTypesEnabled
 };
 
 // Verify that there's no Trusted Types violation in chrome://chrome-urls
-IN_PROC_BROWSER_TEST_F(
-    ChromeURLDataManagerTestWithWebUIReportOnlyTrustedTypesEnabled,
-    NoTrustedTypesViolationInChromeUrls) {
-  std::string message_filter = "*This document requires*assignment*";
-  content::WebContents* content =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  content::WebContentsConsoleObserver console_observer(content);
-  console_observer.SetPattern(message_filter);
-
-  ASSERT_TRUE(embedded_test_server()->Start());
-  ui_test_utils::NavigateToURL(browser(), GURL("chrome://chrome-urls"));
-
-  // Round trip to the renderer to ensure that the page is loaded
-  EXPECT_TRUE(content::ExecuteScript(content, "var a = 0;"));
-  EXPECT_TRUE(console_observer.messages().empty());
+IN_PROC_BROWSER_TEST_P(ChromeURLDataManagerWebUITrustedTypesTest,
+                       NoTrustedTypesViolation) {
+  LOG(INFO) << "Navigating to " << GetParam();
+  CheckTrustedTypesViolation(GetParam());
 }
+
+// Non-exhaustive list of chrome:// URLs to test for trusted types violations.
+// This list was derived from chrome://about. :)
+static constexpr const char* const kChromeUrls[] = {
+    "chrome://accessibility",
+    // TODO(crbug.com/1114074): DCHECK failure when opening
+    // chrome://appcache-internals.
+    // "chrome://appcache-internals",
+    "chrome://autofill-internals",
+    "chrome://blob-internals",
+    "chrome://bluetooth-internals",
+    "chrome://bookmarks",
+    "chrome://chrome-urls",
+    "chrome://components",
+    "chrome://connection-help",
+    "chrome://connection-monitoring-detected",
+    "chrome://conversion-internals",
+    "chrome://crashes",
+    "chrome://credits",
+    "chrome://device-log",
+    "chrome://dino",
+    // TODO(crbug.com/1113446): Test failure due to excessive output.
+    // "chrome://discards",
+    "chrome://domain-reliability-internals",
+    "chrome://download-internals",
+    "chrome://downloads",
+    "chrome://extensions",
+    "chrome://extensions-internals",
+    "chrome://flags",
+    "chrome://gcm-internals",
+    "chrome://gpu",
+    "chrome://histograms",
+    "chrome://history",
+    "chrome://identity-internals",
+    "chrome://indexeddb-internals",
+    "chrome://inspect",
+    "chrome://internals/web-app",
+    "chrome://interstitials/ssl",
+    "chrome://invalidations",
+    "chrome://local-state",
+    "chrome://management",
+    "chrome://media-engagement",
+    "chrome://media-feeds",
+    "chrome://media-history",
+    "chrome://media-internals",
+    "chrome://media-router-internals",
+    "chrome://memory-internals",
+    "chrome://net-export",
+    "chrome://net-internals",
+    "chrome://network-error",
+    "chrome://network-errors",
+    "chrome://new-tab-page",
+    "chrome://newtab",
+    "chrome://ntp-tiles-internals",
+    "chrome://omnibox",
+    "chrome://password-manager-internals",
+    "chrome://policy",
+    "chrome://predictors",
+    "chrome://prefs-internals",
+    "chrome://print",
+    "chrome://process-internals",
+    "chrome://quota-internals",
+    "chrome://reset-password",
+    "chrome://safe-browsing",
+    "chrome://serviceworker-internals",
+    "chrome://settings",
+    // TODO(crbug.com/1115600): DCHECK failure when opening
+    // chrome://signin-dice-web-intercept.
+    // "chrome://signin-dice-web-intercept",
+    "chrome://signin-internals",
+    "chrome://site-engagement",
+    "chrome://suggestions",
+    // TODO(crbug.com/1099564): Navigating to chrome://sync-confirmation and
+    // quickly navigating away cause DCHECK failure.
+    // "chrome://sync-confirmation",
+    "chrome://sync-internals",
+    "chrome://syncfs-internals",
+    "chrome://system",
+    // TODO(crbug.com/1099565): Navigating to chrome://tab-strip and quickly
+    // navigating away cause DCHECK failure.
+    // "chrome://tab-strip",
+    "chrome://terms",
+    "chrome://tracing",
+    "chrome://translate-internals",
+    "chrome://ukm",
+    "chrome://usb-internals",
+    "chrome://user-actions",
+    "chrome://version",
+    "chrome://webrtc-internals",
+    "chrome://webrtc-logs",
+#if defined(OS_ANDROID)
+    "chrome://explore-sites-internals",
+    "chrome://internals/notifications",
+    "chrome://internals/query-tiles",
+    "chrome://offline-internals",
+    "chrome://snippets-internals",
+    "chrome://webapks",
+#endif
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    "chrome://account-manager-error",
+    "chrome://account-manager-welcome",
+    "chrome://account-migration-welcome",
+    "chrome://add-supervision",
+    // TODO(crbug.com/1102129): DCHECK failure in
+    // ArcGraphicsTracingHandler::ArcGraphicsTracingHandler.
+    // "chrome://arc-graphics-tracing",
+    // "chrome://arc-overview-tracing",
+    "chrome://assistant-optin",
+    "chrome://bluetooth-pairing",
+    "chrome://cellular-setup",
+    "chrome://certificate-manager",
+    "chrome://crostini-credits",
+    "chrome://crostini-installer",
+    "chrome://cryptohome",
+    "chrome://drive-internals",
+    "chrome://help-app",
+    "chrome://internet-config-dialog",
+    "chrome://internet-detail-dialog",
+    "chrome://linux-proxy-config",
+    "chrome://machine-learning-internals",
+    "chrome://multidevice-setup",
+    "chrome://network",
+    "chrome://oobe",
+    "chrome://os-credits",
+    "chrome://os-settings",
+    "chrome://power",
+    "chrome://proximity-auth/proximity_auth.html",
+    "chrome://set-time",
+    "chrome://slow",
+    "chrome://smb-credentials-dialog",
+    "chrome://smb-share-dialog",
+    "chrome://supervised-user-internals",
+    "chrome://sys-internals",
+    "chrome-untrusted://terminal",
+#endif
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
+    "chrome://apps",
+    "chrome://browser-switch",
+    "chrome://md-user-manager",
+    "chrome://signin-email-confirmation",
+    "chrome://welcome",
+#endif
+#if !defined(OS_MAC)
+    "chrome://sandbox",
+    "chrome://nacl",
+#endif
+#if defined(OS_WIN)
+    "chrome://conflicts",
+#endif
+};
+
+INSTANTIATE_TEST_SUITE_P(,
+                         ChromeURLDataManagerWebUITrustedTypesTest,
+                         ::testing::ValuesIn(kChromeUrls));

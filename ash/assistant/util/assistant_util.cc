@@ -20,7 +20,7 @@ namespace ash {
 namespace assistant {
 namespace util {
 
-using chromeos::assistant::mojom::AssistantEntryPoint;
+using chromeos::assistant::AssistantEntryPoint;
 
 bool IsStartingSession(AssistantVisibility new_visibility,
                        AssistantVisibility old_visibility) {
@@ -48,24 +48,6 @@ bool IsVoiceEntryPoint(AssistantEntryPoint entry_point, bool prefer_voice) {
     case AssistantEntryPoint::kSetup:
     case AssistantEntryPoint::kStylus:
       return false;
-  }
-}
-
-bool ShouldAttemptWarmerWelcome(AssistantEntryPoint entry_point) {
-  switch (entry_point) {
-    case AssistantEntryPoint::kDeepLink:
-    case AssistantEntryPoint::kHotword:
-    case AssistantEntryPoint::kLauncherChip:
-    case AssistantEntryPoint::kLauncherSearchBoxIcon:
-    case AssistantEntryPoint::kLauncherSearchResult:
-    case AssistantEntryPoint::kProactiveSuggestions:
-    case AssistantEntryPoint::kStylus:
-      return false;
-    case AssistantEntryPoint::kUnspecified:
-    case AssistantEntryPoint::kHotkey:
-    case AssistantEntryPoint::kLongPressLauncher:
-    case AssistantEntryPoint::kSetup:
-      return true;
   }
 }
 

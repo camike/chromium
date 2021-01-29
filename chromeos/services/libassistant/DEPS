@@ -1,0 +1,8 @@
+include_rules = [
+  "+libassistant",
+  "+media/audio",
+  "+media/base",
+  "+services/audio/public",
+  "+services/network/public",
+  "+services/network/test",
+]

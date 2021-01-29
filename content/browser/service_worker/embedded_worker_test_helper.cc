@@ -12,14 +12,12 @@
 #include "base/time/time.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
+#include "content/browser/service_worker/service_worker_storage_control_impl.h"
 #include "content/browser/service_worker/service_worker_test_utils.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/test/fake_network_url_loader_factory.h"
-#include "mojo/public/cpp/bindings/associated_binding_set.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
-#include "third_party/blink/public/common/service_worker/service_worker_utils.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 
 namespace content {
@@ -39,26 +37,21 @@ EmbeddedWorkerTestHelper::EmbeddedWorkerTestHelper(
           std::make_unique<MockRenderProcessHost>(browser_context_.get())),
       wrapper_(base::MakeRefCounted<ServiceWorkerContextWrapper>(
           browser_context_.get())),
+      user_data_directory_(user_data_directory),
+      database_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       next_thread_id_(0),
       mock_render_process_id_(render_process_host_->GetID()),
       new_mock_render_process_id_(new_render_process_host_->GetID()),
       url_loader_factory_getter_(
           base::MakeRefCounted<URLLoaderFactoryGetter>()) {
-  scoped_refptr<base::SequencedTaskRunner> database_task_runner =
-      base::ThreadTaskRunnerHandle::Get();
-  wrapper_->InitOnCoreThread(
-      user_data_directory, std::move(database_task_runner),
-      /*quota_manager_proxy=*/nullptr, special_storage_policy, nullptr,
-      url_loader_factory_getter_.get(),
-      blink::ServiceWorkerUtils::IsImportedScriptUpdateCheckEnabled()
-          ? wrapper_
-                ->CreateNonNetworkPendingURLLoaderFactoryBundleForUpdateCheck(
-                    browser_context_.get())
-          : nullptr);
+  wrapper_->SetStorageControlBinderForTest(base::BindRepeating(
+      &EmbeddedWorkerTestHelper::BindStorageControl, base::Unretained(this)));
+  wrapper_->InitInternal(
+      /*quota_manager_proxy=*/nullptr, special_storage_policy,
+      /*blob_context=*/nullptr, url_loader_factory_getter_.get(),
+      browser_context_.get());
   wrapper_->process_manager()->SetProcessIdForTest(mock_render_process_id());
   wrapper_->process_manager()->SetNewProcessIdForTest(new_render_process_id());
-  if (!ServiceWorkerContext::IsServiceWorkerOnUIEnabled())
-    wrapper_->InitializeResourceContext(browser_context_->GetResourceContext());
 
   render_process_host_->OverrideBinderForTesting(
       blink::mojom::EmbeddedWorkerInstanceClient::Name_,
@@ -157,6 +150,10 @@ void EmbeddedWorkerTestHelper::ShutdownContext() {
   wrapper_ = nullptr;
 }
 
+void EmbeddedWorkerTestHelper::SimulateStorageRestartForTesting() {
+  storage_control_.reset();
+}
+
 // static
 std::unique_ptr<ServiceWorkerVersion::MainScriptResponse>
 EmbeddedWorkerTestHelper::CreateMainScriptResponse() {
@@ -186,7 +183,7 @@ void EmbeddedWorkerTestHelper::PopulateScriptCacheMap(
     // Add a dummy ResourceRecord for the main script to the script cache map of
     // the ServiceWorkerVersion.
     WriteToDiskCacheAsync(
-        context()->storage(), version->script_url(), {} /* headers */,
+        context()->GetStorageControl(), version->script_url(), {} /* headers */,
         "I'm a body", "I'm a meta data",
         base::BindOnce(
             [](scoped_refptr<ServiceWorkerVersion> version,
@@ -215,6 +212,15 @@ EmbeddedWorkerTestHelper::CreateInstanceClient() {
 std::unique_ptr<FakeServiceWorker>
 EmbeddedWorkerTestHelper::CreateServiceWorker() {
   return std::make_unique<FakeServiceWorker>(this);
+}
+
+void EmbeddedWorkerTestHelper::BindStorageControl(
+    mojo::PendingReceiver<storage::mojom::ServiceWorkerStorageControl>
+        receiver) {
+  storage_control_ = std::make_unique<ServiceWorkerStorageControlImpl>(
+      ServiceWorkerStorage::Create(user_data_directory_, database_task_runner_,
+                                   /*quota_manager_proxy=*/nullptr));
+  storage_control_->Bind(std::move(receiver));
 }
 
 }  // namespace content

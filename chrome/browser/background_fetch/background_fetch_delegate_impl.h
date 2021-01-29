@@ -13,6 +13,7 @@
 
 #include "base/containers/flat_set.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/profiles/profile.h"
 #include "components/download/public/background_service/download_params.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/offline_items_collection/core/offline_content_provider.h"
@@ -111,6 +112,10 @@ class BackgroundFetchDelegateImpl
   void RenameItem(const offline_items_collection::ContentId& id,
                   const std::string& name,
                   RenameCallback callback) override;
+  void ChangeSchedule(
+      const offline_items_collection::ContentId& id,
+      base::Optional<offline_items_collection::OfflineItemSchedule> schedule)
+      override;
   void AddObserver(Observer* observer) override;
   void RemoveObserver(Observer* observer) override;
 
@@ -130,10 +135,6 @@ class BackgroundFetchDelegateImpl
   // Gets the upload data, if any, associated with the |download_guid|.
   void GetUploadData(const std::string& download_guid,
                      download::GetUploadDataCallback callback);
-
-  void set_ukm_event_recorded_for_testing(base::OnceClosure closure) {
-    ukm_event_recorded_for_testing_ = std::move(closure);
-  }
 
   base::WeakPtr<BackgroundFetchDelegateImpl> GetWeakPtr() {
     return weak_ptr_factory_.GetWeakPtr();
@@ -169,7 +170,7 @@ class BackgroundFetchDelegateImpl
         base::WeakPtr<Client> client,
         std::unique_ptr<content::BackgroundFetchDescription> fetch_description,
         const std::string& provider_namespace,
-        bool is_off_the_record);
+        const Profile* profile);
     ~JobDetails();
 
     void UpdateOfflineItem();
@@ -288,9 +289,6 @@ class BackgroundFetchDelegateImpl
 
   // Set of Observers to be notified of any changes to the shown notifications.
   std::set<Observer*> observers_;
-
-  // Testing-only closure to inform tests when a UKM event has been recorded.
-  base::OnceClosure ukm_event_recorded_for_testing_;
 
   base::WeakPtrFactory<BackgroundFetchDelegateImpl> weak_ptr_factory_{this};
 

@@ -9,6 +9,7 @@
 
 #include "third_party/blink/public/mojom/feature_policy/feature_policy_feature.mojom-blink.h"
 #include "third_party/blink/renderer/core/animation/css_angle_interpolation_type.h"
+#include "third_party/blink/renderer/core/animation/css_aspect_ratio_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_basic_shape_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_border_image_length_box_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_clip_interpolation_type.h"
@@ -18,6 +19,7 @@
 #include "third_party/blink/renderer/core/animation/css_default_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_filter_list_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_font_size_interpolation_type.h"
+#include "third_party/blink/renderer/core/animation/css_font_stretch_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_font_variation_settings_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_font_weight_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_image_interpolation_type.h"
@@ -46,6 +48,7 @@
 #include "third_party/blink/renderer/core/animation/css_translate_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_var_cycle_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_visibility_interpolation_type.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/css_syntax_definition.h"
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
 #include "third_party/blink/renderer/core/css/property_registry.h"
@@ -58,7 +61,7 @@ CSSInterpolationTypesMap::CSSInterpolationTypesMap(
     const PropertyRegistry* registry,
     const Document& document)
     : registry_(registry) {
-  allow_all_animations_ = document.IsFeatureEnabled(
+  allow_all_animations_ = document.GetExecutionContext()->IsFeatureEnabled(
       blink::mojom::blink::DocumentPolicyFeature::kLayoutAnimations);
 }
 
@@ -155,6 +158,8 @@ const InterpolationTypes& CSSInterpolationTypesMap::Get(
       case CSSPropertyID::kShapeMargin:
       case CSSPropertyID::kStrokeDashoffset:
       case CSSPropertyID::kStrokeWidth:
+      case CSSPropertyID::kTextDecorationThickness:
+      case CSSPropertyID::kTextUnderlineOffset:
       case CSSPropertyID::kTop:
       case CSSPropertyID::kVerticalAlign:
       case CSSPropertyID::kWebkitBorderHorizontalSpacing:
@@ -174,6 +179,10 @@ const InterpolationTypes& CSSInterpolationTypesMap::Get(
       case CSSPropertyID::kY:
         applicable_types->push_back(
             std::make_unique<CSSLengthInterpolationType>(used_property));
+        break;
+      case CSSPropertyID::kAspectRatio:
+        applicable_types->push_back(
+            std::make_unique<CSSAspectRatioInterpolationType>(used_property));
         break;
       case CSSPropertyID::kFlexGrow:
       case CSSPropertyID::kFlexShrink:
@@ -195,6 +204,7 @@ const InterpolationTypes& CSSInterpolationTypesMap::Get(
             std::make_unique<CSSNumberInterpolationType>(used_property));
         break;
       case CSSPropertyID::kLineHeight:
+      case CSSPropertyID::kTabSize:
         applicable_types->push_back(
             std::make_unique<CSSLengthInterpolationType>(used_property));
         applicable_types->push_back(
@@ -254,6 +264,10 @@ const InterpolationTypes& CSSInterpolationTypesMap::Get(
         applicable_types->push_back(
             std::make_unique<CSSFontWeightInterpolationType>(used_property));
         break;
+      case CSSPropertyID::kFontStretch:
+        applicable_types->push_back(
+            std::make_unique<CSSFontStretchInterpolationType>(used_property));
+        break;
       case CSSPropertyID::kFontVariationSettings:
         applicable_types->push_back(
             std::make_unique<CSSFontVariationSettingsInterpolationType>(
@@ -290,6 +304,7 @@ const InterpolationTypes& CSSInterpolationTypesMap::Get(
       case CSSPropertyID::kBorderBottomRightRadius:
       case CSSPropertyID::kBorderTopLeftRadius:
       case CSSPropertyID::kBorderTopRightRadius:
+      case CSSPropertyID::kContainIntrinsicSize:
         applicable_types->push_back(
             std::make_unique<CSSLengthPairInterpolationType>(used_property));
         break;
@@ -333,6 +348,11 @@ const InterpolationTypes& CSSInterpolationTypesMap::Get(
             std::make_unique<CSSImageSliceInterpolationType>(used_property));
         break;
       case CSSPropertyID::kClipPath:
+        applicable_types->push_back(
+            std::make_unique<CSSBasicShapeInterpolationType>(used_property));
+        applicable_types->push_back(
+            std::make_unique<CSSPathInterpolationType>(used_property));
+        break;
       case CSSPropertyID::kShapeOutside:
         applicable_types->push_back(
             std::make_unique<CSSBasicShapeInterpolationType>(used_property));

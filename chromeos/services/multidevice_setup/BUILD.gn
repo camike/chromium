@@ -52,6 +52,9 @@ static_library("multidevice_setup") {
     "privileged_host_device_setter_base.h",
     "privileged_host_device_setter_impl.cc",
     "privileged_host_device_setter_impl.h",
+    "wifi_sync_feature_manager.h",
+    "wifi_sync_feature_manager_impl.cc",
+    "wifi_sync_feature_manager_impl.h",
   ]
 
   deps = [
@@ -72,6 +75,7 @@ static_library("multidevice_setup") {
     "//chromeos/services/secure_channel/public/mojom",
     "//components/pref_registry",
     "//components/prefs:prefs",
+    "//components/session_manager/core",
     "//url",
   ]
 
@@ -110,6 +114,8 @@ static_library("test_support") {
     "fake_host_status_provider.h",
     "fake_host_verifier.cc",
     "fake_host_verifier.h",
+    "fake_wifi_sync_feature_manager.cc",
+    "fake_wifi_sync_feature_manager.h",
   ]
 
   deps = [
@@ -139,6 +145,7 @@ source_set("unit_tests") {
     "multidevice_setup_impl_unittest.cc",
     "multidevice_setup_service_unittest.cc",
     "privileged_host_device_setter_impl_unittest.cc",
+    "wifi_sync_feature_manager_impl_unittest.cc",
   ]
 
   deps = [
@@ -156,6 +163,7 @@ source_set("unit_tests") {
     "//chromeos/services/multidevice_setup/public/cpp:unit_tests",
     "//chromeos/services/multidevice_setup/public/mojom",
     "//chromeos/services/secure_channel/public/cpp/client:test_support",
+    "//components/session_manager/core",
     "//components/sync_preferences:test_support",
     "//testing/gmock",
     "//testing/gtest",

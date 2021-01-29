@@ -27,7 +27,7 @@ suite(extension_item_list_tests.suiteName, function() {
 
   // Initialize an extension item before each test.
   setup(function() {
-    PolymerTest.clearBody();
+    document.body.innerHTML = '';
     itemList = document.createElement('extensions-item-list');
     boundTestVisible = testVisible.bind(null, itemList);
 
@@ -35,7 +35,7 @@ suite(extension_item_list_tests.suiteName, function() {
     const extensionItems = [
       createExt({name: 'Alpha', id: 'a'.repeat(32)}),
       createExt({name: 'Bravo', id: 'b'.repeat(32)}),
-      createExt({name: 'Charlie', id: 'c'.repeat(32)})
+      createExt({name: 'Charlie', id: 'c'.repeat(29) + 'wxy'})
     ];
     const appItems = [
       createExt({name: 'QQ', id: 'q'.repeat(32)}),
@@ -83,6 +83,11 @@ suite(extension_item_list_tests.suiteName, function() {
     // A filter of 'q' should should show just the apps item.
     itemList.filter = 'q';
     itemLengthEquals(1);
+    // A filter of 'xy' should show just the 'Charlie' item since its id
+    // matches.
+    itemList.filter = 'xy';
+    itemLengthEquals(1);
+    expectEquals('Charlie', itemList.$$('extensions-item').data.name);
   });
 
   test(assert(extension_item_list_tests.TestNames.NoItemsMsg), function() {

@@ -4,6 +4,7 @@
 
 #include <memory>
 
+#include "ash/public/cpp/login_screen_test_api.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -17,16 +18,16 @@
 #include "chrome/browser/chromeos/child_accounts/time_limit_test_utils.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker_tester.h"
+#include "chrome/browser/chromeos/login/test/logged_in_user_mixin.h"
 #include "chrome/browser/chromeos/policy/user_policy_test_helper.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/supervised_user/logged_in_user_mixin.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/mixin_based_in_process_browser_test.h"
-#include "chromeos/constants/chromeos_switches.h"
 #include "components/prefs/pref_service.h"
 #include "components/session_manager/core/session_manager.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -64,12 +65,6 @@ class ScreenTimeControllerTest : public MixinBasedInProcessBrowserTest {
   ~ScreenTimeControllerTest() override = default;
 
   // MixinBasedInProcessBrowserTest:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    MixinBasedInProcessBrowserTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kOobeSkipPostLogin);
-  }
-
-  // MixinBasedInProcessBrowserTest:
   void SetUpInProcessBrowserTestFixture() override {
     MixinBasedInProcessBrowserTest::SetUpInProcessBrowserTestFixture();
     // A basic starting policy.
@@ -85,9 +80,7 @@ class ScreenTimeControllerTest : public MixinBasedInProcessBrowserTest {
  protected:
   void LogInChildAndSetupClockWithTime(const char* time) {
     SetupTaskRunnerWithTime(utils::TimeFromString(time));
-    logged_in_user_mixin_.LogInUser(false /*issue_any_scope_token*/,
-                                    true /*wait_for_active_session*/,
-                                    true /*request_policy_update*/);
+    logged_in_user_mixin_.LogInUser();
     MockClockForActiveUser();
   }
 
@@ -111,8 +104,13 @@ class ScreenTimeControllerTest : public MixinBasedInProcessBrowserTest {
   }
 
   bool IsAuthEnabled() {
-    return ScreenLocker::default_screen_locker()->IsAuthEnabledForUser(
-        logged_in_user_mixin_.GetAccountId());
+    return !ScreenLocker::default_screen_locker()
+                ->IsAuthTemporarilyDisabledForUser(
+                    logged_in_user_mixin_.GetAccountId());
+  }
+
+  const AccountId& GetAccountId() {
+    return logged_in_user_mixin_.GetAccountId();
   }
 
   void MockChildScreenTime(base::TimeDelta used_time) {
@@ -663,6 +661,33 @@ IN_PROC_BROWSER_TEST_F(ScreenTimeControllerTest, BedtimeOnTimezoneChange) {
   system::TimezoneSettings::GetInstance()->SetTimezoneFromID(
       base::UTF8ToUTF16("GMT+0500"));
   EXPECT_TRUE(IsAuthEnabled());
+}
+
+IN_PROC_BROWSER_TEST_F(ScreenTimeControllerTest, BedtimeLockScreen24HourClock) {
+  LogInChildAndSetupClockWithTime("1 Jan 2018 22:00:00 GMT");
+
+  // Set preference of using 24 hour clock to be true.
+  child_profile_->GetPrefs()->SetBoolean(prefs::kUse24HourClock, true);
+
+  ScreenLockerTester().Lock();
+
+  system::TimezoneSettings::GetInstance()->SetTimezoneFromID(
+      base::UTF8ToUTF16("GMT"));
+
+  // Set new policy.
+  base::Time last_updated = utils::TimeFromString("1 Jan 2018 0:00 GMT");
+  base::Value policy_content =
+      utils::CreateTimeLimitPolicy(utils::CreateTime(6, 0));
+  utils::AddTimeWindowLimit(&policy_content, utils::kMonday,
+                            utils::CreateTime(21, 0), utils::CreateTime(17, 0),
+                            last_updated);
+  SetUsageTimeLimitPolicy(policy_content);
+
+  // Check that auth is disabled, since the bedtime has already started.
+  EXPECT_FALSE(IsAuthEnabled());
+
+  EXPECT_EQ(base::UTF8ToUTF16("Come back at 17:00."),
+            ash::LoginScreenTestApi::GetDisabledAuthMessage(GetAccountId()));
 }
 
 // Tests bedtime during timezone changes that make the clock go back in time.

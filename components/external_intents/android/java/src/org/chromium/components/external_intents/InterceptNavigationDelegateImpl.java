@@ -11,6 +11,7 @@ import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.task.PostTask;
 import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResult;
+import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResultType;
 import org.chromium.components.navigation_interception.InterceptNavigationDelegate;
 import org.chromium.components.navigation_interception.NavigationParams;
 import org.chromium.content_public.browser.NavigationController;
@@ -31,8 +32,8 @@ import org.chromium.content_public.common.ConsoleMessageLevel;
 public class InterceptNavigationDelegateImpl implements InterceptNavigationDelegate {
     private final AuthenticatorNavigationInterceptor mAuthenticatorHelper;
     private InterceptNavigationDelegateClient mClient;
-    private @OverrideUrlLoadingResult int mLastOverrideUrlLoadingResult =
-            OverrideUrlLoadingResult.NO_OVERRIDE;
+    private @OverrideUrlLoadingResultType int mLastOverrideUrlLoadingResultType =
+            OverrideUrlLoadingResultType.NO_OVERRIDE;
     private WebContents mWebContents;
     private ExternalNavigationHandler mExternalNavHandler;
 
@@ -81,14 +82,15 @@ public class InterceptNavigationDelegateImpl implements InterceptNavigationDeleg
 
         ExternalNavigationParams params =
                 new ExternalNavigationParams.Builder(url, incognito).setOpenInNewTab(true).build();
-        mLastOverrideUrlLoadingResult = mExternalNavHandler.shouldOverrideUrlLoading(params);
-        return mLastOverrideUrlLoadingResult
-                != ExternalNavigationHandler.OverrideUrlLoadingResult.NO_OVERRIDE;
+        mLastOverrideUrlLoadingResultType =
+                mExternalNavHandler.shouldOverrideUrlLoading(params).getResultType();
+        return mLastOverrideUrlLoadingResultType
+                != ExternalNavigationHandler.OverrideUrlLoadingResultType.NO_OVERRIDE;
     }
 
     @VisibleForTesting
-    public @OverrideUrlLoadingResult int getLastOverrideUrlLoadingResultForTests() {
-        return mLastOverrideUrlLoadingResult;
+    public @OverrideUrlLoadingResultType int getLastOverrideUrlLoadingResultTypeForTests() {
+        return mLastOverrideUrlLoadingResultType;
     }
 
     @Override
@@ -102,7 +104,7 @@ public class InterceptNavigationDelegateImpl implements InterceptNavigationDeleg
             return true;
         }
 
-        RedirectHandlerImpl redirectHandler = null;
+        RedirectHandler redirectHandler = null;
         if (navigationParams.isMainFrame) {
             redirectHandler = mClient.getOrCreateRedirectHandler();
         } else if (navigationParams.isExternalProtocol) {
@@ -116,7 +118,7 @@ public class InterceptNavigationDelegateImpl implements InterceptNavigationDeleg
             // not covering the case where a gesture is carried over via a redirect.  This is
             // currently not feasible because we do not see all navigations for iframes and it is
             // better to error on the side of caution and require direct user gestures for iframes.
-            redirectHandler = RedirectHandlerImpl.create();
+            redirectHandler = RedirectHandler.create();
         } else {
             assert false;
             return false;
@@ -130,26 +132,27 @@ public class InterceptNavigationDelegateImpl implements InterceptNavigationDeleg
         ExternalNavigationParams params =
                 buildExternalNavigationParams(navigationParams, redirectHandler, shouldCloseTab)
                         .build();
-        @OverrideUrlLoadingResult
-        int result = mExternalNavHandler.shouldOverrideUrlLoading(params);
-        mLastOverrideUrlLoadingResult = result;
+        OverrideUrlLoadingResult result = mExternalNavHandler.shouldOverrideUrlLoading(params);
+        mLastOverrideUrlLoadingResultType = result.getResultType();
 
-        switch (result) {
-            case OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT:
+        mClient.onDecisionReachedForNavigation(navigationParams, result);
+
+        switch (mLastOverrideUrlLoadingResultType) {
+            case OverrideUrlLoadingResultType.OVERRIDE_WITH_EXTERNAL_INTENT:
                 assert mExternalNavHandler.canExternalAppHandleUrl(url);
                 if (navigationParams.isMainFrame) {
                     onOverrideUrlLoadingAndLaunchIntent(shouldCloseTab);
                 }
                 return true;
-            case OverrideUrlLoadingResult.OVERRIDE_WITH_CLOBBERING_TAB:
+            case OverrideUrlLoadingResultType.OVERRIDE_WITH_CLOBBERING_TAB:
                 mShouldClearRedirectHistoryForTabClobbering = true;
                 return true;
-            case OverrideUrlLoadingResult.OVERRIDE_WITH_ASYNC_ACTION:
+            case OverrideUrlLoadingResultType.OVERRIDE_WITH_ASYNC_ACTION:
                 if (!shouldCloseTab && navigationParams.isMainFrame) {
                     onOverrideUrlLoadingAndLaunchIntent(shouldCloseTab);
                 }
                 return true;
-            case OverrideUrlLoadingResult.NO_OVERRIDE:
+            case OverrideUrlLoadingResultType.NO_OVERRIDE:
             default:
                 if (navigationParams.isExternalProtocol) {
                     logBlockedNavigationToDevToolsConsole(url);
@@ -164,7 +167,7 @@ public class InterceptNavigationDelegateImpl implements InterceptNavigationDeleg
      * ExternalNavigationHandler#shouldOverrideUrlLoading().
      */
     public ExternalNavigationParams.Builder buildExternalNavigationParams(
-            NavigationParams navigationParams, RedirectHandlerImpl redirectHandler,
+            NavigationParams navigationParams, RedirectHandler redirectHandler,
             boolean shouldCloseTab) {
         boolean isInitialTabLaunchInBackground =
                 mClient.wasTabLaunchedFromLongPressInBackground() && shouldCloseTab;
@@ -180,7 +183,9 @@ public class InterceptNavigationDelegateImpl implements InterceptNavigationDeleg
                 .setIsMainFrame(navigationParams.isMainFrame)
                 .setHasUserGesture(navigationParams.hasUserGesture)
                 .setShouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent(
-                        shouldCloseTab && navigationParams.isMainFrame);
+                        shouldCloseTab && navigationParams.isMainFrame)
+                .setIsRendererInitiated(navigationParams.isRendererInitiated)
+                .setInitiatorOrigin(navigationParams.initiatorOrigin);
     }
 
     /**
@@ -230,7 +235,7 @@ public class InterceptNavigationDelegateImpl implements InterceptNavigationDeleg
         if (mClient.getOrCreateRedirectHandler().isOnNavigation()) {
             return mClient.getOrCreateRedirectHandler()
                            .getLastCommittedEntryIndexBeforeStartingNavigation()
-                    == RedirectHandlerImpl.INVALID_ENTRY_INDEX;
+                    == RedirectHandler.INVALID_ENTRY_INDEX;
         }
         return false;
     }

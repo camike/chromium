@@ -90,8 +90,8 @@ void LocalStateValueWaiter::QuitLoopIfExpectedValueFound() {
 void LocalStateValueWaiter::Wait() {
   pref_change_registrar_.Add(
       pref_.c_str(),
-      base::Bind(&LocalStateValueWaiter::QuitLoopIfExpectedValueFound,
-                 base::Unretained(this)));
+      base::BindRepeating(&LocalStateValueWaiter::QuitLoopIfExpectedValueFound,
+                          base::Unretained(this)));
   // Necessary if the pref value changes before the run loop is run. It is
   // safe to call RunLoop::Quit before RunLoop::Run (in which case the call
   // to Run will do nothing).
@@ -147,6 +147,7 @@ void DevicePolicyCrosTestHelper::OverridePaths() {
   ASSERT_TRUE(base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir));
   base::ScopedAllowBlockingForTesting allow_io;
   chromeos::RegisterStubPathOverrides(user_data_dir);
+  chromeos::dbus_paths::RegisterStubPathOverrides(user_data_dir);
 }
 
 const std::string DevicePolicyCrosTestHelper::device_policy_blob() {
@@ -167,11 +168,10 @@ void DevicePolicyCrosTestHelper::RefreshPolicyAndWaitUntilDeviceSettingsUpdated(
   base::RunLoop run_loop;
 
   // For calls from SetPolicy().
-  std::vector<std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>>
-      observers = {};
+  std::vector<base::CallbackListSubscription> subscriptions = {};
   for (auto setting_it = settings.cbegin(); setting_it != settings.cend();
        setting_it++) {
-    observers.push_back(chromeos::CrosSettings::Get()->AddSettingsObserver(
+    subscriptions.push_back(chromeos::CrosSettings::Get()->AddSettingsObserver(
         *setting_it, run_loop.QuitClosure()));
   }
   RefreshDevicePolicy();

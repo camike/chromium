@@ -8,6 +8,7 @@
 #include <map>
 #include <string>
 
+#include "ash/public/cpp/login_accelerators.h"
 #include "ash/public/cpp/system_tray_focus_observer.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -19,6 +20,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "ui/views/controls/webview/unhandled_keyboard_event_handler.h"
+#include "ui/views/metadata/metadata_header_macros.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "url/gurl.h"
@@ -36,6 +38,7 @@ class Widget;
 namespace chromeos {
 
 class OobeUI;
+class LoginDisplayHostWebUI;
 
 // View used to render a WebUI supporting Widget. This widget is used for the
 // WebUI based start up and lock screens. It contains a WebView.
@@ -47,6 +50,8 @@ class WebUILoginView : public views::View,
                        public web_modal::WebContentsModalDialogHost,
                        public ash::SystemTrayFocusObserver {
  public:
+  METADATA_HEADER(WebUILoginView);
+
   struct WebViewSettings {
     // If true, this will check for and consume a preloaded views::WebView
     // instance.
@@ -57,10 +62,8 @@ class WebUILoginView : public views::View,
     base::string16 web_view_title;
   };
 
-  // Internal class name.
-  static const char kViewClassName[];
-
-  explicit WebUILoginView(const WebViewSettings& settings);
+  WebUILoginView(const WebViewSettings& settings,
+                 base::WeakPtr<LoginDisplayHostWebUI> controller);
   ~WebUILoginView() override;
 
   // Initializes the webui login view.
@@ -68,7 +71,6 @@ class WebUILoginView : public views::View,
 
   // Overridden from views::View:
   bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
-  const char* GetClassName() const override;
   void RequestFocus() override;
 
   // Overridden from ChromeWebModalDialogManagerDelegate:
@@ -115,6 +117,8 @@ class WebUILoginView : public views::View,
     should_emit_login_prompt_visible_ = emit;
   }
 
+  void set_shelf_enabled(bool enabled) { shelf_enabled_ = enabled; }
+
  protected:
   static void InitializeWebView(views::WebView* web_view,
                                 const base::string16& title);
@@ -129,11 +133,9 @@ class WebUILoginView : public views::View,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
 
-  views::WebView* web_view();
-
  private:
   // Map type for the accelerator-to-identifier map.
-  typedef std::map<ui::Accelerator, std::string> AccelMap;
+  typedef std::map<ui::Accelerator, ash::LoginAcceleratorAction> AccelMap;
 
   // ChromeKeyboardControllerClient::Observer:
   void OnKeyboardVisibilityChanged(bool visible) override;
@@ -158,10 +160,6 @@ class WebUILoginView : public views::View,
   // Overridden from ash::SystemTrayFocusObserver.
   void OnFocusLeavingSystemTray(bool reverse) override;
 
-  // Attempts to move focus to system tray. Returns whether the attempt was
-  // successful (it might fail if the system tray is not visible).
-  bool MoveFocusToSystemTray(bool reverse);
-
   // Performs series of actions when login prompt is considered
   // to be ready and visible.
   // 1. Emits LoginPromptVisible signal if needed
@@ -173,8 +171,10 @@ class WebUILoginView : public views::View,
   // WebView configuration options.
   const WebViewSettings settings_;
 
+  base::WeakPtr<LoginDisplayHostWebUI> controller_;
+
   // WebView for rendering a webpage as a webui login.
-  std::unique_ptr<views::WebView> webui_login_;
+  views::WebView* web_view_ = nullptr;
 
   // Converts keyboard events on the WebContents to accelerators.
   views::UnhandledKeyboardEventHandler unhandled_keyboard_event_handler_;
@@ -196,6 +196,8 @@ class WebUILoginView : public views::View,
   bool forward_keyboard_event_ = true;
 
   bool observing_system_tray_focus_ = false;
+
+  bool shelf_enabled_ = true;
 
   base::ObserverList<web_modal::ModalDialogHostObserver>::Unchecked
       observer_list_;

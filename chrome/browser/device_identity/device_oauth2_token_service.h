@@ -11,6 +11,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/device_identity/device_oauth2_token_store.h"
 #include "google_apis/gaia/core_account_id.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
@@ -34,13 +35,13 @@ class DeviceOAuth2TokenService : public OAuth2AccessTokenManager::Delegate,
                                  public DeviceOAuth2TokenStore::Observer {
  public:
   typedef base::RepeatingCallback<void()> RefreshTokenAvailableCallback;
-  typedef base::Callback<void(bool)> StatusCallback;
+  typedef base::RepeatingCallback<void(bool)> StatusCallback;
 
   // Persist the given refresh token on the device. Overwrites any previous
   // value. Should only be called during initial device setup. Signals
   // completion via the given callback, passing true if the operation succeeded.
   void SetAndSaveRefreshToken(const std::string& refresh_token,
-                              const StatusCallback& callback);
+                              StatusCallback callback);
 
   // Pull the robot account ID from device policy.
   CoreAccountId GetRobotAccountId() const;
@@ -74,7 +75,7 @@ class DeviceOAuth2TokenService : public OAuth2AccessTokenManager::Delegate,
 
   OAuth2AccessTokenManager* GetAccessTokenManager();
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
   // Used on non-ChromeOS platforms to set the email associated with the
   // current service account. On ChromeOS, this function isn't used because
   // the service account identity comes from CrosSettings.
@@ -165,6 +166,10 @@ class DeviceOAuth2TokenService : public OAuth2AccessTokenManager::Delegate,
   std::string GetRefreshToken() const;
 
   void ReportServiceError(GoogleServiceAuthError::State error);
+
+  // Returns true if this object has already received the validation result for
+  // the token, false otherwise.
+  bool HasValidationResult() const;
 
   std::unique_ptr<OAuth2AccessTokenManager> token_manager_;
 

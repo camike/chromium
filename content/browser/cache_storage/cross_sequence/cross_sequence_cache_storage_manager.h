@@ -7,6 +7,7 @@
 
 #include "base/sequence_checker.h"
 #include "base/threading/sequence_bound.h"
+#include "components/services/storage/public/mojom/cache_storage_control.mojom.h"
 #include "content/browser/cache_storage/cache_storage_manager.h"
 
 namespace content {
@@ -28,34 +29,38 @@ class CONTENT_EXPORT CrossSequenceCacheStorageManager
       scoped_refptr<CacheStorageContextWithManager> context);
 
   // CacheStorageManager
-  CacheStorageHandle OpenCacheStorage(const url::Origin& origin,
-                                      CacheStorageOwner owner) override;
+  CacheStorageHandle OpenCacheStorage(
+      const url::Origin& origin,
+      storage::mojom::CacheStorageOwner owner) override;
   void GetAllOriginsUsage(
-      CacheStorageOwner owner,
-      CacheStorageContext::GetUsageInfoCallback callback) override;
-  void GetOriginUsage(const url::Origin& origin_url,
-                      CacheStorageOwner owner,
-                      storage::QuotaClient::GetUsageCallback callback) override;
-  void GetOrigins(CacheStorageOwner owner,
-                  storage::QuotaClient::GetOriginsCallback callback) override;
+      storage::mojom::CacheStorageOwner owner,
+      storage::mojom::CacheStorageControl::GetAllOriginsInfoCallback callback)
+      override;
+  void GetOriginUsage(
+      const url::Origin& origin_url,
+      storage::mojom::CacheStorageOwner owner,
+      storage::mojom::QuotaClient::GetOriginUsageCallback callback) override;
+  void GetOrigins(
+      storage::mojom::CacheStorageOwner owner,
+      storage::mojom::QuotaClient::GetOriginsForTypeCallback callback) override;
   void GetOriginsForHost(
       const std::string& host,
-      CacheStorageOwner owner,
-      storage::QuotaClient::GetOriginsCallback callback) override;
+      storage::mojom::CacheStorageOwner owner,
+      storage::mojom::QuotaClient::GetOriginsForHostCallback callback) override;
   void DeleteOriginData(
       const url::Origin& origin,
-      CacheStorageOwner owner,
-      storage::QuotaClient::DeletionCallback callback) override;
+      storage::mojom::CacheStorageOwner owner,
+      storage::mojom::QuotaClient::DeleteOriginDataCallback callback) override;
   void DeleteOriginData(const url::Origin& origin,
-                        CacheStorageOwner owner) override;
-  void SetBlobParametersForCache(
-      scoped_refptr<BlobStorageContextWrapper> blob_storage_context) override;
+                        storage::mojom::CacheStorageOwner owner) override;
+  void AddObserver(mojo::PendingRemote<storage::mojom::CacheStorageObserver>
+                       observer) override;
 
  private:
   ~CrossSequenceCacheStorageManager() override;
 
   const scoped_refptr<base::SequencedTaskRunner> target_task_runner_;
-  const scoped_refptr<CacheStorageContextWithManager> context_;
+  scoped_refptr<CacheStorageContextWithManager> context_;
 
   // The |inner_| object is SequenceBound<> to the target sequence used by the
   // real manager.

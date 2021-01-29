@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/input_state_lookup.h"
@@ -29,7 +30,7 @@
 #include "ui/wm/core/default_activation_client.h"
 #include "ui/wm/core/default_screen_position_client.h"
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #include "ui/platform_window/common/platform_window_defaults.h"  // nogncheck
 #endif
 
@@ -40,6 +41,14 @@
 
 #if defined(USE_X11)
 #include "ui/base/x/x11_util.h"  // nogncheck
+#endif
+
+#if defined(USE_OZONE)
+#include "ui/events/ozone/events_ozone.h"
+#endif
+
+#if defined(OS_FUCHSIA)
+#include "ui/platform_window/platform_window_init_properties.h"
 #endif
 
 namespace aura {
@@ -55,8 +64,16 @@ AuraTestHelper::AuraTestHelper(ui::ContextFactory* context_factory,
   DCHECK(!g_instance);
   g_instance = this;
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
   ui::test::EnableTestConfigForPlatformWindows();
+#endif
+
+#if defined(USE_OZONE) && BUILDFLAG(IS_CHROMEOS_ASH)
+  ui::DisableNativeUiEventDispatchForTest();
+#endif
+
+#if defined(OS_FUCHSIA)
+  ui::PlatformWindowInitProperties::allow_null_view_token_for_test = true;
 #endif
 
   ui::InitializeInputMethodForTesting();
@@ -109,7 +126,7 @@ AuraTestHelper* AuraTestHelper::GetInstance() {
 void AuraTestHelper::SetUp() {
   display::Screen* screen = display::Screen::GetScreen();
   gfx::Size host_size(screen ? screen->GetPrimaryDisplay().GetSizeInPixel()
-                             : gfx::Size(800, 600));
+                             : kDefaultHostSize);
   test_screen_.reset(TestScreen::Create(host_size));
   // TODO(pkasting): Seems like we should either always set the screen instance,
   // or not create the screen/host if the test already has one; it doesn't make
@@ -197,6 +214,8 @@ client::FocusClient* AuraTestHelper::GetFocusClient() {
 client::CaptureClient* AuraTestHelper::GetCaptureClient() {
   return capture_client_.get();
 }
+
+constexpr gfx::Size AuraTestHelper::kDefaultHostSize;
 
 Env* AuraTestHelper::GetEnv() {
   if (env_)

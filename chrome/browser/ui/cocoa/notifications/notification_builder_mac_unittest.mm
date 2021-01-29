@@ -5,6 +5,7 @@
 #import <AppKit/AppKit.h>
 
 #include "base/mac/foundation_util.h"
+#include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/notifications/notification_handler.h"
@@ -20,11 +21,12 @@ TEST(NotificationBuilderMacTest, TestNotificationNoButtons) {
   [builder setTitle:@"Title"];
   [builder setSubTitle:@"https://www.miguel.com"];
   [builder setContextMessage:@""];
-  [builder setTag:@"tag1"];
+  [builder setIdentifier:@"identifier"];
   [builder setIcon:[NSImage imageNamed:@"NSApplicationIcon"]];
   [builder setNotificationId:@"notificationId"];
   [builder setProfileId:@"profileId"];
   [builder setIncognito:false];
+  [builder setCreatorPid:@1];
   [builder
       setNotificationType:[NSNumber
                               numberWithInteger:static_cast<int>(
@@ -37,13 +39,17 @@ TEST(NotificationBuilderMacTest, TestNotificationNoButtons) {
   EXPECT_EQ(nullptr, [notification informativeText]);
   EXPECT_EQ("https://www.miguel.com",
             base::SysNSStringToUTF8([notification subtitle]));
-  EXPECT_EQ("tag1",
+  EXPECT_EQ("identifier",
             base::SysNSStringToUTF8([notification valueForKey:@"identifier"]));
 
   EXPECT_TRUE([notification hasActionButton]);
   EXPECT_EQ("Settings",
             base::SysNSStringToUTF8([notification actionButtonTitle]));
-  EXPECT_EQ("Close", base::SysNSStringToUTF8([notification otherButtonTitle]));
+
+  if (!base::mac::IsAtLeastOS11()) {
+    EXPECT_EQ("Close",
+              base::SysNSStringToUTF8([notification otherButtonTitle]));
+  }
 }
 
 TEST(NotificationBuilderMacTest, TestNotificationOneButton) {
@@ -58,6 +64,7 @@ TEST(NotificationBuilderMacTest, TestNotificationOneButton) {
   [builder setNotificationId:@"notificationId"];
   [builder setProfileId:@"profileId"];
   [builder setIncognito:false];
+  [builder setCreatorPid:@1];
   [builder
       setNotificationType:[NSNumber
                               numberWithInteger:static_cast<int>(
@@ -73,11 +80,13 @@ TEST(NotificationBuilderMacTest, TestNotificationOneButton) {
   EXPECT_EQ("https://www.miguel.com",
             base::SysNSStringToUTF8([notification subtitle]));
 
-  EXPECT_TRUE([notification hasActionButton]);
-
-  EXPECT_EQ("Options",
-            base::SysNSStringToUTF8([notification actionButtonTitle]));
-  EXPECT_EQ("Close", base::SysNSStringToUTF8([notification otherButtonTitle]));
+  if (!base::mac::IsAtLeastOS11()) {
+    EXPECT_TRUE([notification hasActionButton]);
+    EXPECT_EQ("Options",
+              base::SysNSStringToUTF8([notification actionButtonTitle]));
+    EXPECT_EQ("Close",
+              base::SysNSStringToUTF8([notification otherButtonTitle]));
+  }
 
   NSArray* buttons = [notification valueForKey:@"_alternateActionButtonTitles"];
   ASSERT_EQ(2u, buttons.count);
@@ -97,6 +106,7 @@ TEST(NotificationBuilderMacTest, TestNotificationTwoButtons) {
   [builder setNotificationId:@"notificationId"];
   [builder setProfileId:@"profileId"];
   [builder setIncognito:false];
+  [builder setCreatorPid:@1];
   [builder
       setNotificationType:[NSNumber
                               numberWithInteger:static_cast<int>(
@@ -112,11 +122,13 @@ TEST(NotificationBuilderMacTest, TestNotificationTwoButtons) {
   EXPECT_EQ("https://www.miguel.com",
             base::SysNSStringToUTF8([notification subtitle]));
 
-  EXPECT_TRUE([notification hasActionButton]);
-
-  EXPECT_EQ("Options",
-            base::SysNSStringToUTF8([notification actionButtonTitle]));
-  EXPECT_EQ("Close", base::SysNSStringToUTF8([notification otherButtonTitle]));
+  if (!base::mac::IsAtLeastOS11()) {
+    EXPECT_TRUE([notification hasActionButton]);
+    EXPECT_EQ("Options",
+              base::SysNSStringToUTF8([notification actionButtonTitle]));
+    EXPECT_EQ("Close",
+              base::SysNSStringToUTF8([notification otherButtonTitle]));
+  }
 
   NSArray* buttons = [notification valueForKey:@"_alternateActionButtonTitles"];
   ASSERT_EQ(3u, buttons.count);
@@ -136,6 +148,7 @@ TEST(NotificationBuilderMacTest, TestNotificationExtensionNoButtons) {
   [builder setNotificationId:@"notificationId"];
   [builder setProfileId:@"profileId"];
   [builder setIncognito:false];
+  [builder setCreatorPid:@1];
   [builder setNotificationType:[NSNumber
                                    numberWithInteger:static_cast<int>(
                                                          NotificationHandler::
@@ -145,7 +158,43 @@ TEST(NotificationBuilderMacTest, TestNotificationExtensionNoButtons) {
   NSUserNotification* notification = [builder buildUserNotification];
 
   EXPECT_FALSE(notification.hasActionButton);
-  EXPECT_EQ("Close", base::SysNSStringToUTF8([notification otherButtonTitle]));
+
+  if (!base::mac::IsAtLeastOS11()) {
+    EXPECT_EQ("Close",
+              base::SysNSStringToUTF8([notification otherButtonTitle]));
+  }
+}
+
+TEST(NotificationBuilderMacTest, TestNotificationExtensionOneButton) {
+  base::scoped_nsobject<NotificationBuilder> builder(
+      [[NotificationBuilder alloc] initWithCloseLabel:@"Close"
+                                         optionsLabel:@"Options"
+                                        settingsLabel:@"Settings"]);
+  [builder setTitle:@"Title"];
+  [builder setSubTitle:@"https://www.miguel.com"];
+  [builder setContextMessage:@"SubTitle"];
+  [builder setButtons:@"Button1" secondaryButton:@""];
+  [builder setNotificationId:@"notificationId"];
+  [builder setProfileId:@"profileId"];
+  [builder setIncognito:false];
+  [builder setCreatorPid:@1];
+  [builder setNotificationType:[NSNumber
+                                   numberWithInteger:static_cast<int>(
+                                                         NotificationHandler::
+                                                             Type::EXTENSION)]];
+  [builder setShowSettingsButton:false];
+
+  NSUserNotification* notification = [builder buildUserNotification];
+
+  // No settings button but one action button without overflow menu.
+  EXPECT_TRUE([notification hasActionButton]);
+  EXPECT_EQ("Button1",
+            base::SysNSStringToUTF8([notification actionButtonTitle]));
+
+  if (!base::mac::IsAtLeastOS11()) {
+    EXPECT_EQ("Close",
+              base::SysNSStringToUTF8([notification otherButtonTitle]));
+  }
 }
 
 TEST(NotificationBuilderMacTest, TestNotificationExtensionButtons) {
@@ -160,6 +209,7 @@ TEST(NotificationBuilderMacTest, TestNotificationExtensionButtons) {
   [builder setNotificationId:@"notificationId"];
   [builder setProfileId:@"profileId"];
   [builder setIncognito:false];
+  [builder setCreatorPid:@1];
   [builder setNotificationType:[NSNumber
                                    numberWithInteger:static_cast<int>(
                                                          NotificationHandler::
@@ -186,6 +236,7 @@ TEST(NotificationBuilderMacTest, TestUserInfo) {
   [builder setOrigin:@"https://www.miguel.com"];
   [builder setNotificationId:@"Notification1"];
   [builder setIncognito:true];
+  [builder setCreatorPid:@1];
   [builder
       setNotificationType:[NSNumber
                               numberWithInteger:static_cast<int>(
@@ -224,6 +275,7 @@ TEST(NotificationBuilderMacTest, TestBuildDictionary) {
     [sourceBuilder setNotificationId:@"notificationId"];
     [sourceBuilder setProfileId:@"profileId"];
     [sourceBuilder setIncognito:false];
+    [sourceBuilder setCreatorPid:@1];
     [sourceBuilder
         setNotificationType:
             [NSNumber

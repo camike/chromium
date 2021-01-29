@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/strings/string16.h"
+#include "base/strings/string_util_win.h"
 #include "ui/base/win/shell.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
@@ -93,14 +94,14 @@ void WinWindow::SetBounds(const gfx::Rect& bounds) {
                window_bounds.width(), window_bounds.height(), flags);
 }
 
-gfx::Rect WinWindow::GetBounds() {
+gfx::Rect WinWindow::GetBounds() const {
   RECT cr;
   GetClientRect(hwnd(), &cr);
   return gfx::Rect(cr);
 }
 
 void WinWindow::SetTitle(const base::string16& title) {
-  SetWindowText(hwnd(), title.c_str());
+  SetWindowText(hwnd(), base::as_wcstr(title));
 }
 
 void WinWindow::SetCapture() {

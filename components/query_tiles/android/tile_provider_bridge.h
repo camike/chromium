@@ -14,7 +14,7 @@ using base::android::JavaRef;
 using base::android::ScopedJavaGlobalRef;
 using base::android::ScopedJavaLocalRef;
 
-namespace upboarding {
+namespace query_tiles {
 
 // Helper class responsible for bridging the TileProvider between C++ and Java.
 class TileProviderBridge : public base::SupportsUserData::Data {
@@ -30,12 +30,11 @@ class TileProviderBridge : public base::SupportsUserData::Data {
   // Methods called from Java via JNI.
   void GetQueryTiles(JNIEnv* env,
                      const JavaParamRef<jobject>& jcaller,
+                     const JavaParamRef<jstring>& j_tile_id,
                      const JavaParamRef<jobject>& jcallback);
 
-  void GetVisuals(JNIEnv* env,
-                  const JavaParamRef<jobject>& jcaller,
-                  const JavaParamRef<jstring>& jid,
-                  const JavaParamRef<jobject>& jcallback);
+  // Called when a tile is clicked.
+  void OnTileClicked(JNIEnv* env, const JavaParamRef<jstring>& j_tile_id);
 
  private:
   // A reference to the Java counterpart of this class.  See
@@ -48,6 +47,6 @@ class TileProviderBridge : public base::SupportsUserData::Data {
   DISALLOW_COPY_AND_ASSIGN(TileProviderBridge);
 };
 
-}  // namespace upboarding
+}  // namespace query_tiles
 
 #endif  // COMPONENTS_QUERY_TILES_ANDROID_TILE_PROVIDER_BRIDGE_H_

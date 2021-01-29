@@ -62,7 +62,7 @@ AudioContext* AudioContext::Create(Document& document,
     return nullptr;
   }
 
-  document.CountUseOnlyInCrossOriginIframe(
+  document.domWindow()->CountUseOnlyInCrossOriginIframe(
       WebFeature::kAudioContextCrossOriginIframe);
 
   WebAudioLatencyHint latency_hint(WebAudioLatencyHint::kCategoryInteractive);
@@ -74,7 +74,15 @@ AudioContext* AudioContext::Create(Document& document,
     // into account double buffering (same as baseLatency).
     latency_hint =
         WebAudioLatencyHint(context_options->latencyHint().GetAsDouble());
+
+    base::UmaHistogramTimes(
+        "WebAudio.AudioContext.latencyHintMilliSeconds",
+        base::TimeDelta::FromSecondsD(latency_hint.Seconds()));
   }
+
+  base::UmaHistogramEnumeration(
+      "WebAudio.AudioContext.latencyHintCategory", latency_hint.Category(),
+      WebAudioLatencyHint::AudioContextLatencyCategory::kLastValue);
 
   base::Optional<float> sample_rate;
   if (context_options->hasSampleRate()) {
@@ -194,7 +202,7 @@ AudioContext::~AudioContext() {
 #endif
 }
 
-void AudioContext::Trace(Visitor* visitor) {
+void AudioContext::Trace(Visitor* visitor) const {
   visitor->Trace(close_resolver_);
   visitor->Trace(audio_context_manager_);
   BaseAudioContext::Trace(visitor);

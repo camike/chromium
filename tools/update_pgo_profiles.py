@@ -103,8 +103,23 @@ def _get_profile_path(args):
   """
   profile_path = os.path.join(_PGO_PROFILE_DIR, _read_profile_name(args.target))
   if not os.path.isfile(profile_path):
-    raise RuntimeError('requested profile "%s" doesn\'t exist, please run '
-                       '"gclient runhooks" to download it')
+    raise RuntimeError(
+        'requested profile "%s" doesn\'t exist, please make sure '
+        '"checkout_pgo_profiles" is set to True in the "custom_vars" section '
+        'of your .gclient file, e.g.: \n'
+        'solutions = [ \n'
+        '  { \n'
+        '    "name": "src", \n'
+        '    # ...  \n'
+        '    "custom_vars": { \n'
+        '      "checkout_pgo_profiles": True, \n'
+        '    }, \n'
+        '  }, \n'
+        '], \n'
+        'and then run "gclient runhooks" to download it. You can also simply '
+        'disable the PGO optimizations by setting |chrome_pgo_phase = 0| in '
+        'your GN arguments.'%
+        profile_path)
 
   os.utime(profile_path, None)
   profile_path.rstrip(os.sep)
@@ -117,7 +132,7 @@ def main():
   parser.add_argument(
       '--target',
       required=True,
-      choices=['win32', 'win64', 'mac'],
+      choices=['win32', 'win64', 'mac', 'linux'],
       help='Identifier of a specific target platform + architecture.')
   subparsers = parser.add_subparsers()
 

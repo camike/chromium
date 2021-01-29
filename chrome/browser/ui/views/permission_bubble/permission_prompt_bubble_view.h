@@ -7,23 +7,25 @@
 
 #include "base/macros.h"
 #include "base/strings/string16.h"
+#include "chrome/browser/ui/views/permission_bubble/permission_prompt_style.h"
 #include "components/permissions/permission_prompt.h"
 #include "ui/views/bubble/bubble_dialog_delegate_view.h"
-#include "ui/views/controls/button/button.h"
+
+namespace permissions {
+enum class RequestType;
+}
 
 class Browser;
 
-namespace views {
-class ImageButton;
-}
-
 // Bubble that prompts the user to grant or deny a permission request from a
 // website.
-class PermissionPromptBubbleView : public views::ButtonListener,
-                                   public views::BubbleDialogDelegateView {
+class PermissionPromptBubbleView : public views::BubbleDialogDelegateView {
  public:
   PermissionPromptBubbleView(Browser* browser,
-                             permissions::PermissionPrompt::Delegate* delegate);
+                             permissions::PermissionPrompt::Delegate* delegate,
+                             base::TimeTicks permission_requested_time,
+                             PermissionPromptStyle prompt_style);
+  ~PermissionPromptBubbleView() override;
 
   void Show();
 
@@ -31,15 +33,18 @@ class PermissionPromptBubbleView : public views::ButtonListener,
   // bubble_anchor_util::GetPageInfoAnchorConfiguration.
   void UpdateAnchorPosition();
 
+  void SetPromptStyle(PermissionPromptStyle prompt_style);
+
   // views::BubbleDialogDelegateView:
   void AddedToWidget() override;
   bool ShouldShowCloseButton() const override;
   base::string16 GetAccessibleWindowTitle() const override;
   base::string16 GetWindowTitle() const override;
-  gfx::Size CalculatePreferredSize() const override;
 
-  // Button Listener
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
+  void AcceptPermission();
+  void AcceptPermissionThisTime();
+  void DenyPermission();
+  void ClosingPermission();
 
  private:
   // Holds the string to be displayed as the origin of the permission prompt,
@@ -49,11 +54,24 @@ class PermissionPromptBubbleView : public views::ButtonListener,
     bool is_origin;
   };
 
-  void AddPermissionRequestLine(permissions::PermissionRequest* request);
+  bool ShouldShowRequest(permissions::RequestType type) const;
+  std::vector<permissions::PermissionRequest*> GetVisibleRequests() const;
+  void AddRequestLine(permissions::PermissionRequest* request);
 
   // Returns the origin to be displayed in the permission prompt. May return
   // a non-origin, e.g. extension URLs use the name of the extension.
-  DisplayNameOrOrigin GetDisplayNameOrOrigin();
+  DisplayNameOrOrigin GetDisplayNameOrOrigin() const;
+
+  // Get extra information to display for the permission, if any.
+  base::Optional<base::string16> GetExtraText() const;
+
+  // Record UMA Permissions.Prompt.TimeToDecision metric.
+  void RecordDecision();
+
+  // Determines whether the current request should also display an
+  // "Allow only this time" option in addition to the "Allow on every visit"
+  // option.
+  bool ShouldShowAllowThisTimeButton() const;
 
   Browser* const browser_;
   permissions::PermissionPrompt::Delegate* const delegate_;
@@ -61,7 +79,7 @@ class PermissionPromptBubbleView : public views::ButtonListener,
   // The requesting domain's name or origin.
   const DisplayNameOrOrigin name_or_origin_;
 
-  views::ImageButton* learn_more_button_ = nullptr;
+  base::TimeTicks permission_requested_time_;
 
   DISALLOW_COPY_AND_ASSIGN(PermissionPromptBubbleView);
 };

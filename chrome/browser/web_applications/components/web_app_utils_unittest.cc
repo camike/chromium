@@ -6,8 +6,11 @@
 
 #include <memory>
 
+#include "base/containers/adapters.h"
 #include "base/files/file_path.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/web_applications/components/web_application_info.h"
 #include "chrome/browser/web_applications/test/web_app_test.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -15,45 +18,83 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/chromeos/login/users/mock_user_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "components/user_manager/scoped_user_manager.h"
-#endif  // OS_CHROMEOS
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace web_app {
 
-class WebAppUtilsTest : public WebAppTest {};
+using ::testing::ElementsAre;
 
-TEST_F(WebAppUtilsTest, AreWebAppsEnabled) {
+class WebAppUtilsTest : public WebAppTest,
+                        public ::testing::WithParamInterface<bool> {
+ public:
+  WebAppUtilsTest() : is_ephemeral_guest_(GetParam()) {
+    // Update for platforms which do not support ephemeral Guest profiles.
+    is_ephemeral_guest_ &=
+        TestingProfile::SetScopedFeatureListForEphemeralGuestProfiles(
+            scoped_feature_list_, is_ephemeral_guest_);
+  }
+
+  bool is_ephemeral_guest() const { return is_ephemeral_guest_; }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+  bool is_ephemeral_guest_;
+};
+
+// Sanity check that iteration order of SortedSizesPx is ascending. The
+// correctness of most usage of SortedSizesPx depends on this.
+TEST(WebAppTest, SortedSizesPxIsAscending) {
+  // Removal of duplicates is expected but not required for correctness.
+  std::vector<SquareSizePx> in{512, 512, 16, 512, 64, 32, 256};
+  SortedSizesPx sorted(in);
+  ASSERT_THAT(sorted, ElementsAre(16, 32, 64, 256, 512));
+
+  std::vector<SquareSizePx> out(sorted.begin(), sorted.end());
+  ASSERT_THAT(out, ElementsAre(16, 32, 64, 256, 512));
+
+  std::vector<SquareSizePx> reversed(sorted.rbegin(), sorted.rend());
+  ASSERT_THAT(reversed, ElementsAre(512, 256, 64, 32, 16));
+
+  std::vector<SquareSizePx> base_reversed(base::Reversed(sorted).begin(),
+                                          base::Reversed(sorted).end());
+  ASSERT_THAT(base_reversed, ElementsAre(512, 256, 64, 32, 16));
+}
+
+TEST_P(WebAppUtilsTest, AreWebAppsEnabled) {
   Profile* regular_profile = profile();
 
   EXPECT_FALSE(AreWebAppsEnabled(nullptr));
   EXPECT_TRUE(AreWebAppsEnabled(regular_profile));
-  EXPECT_TRUE(AreWebAppsEnabled(regular_profile->GetOffTheRecordProfile()));
+  EXPECT_TRUE(AreWebAppsEnabled(regular_profile->GetPrimaryOTRProfile()));
+  EXPECT_TRUE(AreWebAppsEnabled(regular_profile->GetOffTheRecordProfile(
+      Profile::OTRProfileID("Test::WebAppUtils"))));
 
   TestingProfileManager profile_manager(TestingBrowserProcess::GetGlobal());
   ASSERT_TRUE(profile_manager.SetUp());
 
   Profile* guest_profile = profile_manager.CreateGuestProfile();
   EXPECT_TRUE(AreWebAppsEnabled(guest_profile));
-  EXPECT_TRUE(AreWebAppsEnabled(guest_profile->GetOffTheRecordProfile()));
+  if (!is_ephemeral_guest())
+    EXPECT_TRUE(AreWebAppsEnabled(guest_profile->GetPrimaryOTRProfile()));
 
   Profile* system_profile = profile_manager.CreateSystemProfile();
   EXPECT_FALSE(AreWebAppsEnabled(system_profile));
-  EXPECT_FALSE(AreWebAppsEnabled(system_profile->GetOffTheRecordProfile()));
+  EXPECT_FALSE(AreWebAppsEnabled(system_profile->GetPrimaryOTRProfile()));
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   Profile* signin_profile =
       profile_manager.CreateTestingProfile(chrome::kInitialProfile);
   EXPECT_FALSE(AreWebAppsEnabled(signin_profile));
-  EXPECT_FALSE(AreWebAppsEnabled(signin_profile->GetOffTheRecordProfile()));
+  EXPECT_FALSE(AreWebAppsEnabled(signin_profile->GetPrimaryOTRProfile()));
 
   Profile* lock_screen_profile = profile_manager.CreateTestingProfile(
       chromeos::ProfileHelper::GetLockScreenAppProfileName());
   EXPECT_FALSE(AreWebAppsEnabled(lock_screen_profile));
-  EXPECT_FALSE(
-      AreWebAppsEnabled(lock_screen_profile->GetOffTheRecordProfile()));
+  EXPECT_FALSE(AreWebAppsEnabled(lock_screen_profile->GetPrimaryOTRProfile()));
 
   using MockUserManager = testing::NiceMock<chromeos::MockUserManager>;
   {
@@ -78,83 +119,103 @@ TEST_F(WebAppUtilsTest, AreWebAppsEnabled) {
 #endif
 }
 
-TEST_F(WebAppUtilsTest, AreWebAppsUserInstallable) {
+TEST_P(WebAppUtilsTest, AreWebAppsUserInstallable) {
   Profile* regular_profile = profile();
 
   EXPECT_FALSE(AreWebAppsEnabled(nullptr));
   EXPECT_TRUE(AreWebAppsUserInstallable(regular_profile));
   EXPECT_FALSE(
-      AreWebAppsUserInstallable(regular_profile->GetOffTheRecordProfile()));
+      AreWebAppsUserInstallable(regular_profile->GetPrimaryOTRProfile()));
+  EXPECT_FALSE(
+      AreWebAppsUserInstallable(regular_profile->GetOffTheRecordProfile(
+          Profile::OTRProfileID("Test::WebAppUtils"))));
 
   TestingProfileManager profile_manager(TestingBrowserProcess::GetGlobal());
   ASSERT_TRUE(profile_manager.SetUp());
 
   Profile* guest_profile = profile_manager.CreateGuestProfile();
   EXPECT_FALSE(AreWebAppsUserInstallable(guest_profile));
-  EXPECT_FALSE(
-      AreWebAppsUserInstallable(guest_profile->GetOffTheRecordProfile()));
+  if (!is_ephemeral_guest()) {
+    EXPECT_FALSE(
+        AreWebAppsUserInstallable(guest_profile->GetPrimaryOTRProfile()));
+  }
 
   Profile* system_profile = profile_manager.CreateSystemProfile();
   EXPECT_FALSE(AreWebAppsUserInstallable(system_profile));
   EXPECT_FALSE(
-      AreWebAppsUserInstallable(system_profile->GetOffTheRecordProfile()));
+      AreWebAppsUserInstallable(system_profile->GetPrimaryOTRProfile()));
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   Profile* signin_profile =
       profile_manager.CreateTestingProfile(chrome::kInitialProfile);
   EXPECT_FALSE(AreWebAppsUserInstallable(signin_profile));
   EXPECT_FALSE(
-      AreWebAppsUserInstallable(signin_profile->GetOffTheRecordProfile()));
+      AreWebAppsUserInstallable(signin_profile->GetPrimaryOTRProfile()));
 
   Profile* lock_screen_profile = profile_manager.CreateTestingProfile(
       chromeos::ProfileHelper::GetLockScreenAppProfileName());
   EXPECT_FALSE(AreWebAppsUserInstallable(lock_screen_profile));
   EXPECT_FALSE(
-      AreWebAppsUserInstallable(lock_screen_profile->GetOffTheRecordProfile()));
+      AreWebAppsUserInstallable(lock_screen_profile->GetPrimaryOTRProfile()));
 #endif
 }
 
-TEST_F(WebAppUtilsTest, GetBrowserContextForWebApps) {
+TEST_P(WebAppUtilsTest, GetBrowserContextForWebApps) {
   Profile* regular_profile = profile();
 
   EXPECT_EQ(regular_profile, GetBrowserContextForWebApps(regular_profile));
   EXPECT_EQ(regular_profile, GetBrowserContextForWebApps(
-                                 regular_profile->GetOffTheRecordProfile()));
+                                 regular_profile->GetPrimaryOTRProfile()));
+  EXPECT_EQ(regular_profile,
+            GetBrowserContextForWebApps(regular_profile->GetOffTheRecordProfile(
+                Profile::OTRProfileID("Test::WebAppUtils"))));
 
   TestingProfileManager profile_manager(TestingBrowserProcess::GetGlobal());
   ASSERT_TRUE(profile_manager.SetUp());
 
   Profile* guest_profile = profile_manager.CreateGuestProfile();
   EXPECT_EQ(guest_profile, GetBrowserContextForWebApps(guest_profile));
-  EXPECT_EQ(guest_profile, GetBrowserContextForWebApps(
-                               guest_profile->GetOffTheRecordProfile()));
+  if (!is_ephemeral_guest()) {
+    EXPECT_EQ(guest_profile, GetBrowserContextForWebApps(
+                                 guest_profile->GetPrimaryOTRProfile()));
+  }
 
   Profile* system_profile = profile_manager.CreateSystemProfile();
   EXPECT_EQ(nullptr, GetBrowserContextForWebApps(system_profile));
   EXPECT_EQ(nullptr, GetBrowserContextForWebApps(
-                         system_profile->GetOffTheRecordProfile()));
+                         system_profile->GetPrimaryOTRProfile()));
 }
 
-TEST_F(WebAppUtilsTest, GetBrowserContextForWebAppMetrics) {
+TEST_P(WebAppUtilsTest, GetBrowserContextForWebAppMetrics) {
   Profile* regular_profile = profile();
 
   EXPECT_EQ(regular_profile,
             GetBrowserContextForWebAppMetrics(regular_profile));
   EXPECT_EQ(regular_profile, GetBrowserContextForWebAppMetrics(
-                                 regular_profile->GetOffTheRecordProfile()));
+                                 regular_profile->GetPrimaryOTRProfile()));
+  EXPECT_EQ(
+      regular_profile,
+      GetBrowserContextForWebAppMetrics(regular_profile->GetOffTheRecordProfile(
+          Profile::OTRProfileID("Test::WebAppUtils"))));
 
   TestingProfileManager profile_manager(TestingBrowserProcess::GetGlobal());
   ASSERT_TRUE(profile_manager.SetUp());
 
   Profile* guest_profile = profile_manager.CreateGuestProfile();
   EXPECT_EQ(nullptr, GetBrowserContextForWebAppMetrics(guest_profile));
-  EXPECT_EQ(nullptr, GetBrowserContextForWebAppMetrics(
-                         guest_profile->GetOffTheRecordProfile()));
+  if (!is_ephemeral_guest()) {
+    EXPECT_EQ(nullptr, GetBrowserContextForWebAppMetrics(
+                           guest_profile->GetPrimaryOTRProfile()));
+  }
 
   Profile* system_profile = profile_manager.CreateSystemProfile();
   EXPECT_EQ(nullptr, GetBrowserContextForWebAppMetrics(system_profile));
   EXPECT_EQ(nullptr, GetBrowserContextForWebAppMetrics(
-                         system_profile->GetOffTheRecordProfile()));
+                         system_profile->GetPrimaryOTRProfile()));
 }
+
+INSTANTIATE_TEST_SUITE_P(AllGuestTypes,
+                         WebAppUtilsTest,
+                         /*is_ephemeral_guest=*/testing::Bool());
 
 }  // namespace web_app

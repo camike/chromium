@@ -31,13 +31,11 @@ class OneClickSigninDialogView : public views::DialogDelegateView {
 
   static void Hide();
 
-  // Gets the global dialog view.  If its not showing returns NULL.  This
+  // Gets the global dialog view. If its not showing returns nullptr. This
   // method is meant to be called only from tests.
   static OneClickSigninDialogView* view_for_testing() { return dialog_view_; }
 
   // Overridden from views::DialogDelegateView:
-  base::string16 GetWindowTitle() const override;
-  ui::ModalType GetModalType() const override;
   void WindowClosing() override;
   bool Accept() override;
 

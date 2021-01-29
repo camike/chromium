@@ -77,6 +77,13 @@ void CredentialManagementHandler::OnTouch(FidoAuthenticator* authenticator) {
     return;
   }
 
+  if (authenticator->ForcePINChange()) {
+    state_ = State::kFinished;
+    std::move(finished_callback_)
+        .Run(CredentialManagementStatus::kForcePINChange);
+    return;
+  }
+
   authenticator_ = authenticator;
   authenticator_->GetPinRetries(
       base::BindOnce(&CredentialManagementHandler::OnRetriesResponse,
@@ -101,7 +108,8 @@ void CredentialManagementHandler::OnRetriesResponse(
     return;
   }
   state_ = State::kWaitingForPIN;
-  get_pin_callback_.Run(response->retries,
+  get_pin_callback_.Run(authenticator_->CurrentMinPINLength(),
+                        response->retries,
                         base::BindOnce(&CredentialManagementHandler::OnHavePIN,
                                        weak_factory_.GetWeakPtr()));
 }
@@ -118,7 +126,8 @@ void CredentialManagementHandler::OnHavePIN(std::string pin) {
 
   state_ = State::kGettingPINToken;
   authenticator_->GetPINToken(
-      std::move(pin),
+      std::move(pin), {pin::Permissions::kCredentialManagement},
+      /*rp_id=*/base::nullopt,
       base::BindOnce(&CredentialManagementHandler::OnHavePINToken,
                      weak_factory_.GetWeakPtr()));
 }
@@ -156,7 +165,7 @@ void CredentialManagementHandler::OnHavePINToken(
   }
 
   state_ = State::kReady;
-  pin_token_ = response->token();
+  pin_token_ = response;
   std::move(ready_callback_).Run();
 }
 

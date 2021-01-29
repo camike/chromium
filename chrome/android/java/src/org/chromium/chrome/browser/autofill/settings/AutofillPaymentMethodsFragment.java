@@ -10,6 +10,9 @@ import android.graphics.drawable.Drawable;
 import android.hardware.biometrics.BiometricManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 
 import androidx.appcompat.content.res.AppCompatResources;
 import androidx.core.hardware.fingerprint.FingerprintManagerCompat;
@@ -19,17 +22,18 @@ import androidx.preference.PreferenceScreen;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.autofill.AutofillUiUtils;
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
 import org.chromium.chrome.browser.payments.AndroidPaymentAppFactory;
 import org.chromium.chrome.browser.payments.ServiceWorkerPaymentAppBridge;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.settings.ChromeManagedPreferenceDelegate;
 import org.chromium.components.browser_ui.settings.ChromeSwitchPreference;
 
 /**
  * Autofill credit cards fragment, which allows the user to edit credit cards and control
  * payment apps.
- * TODO(crbug.com/949269): Add tests for AutofillProfilesFragment.
  */
 public class AutofillPaymentMethodsFragment extends PreferenceFragmentCompat
         implements PersonalDataManager.PersonalDataManagerObserver {
@@ -38,13 +42,31 @@ public class AutofillPaymentMethodsFragment extends PreferenceFragmentCompat
     @Override
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
         getActivity().setTitle(R.string.autofill_payment_methods);
-
+        setHasOptionsMenu(true);
         PreferenceScreen screen = getPreferenceManager().createPreferenceScreen(getStyledContext());
         // Suppresses unwanted animations while Preferences are removed from and re-added to the
         // screen.
         screen.setShouldUseGeneratedIds(false);
 
         setPreferenceScreen(screen);
+    }
+
+    @Override
+    public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
+        menu.clear();
+        MenuItem help =
+                menu.add(Menu.NONE, R.id.menu_id_targeted_help, Menu.NONE, R.string.menu_help);
+        help.setIcon(R.drawable.ic_help_and_feedback);
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == R.id.menu_id_targeted_help) {
+            AutofillUiUtils.launchAutofillHelpPage(
+                    getActivity(), Profile.getLastUsedRegularProfile());
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
     }
 
     @Override
@@ -100,7 +122,10 @@ public class AutofillPaymentMethodsFragment extends PreferenceFragmentCompat
         for (CreditCard card : PersonalDataManager.getInstance().getCreditCardsForSettings()) {
             // Add a preference for the credit card.
             Preference card_pref = new Preference(getStyledContext());
-            card_pref.setTitle(card.getObfuscatedNumber());
+            // Make the card_pref multi-line, since cards with long nicknames won't fit on a single
+            // line.
+            card_pref.setSingleLineTitle(false);
+            card_pref.setTitle(card.getCardLabel());
             card_pref.setSummary(card.getFormattedExpirationDate(getActivity()));
             card_pref.setIcon(
                     AppCompatResources.getDrawable(getActivity(), card.getIssuerIconDrawableId()));
@@ -123,8 +148,8 @@ public class AutofillPaymentMethodsFragment extends PreferenceFragmentCompat
             Preference add_card_pref = new Preference(getStyledContext());
             Drawable plusIcon = ApiCompatibilityUtils.getDrawable(getResources(), R.drawable.plus);
             plusIcon.mutate();
-            plusIcon.setColorFilter(
-                    ApiCompatibilityUtils.getColor(getResources(), R.color.light_active_color),
+            plusIcon.setColorFilter(ApiCompatibilityUtils.getColor(
+                                            getResources(), R.color.default_control_color_active),
                     PorterDuff.Mode.SRC_IN);
             add_card_pref.setIcon(plusIcon);
             add_card_pref.setTitle(R.string.autofill_create_credit_card);
@@ -175,6 +200,11 @@ public class AutofillPaymentMethodsFragment extends PreferenceFragmentCompat
     }
 
     private boolean isBiometricAvailable() {
+        // Only Android versions 9 and above are supported.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            return false;
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             BiometricManager biometricManager =
                     getStyledContext().getSystemService(BiometricManager.class);

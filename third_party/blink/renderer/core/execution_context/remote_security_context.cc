@@ -5,7 +5,6 @@
 #include "third_party/blink/renderer/core/execution_context/remote_security_context.h"
 
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink.h"
-#include "third_party/blink/renderer/core/execution_context/security_context_init.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
@@ -13,8 +12,7 @@
 
 namespace blink {
 
-RemoteSecurityContext::RemoteSecurityContext()
-    : SecurityContext(SecurityContextInit(), kRemoteFrame) {
+RemoteSecurityContext::RemoteSecurityContext() : SecurityContext(nullptr) {
   // RemoteSecurityContext's origin is expected to stay uninitialized until
   // we set it using replicated origin data from the browser process.
   DCHECK(!GetSecurityOrigin());
@@ -53,24 +51,10 @@ void RemoteSecurityContext::ResetAndEnforceSandboxFlags(
 void RemoteSecurityContext::InitializeFeaturePolicy(
     const ParsedFeaturePolicy& parsed_header,
     const ParsedFeaturePolicy& container_policy,
-    const FeaturePolicy* parent_feature_policy,
-    const FeaturePolicy::FeatureState* opener_feature_state) {
-  // Feature policy should either come from a parent in the case of an embedded
-  // child frame, or from an opener if any when a new window is created by an
-  // opener. A main frame without an opener would not have a parent policy nor
-  // an opener feature state.
-  DCHECK(!parent_feature_policy || !opener_feature_state);
+    const FeaturePolicy* parent_feature_policy) {
   report_only_feature_policy_ = nullptr;
-  if (!opener_feature_state ||
-      !RuntimeEnabledFeatures::FeaturePolicyForSandboxEnabled()) {
-    feature_policy_ = FeaturePolicy::CreateFromParentPolicy(
-        parent_feature_policy, container_policy,
-        security_origin_->ToUrlOrigin());
-  } else {
-    DCHECK(!parent_feature_policy);
-    feature_policy_ = FeaturePolicy::CreateWithOpenerPolicy(
-        *opener_feature_state, security_origin_->ToUrlOrigin());
-  }
+  feature_policy_ = FeaturePolicy::CreateFromParentPolicy(
+      parent_feature_policy, container_policy, security_origin_->ToUrlOrigin());
   feature_policy_->SetHeaderPolicy(parsed_header);
 }
 

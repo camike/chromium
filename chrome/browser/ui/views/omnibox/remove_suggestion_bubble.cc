@@ -34,10 +34,10 @@ class RemoveSuggestionBubbleDialogDelegateView
     DCHECK(template_url_service);
     DCHECK(match_.SupportsDeletion());
 
-    DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_OK,
-                                     l10n_util::GetStringUTF16(IDS_REMOVE));
-    DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
-                                     l10n_util::GetStringUTF16(IDS_CANCEL));
+    SetButtonLabel(ui::DIALOG_BUTTON_OK, l10n_util::GetStringUTF16(IDS_REMOVE));
+    SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
+                   l10n_util::GetStringUTF16(IDS_CANCEL));
+    SetModalType(ui::MODAL_TYPE_WINDOW);
 
     auto* layout_manager = SetLayoutManager(std::make_unique<views::BoxLayout>(
         views::BoxLayout::Orientation::kVertical));
@@ -89,7 +89,6 @@ class RemoveSuggestionBubbleDialogDelegateView
   }
 
   // views::WidgetDelegate:
-  ui::ModalType GetModalType() const override { return ui::MODAL_TYPE_WINDOW; }
   base::string16 GetWindowTitle() const override {
     return l10n_util::GetStringUTF16(
         IDS_OMNIBOX_REMOVE_SUGGESTION_BUBBLE_TITLE);
@@ -107,7 +106,7 @@ void ShowRemoveSuggestion(TemplateURLService* template_url_service,
                           const AutocompleteMatch& match,
                           base::OnceClosure remove_closure) {
   views::BubbleDialogDelegateView::CreateBubble(
-      new RemoveSuggestionBubbleDialogDelegateView(
+      std::make_unique<RemoveSuggestionBubbleDialogDelegateView>(
           template_url_service, anchor_view, match, std::move(remove_closure)))
       ->Show();
 }

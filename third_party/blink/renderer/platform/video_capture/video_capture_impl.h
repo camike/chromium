@@ -20,6 +20,10 @@
 #include "third_party/blink/public/common/media/video_capture.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 
+namespace base {
+class SequencedTaskRunner;
+}  // namespace base
+
 namespace gpu {
 class GpuMemoryBufferSupport;
 }  // namespace gpu
@@ -30,6 +34,17 @@ class GpuVideoAcceleratorFactories;
 
 namespace blink {
 
+extern const PLATFORM_EXPORT base::Feature kTimeoutHangingVideoCaptureStarts;
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class VideoCaptureStartOutcome {
+  kStarted = 0,
+  kTimedout = 1,
+  kFailed = 2,
+  kMaxValue = kFailed,
+};
+
 // VideoCaptureImpl represents a capture device in renderer process. It provides
 // an interface for clients to command the capture (Start, Stop, etc), and
 // communicates back to these clients e.g. the capture state or incoming
@@ -38,7 +53,8 @@ namespace blink {
 class PLATFORM_EXPORT VideoCaptureImpl
     : public media::mojom::blink::VideoCaptureObserver {
  public:
-  explicit VideoCaptureImpl(media::VideoCaptureSessionId session_id);
+  VideoCaptureImpl(media::VideoCaptureSessionId session_id,
+                   scoped_refptr<base::SequencedTaskRunner> main_task_runner);
   ~VideoCaptureImpl() override;
 
   // Stop/resume delivering video frames to clients, based on flag |suspend|.
@@ -93,6 +109,11 @@ class PLATFORM_EXPORT VideoCaptureImpl
                      media::mojom::blink::VideoFrameInfoPtr info) override;
   void OnBufferDestroyed(int32_t buffer_id) override;
 
+  void ProcessFeedback(const media::VideoFrameFeedback& feedback);
+
+  static constexpr base::TimeDelta kCaptureStartTimeout =
+      base::TimeDelta::FromSeconds(10);
+
  private:
   friend class VideoCaptureImplTest;
   friend class MockVideoCaptureImpl;
@@ -104,8 +125,7 @@ class PLATFORM_EXPORT VideoCaptureImpl
   struct ClientInfo;
   using ClientInfoMap = std::map<int, ClientInfo>;
 
-  using BufferFinishedCallback =
-      base::OnceCallback<void(double consumer_resource_utilization)>;
+  using BufferFinishedCallback = base::OnceClosure;
 
   void OnVideoFrameReady(int32_t buffer_id,
                          base::TimeTicks reference_time,
@@ -115,8 +135,7 @@ class PLATFORM_EXPORT VideoCaptureImpl
 
   void OnAllClientsFinishedConsumingFrame(
       int buffer_id,
-      scoped_refptr<BufferContext> buffer_context,
-      double consumer_resource_utilization);
+      scoped_refptr<BufferContext> buffer_context);
 
   void StopDevice();
   void RestartCapture();
@@ -140,8 +159,20 @@ class PLATFORM_EXPORT VideoCaptureImpl
   // RESOURCE_UTILIZATION value from the |metadata| and then runs the given
   // callback, to trampoline back to the IO thread with the values.
   static void DidFinishConsumingFrame(
-      const media::VideoFrameMetadata* metadata,
       BufferFinishedCallback callback_to_io_thread);
+
+  void OnStartTimedout();
+
+  void RecordStartOutcomeUMA(VideoCaptureStartOutcome outcome);
+
+  // Callback for when GPU context lost is detected. The method fetches the new
+  // GPU factories handle on |main_task_runner_| and sets |gpu_factories_| to
+  // the new handle.
+  static void OnGpuContextLost(
+      base::WeakPtr<VideoCaptureImpl> video_capture_impl);
+
+  void SetGpuFactoriesHandleOnIOTaskRunner(
+      media::GpuVideoAcceleratorFactories* gpu_factories);
 
   // |device_id_| and |session_id_| are different concepts, but we reuse the
   // same numerical value, passed on construction.
@@ -173,14 +204,25 @@ class PLATFORM_EXPORT VideoCaptureImpl
   base::TimeTicks first_frame_ref_time_;
 
   VideoCaptureState state_;
+  bool start_timedout_ = false;
+  bool start_outcome_reported_ = false;
+
+  int num_first_frame_logs_ = 0;
 
   // Methods of |gpu_factories_| need to run on |media_task_runner_|.
-  media::GpuVideoAcceleratorFactories* gpu_factories_;
-  scoped_refptr<base::SingleThreadTaskRunner> media_task_runner_;
+  media::GpuVideoAcceleratorFactories* gpu_factories_ = nullptr;
+  scoped_refptr<base::SequencedTaskRunner> media_task_runner_;
+  scoped_refptr<base::SequencedTaskRunner> main_task_runner_;
 
   std::unique_ptr<gpu::GpuMemoryBufferSupport> gpu_memory_buffer_support_;
 
+  // Stores feedback from the clients, received in |ProcessFeedback()|.
+  // Only accessed on the IO thread.
+  media::VideoFrameFeedback feedback_;
+
   THREAD_CHECKER(io_thread_checker_);
+
+  base::OneShotTimer startup_timeout_;
 
   // WeakPtrFactory pointing back to |this| object, for use with
   // media::VideoFrames constructed in OnBufferReceived() from buffers cached

@@ -94,12 +94,14 @@ enum AXTextFromNativeHTML {
   kAXTextFromNativeHTMLLabelFor,
   kAXTextFromNativeHTMLLabelWrapped,
   kAXTextFromNativeHTMLLegend,
+  kAXTextFromNativeHTMLRubyAnnotation,
   kAXTextFromNativeHTMLTableCaption,
   kAXTextFromNativeHTMLTitleElement,
 };
 
 enum AXIgnoredReason {
   kAXActiveModalDialog,
+  kAXAriaModalDialog,
   kAXAncestorIsLeafNode,
   kAXAriaHiddenElement,
   kAXAriaHiddenSubtree,

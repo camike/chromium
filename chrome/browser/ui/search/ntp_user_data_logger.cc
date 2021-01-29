@@ -7,29 +7,27 @@
 #include <algorithm>
 #include <string>
 
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "chrome/browser/after_startup_task_utils.h"
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
-#include "chrome/browser/search/ntp_features.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/search/ntp_user_data_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/ntp_tiles/metrics.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/browser/navigation_details.h"
-#include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/web_contents.h"
+#include "components/search/ntp_features.h"
 
 namespace {
 
 // This enum must match the numbering for NewTabPageVoiceAction in enums.xml.
 // Do not reorder or remove items, only add new items before VOICE_ACTION_MAX.
 enum VoiceAction {
-  // Activated by clicking on the fakebox icon.
-  VOICE_ACTION_ACTIVATE_FAKEBOX = 0,
+  // Activated by clicking on the fakebox or realbox icon.
+  VOICE_ACTION_ACTIVATE_SEARCH_BOX = 0,
   // Activated by keyboard shortcut.
   VOICE_ACTION_ACTIVATE_KEYBOARD = 1,
   // Close the voice overlay by a user's explicit action.
@@ -50,8 +48,8 @@ enum VoiceAction {
 // is an action value. Otherwise, |VOICE_ACTION_MAX| is returned.
 VoiceAction LoggingEventToVoiceAction(NTPLoggingEventType event) {
   switch (event) {
-    case NTP_VOICE_ACTION_ACTIVATE_FAKEBOX:
-      return VOICE_ACTION_ACTIVATE_FAKEBOX;
+    case NTP_VOICE_ACTION_ACTIVATE_SEARCH_BOX:
+      return VOICE_ACTION_ACTIVATE_SEARCH_BOX;
     case NTP_VOICE_ACTION_ACTIVATE_KEYBOARD:
       return VOICE_ACTION_ACTIVATE_KEYBOARD;
     case NTP_VOICE_ACTION_CLOSE_OVERLAY:
@@ -367,38 +365,29 @@ LogoClickType LoggingEventToLogoClick(NTPLoggingEventType event) {
                              base::TimeDelta::FromMilliseconds(1), \
                              base::TimeDelta::FromSeconds(60), 100)
 
-NTPUserDataLogger::~NTPUserDataLogger() {}
+NTPUserDataLogger::NTPUserDataLogger(Profile* profile, const GURL& ntp_url)
+    : has_emitted_(false),
+      should_record_doodle_load_time_(true),
+      modules_visible_(false),
+      during_startup_(!AfterStartupTaskUtils::IsBrowserStartupComplete()),
+      ntp_url_(ntp_url),
+      profile_(profile) {}
+
+NTPUserDataLogger::~NTPUserDataLogger() = default;
 
 // static
-NTPUserDataLogger* NTPUserDataLogger::GetOrCreateFromWebContents(
-    content::WebContents* content) {
-  DCHECK(search::IsInstantNTP(content) ||
-         content->GetMainFrame()->GetSiteInstance()->GetSiteURL() ==
-             GURL(chrome::kChromeUINewTabPageURL));
-
-  // Calling CreateForWebContents when an instance is already attached has no
-  // effect, so we can do this.
-  NTPUserDataLogger::CreateForWebContents(content);
-  NTPUserDataLogger* logger = NTPUserDataLogger::FromWebContents(content);
-
-  // We record the URL of this NTP in order to identify navigations that
-  // originate from it. We use the NavigationController's URL since it might
-  // differ from the WebContents URL which is usually chrome://newtab/.
-  //
-  // We update the NTP URL every time this function is called, because the NTP
-  // URL sometimes changes while it is open, and we care about the final one for
-  // detecting when the user leaves or returns to the NTP. In particular, if the
-  // Google URL changes (e.g. google.com -> google.de), then we fall back to the
-  // local NTP.
-  content::NavigationEntry* entry = content->GetController().GetVisibleEntry();
-  if (entry && (logger->ntp_url_ != entry->GetURL())) {
-    DVLOG(1) << "NTP URL changed from \"" << logger->ntp_url_ << "\" to \""
-             << entry->GetURL() << "\"";
-    logger->ntp_url_ = entry->GetURL();
+void NTPUserDataLogger::LogOneGoogleBarFetchDuration(
+    bool success,
+    const base::TimeDelta& duration) {
+  UMA_HISTOGRAM_MEDIUM_TIMES("NewTabPage.OneGoogleBar.RequestLatency",
+                             duration);
+  if (success) {
+    UMA_HISTOGRAM_MEDIUM_TIMES("NewTabPage.OneGoogleBar.RequestLatency.Success",
+                               duration);
+  } else {
+    UMA_HISTOGRAM_MEDIUM_TIMES("NewTabPage.OneGoogleBar.RequestLatency.Failure",
+                               duration);
   }
-
-  logger->profile_ = Profile::FromBrowserContext(content->GetBrowserContext());
-  return logger;
 }
 
 void NTPUserDataLogger::LogEvent(NTPLoggingEventType event,
@@ -416,7 +405,7 @@ void NTPUserDataLogger::LogEvent(NTPLoggingEventType event,
     case NTP_ALL_TILES_LOADED:
       // permitted above for non-Google search providers
       break;
-    case NTP_VOICE_ACTION_ACTIVATE_FAKEBOX:
+    case NTP_VOICE_ACTION_ACTIVATE_SEARCH_BOX:
     case NTP_VOICE_ACTION_ACTIVATE_KEYBOARD:
     case NTP_VOICE_ACTION_CLOSE_OVERLAY:
     case NTP_VOICE_ACTION_QUERY_SUBMITTED:
@@ -533,6 +522,12 @@ void NTPUserDataLogger::LogEvent(NTPLoggingEventType event,
     case NTP_CUSTOMIZE_SHORTCUT_VISIBILITY_TOGGLE_CLICKED:
       RecordAction(LoggingEventToShortcutUserActionName(event));
       break;
+    case NTP_MODULES_SHOWN:
+      UMA_HISTOGRAM_LOAD_TIME("NewTabPage.Modules.ShownTime", time);
+      break;
+    case NTP_APP_RENDERED:
+      UMA_HISTOGRAM_LOAD_TIME("NewTabPage.MainUi.ShownTime", time);
+      break;
   }
 }
 
@@ -574,29 +569,35 @@ void NTPUserDataLogger::LogMostVisitedNavigation(
   base::RecordAction(base::UserMetricsAction("MostVisited_Clicked"));
 }
 
-NTPUserDataLogger::NTPUserDataLogger(content::WebContents* contents)
-    : content::WebContentsObserver(contents),
-      has_emitted_(false),
-      should_record_doodle_load_time_(true),
-      during_startup_(!AfterStartupTaskUtils::IsBrowserStartupComplete()) {
+void NTPUserDataLogger::LogModuleImpression(const std::string& id,
+                                            base::TimeDelta time) {
+  UMA_HISTOGRAM_LOAD_TIME("NewTabPage.Modules.Impression", time);
+  base::UmaHistogramCustomTimes("NewTabPage.Modules.Impression." + id, time,
+                                base::TimeDelta::FromMilliseconds(1),
+                                base::TimeDelta::FromSeconds(60), 100);
 }
 
-// content::WebContentsObserver override
-void NTPUserDataLogger::NavigationEntryCommitted(
-    const content::LoadCommittedDetails& load_details) {
-  NavigatedFromURLToURL(load_details.previous_url,
-                        load_details.entry->GetURL());
+void NTPUserDataLogger::LogModuleLoaded(const std::string& id,
+                                        base::TimeDelta duration,
+                                        base::TimeDelta time_since_navigation) {
+  UMA_HISTOGRAM_LOAD_TIME("NewTabPage.Modules.Loaded", time_since_navigation);
+  base::UmaHistogramCustomTimes("NewTabPage.Modules.Loaded." + id,
+                                time_since_navigation,
+                                base::TimeDelta::FromMilliseconds(1),
+                                base::TimeDelta::FromSeconds(60), 100);
+  UMA_HISTOGRAM_LOAD_TIME("NewTabPage.Modules.LoadDuration", duration);
+  base::UmaHistogramCustomTimes("NewTabPage.Modules.LoadDuration." + id,
+                                duration, base::TimeDelta::FromMilliseconds(1),
+                                base::TimeDelta::FromSeconds(60), 100);
 }
 
-void NTPUserDataLogger::NavigatedFromURLToURL(const GURL& from,
-                                              const GURL& to) {
-  // User is returning to NTP, probably via the back button; reset stats.
-  if (from.is_valid() && to.is_valid() && (to == ntp_url_)) {
-    DVLOG(1) << "Returning to New Tab Page";
-    logged_impressions_.fill(base::nullopt);
-    has_emitted_ = false;
-    should_record_doodle_load_time_ = true;
-  }
+void NTPUserDataLogger::LogModuleUsage(const std::string& id) {
+  UMA_HISTOGRAM_EXACT_LINEAR("NewTabPage.Modules.Usage", 1, 1);
+  base::UmaHistogramExactLinear("NewTabPage.Modules.Usage." + id, 1, 1);
+}
+
+void NTPUserDataLogger::SetModulesVisible(bool visible) {
+  modules_visible_ = visible;
 }
 
 bool NTPUserDataLogger::DefaultSearchProviderIsGoogle() const {
@@ -699,6 +700,11 @@ void NTPUserDataLogger::EmitNtpStatistics(base::TimeDelta load_time) {
     }
   }
 
+  if (base::FeatureList::IsEnabled(ntp_features::kModules)) {
+    base::UmaHistogramBoolean("NewTabPage.Modules.VisibleOnNTPLoad",
+                              modules_visible_);
+  }
+
   has_emitted_ = true;
   during_startup_ = false;
 }
@@ -730,5 +736,3 @@ void NTPUserDataLogger::RecordAction(const char* action) {
 
   base::RecordAction(base::UserMetricsAction(action));
 }
-
-WEB_CONTENTS_USER_DATA_KEY_IMPL(NTPUserDataLogger)

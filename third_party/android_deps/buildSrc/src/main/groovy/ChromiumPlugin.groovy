@@ -17,11 +17,20 @@ class ChromiumPlugin implements Plugin<Project> {
             /** Main type of configuration, use it for libraries that the APK depends on. */
             compile
 
+            /**
+             * Dedicated com_google_guava_listenablefuture configuration so that other libraries do
+             * not affect the resolved listenablefuture version.
+             */
+            compileListenableFuture
+
             /** Libraries that are for testing only. */
             testCompile
 
             /** Libraries that are only used during build. These support android. */
             buildCompile
+
+            /** Libraries that are used for testing only and support android. */
+            androidTestCompile
         }
     }
 }

@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -16,6 +16,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/chrome_zipfile_installer.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/load_error_reporter.h"
@@ -26,6 +27,7 @@
 #include "components/services/unzip/in_process_unzipper.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/extension_file_task_runner.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/constants.h"
@@ -33,7 +35,7 @@
 #include "services/data_decoder/public/cpp/test_support/in_process_data_decoder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
 #include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #endif
@@ -79,11 +81,11 @@ struct MockExtensionRegistryObserver : public ExtensionRegistryObserver {
                             const Extension* extension,
                             bool is_update) override {
     last_extension_installed = extension->id();
-    quit_closure.Run();
+    std::move(quit_closure).Run();
   }
 
   std::string last_extension_installed;
-  base::Closure quit_closure;
+  base::OnceClosure quit_closure;
 };
 
 struct UnzipFileFilterTestCase {
@@ -135,6 +137,7 @@ class ZipFileInstallerTest : public testing::Test {
                         .AppendASCII(zip_name);
     ASSERT_TRUE(base::PathExists(original_path)) << original_path.value();
     zipfile_installer_ = ZipFileInstaller::Create(
+        GetExtensionFileTaskRunner(),
         MakeRegisterInExtensionServiceCallback(extension_service_));
 
     base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -165,7 +168,7 @@ class ZipFileInstallerTest : public testing::Test {
       in_process_utility_thread_helper_;
   MockExtensionRegistryObserver observer_;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   chromeos::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
   // ChromeOS needs a user manager to instantiate an extension service.
   chromeos::ScopedTestUserManager test_user_manager_;

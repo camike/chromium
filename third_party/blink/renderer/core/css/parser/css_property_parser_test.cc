@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/html/html_html_element.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
@@ -385,9 +386,12 @@ TEST(CSSPropertyParserTest, GradientUseCount) {
 
 TEST(CSSPropertyParserTest, PaintUseCount) {
   auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+  dummy_page_holder->GetFrame().Loader().CommitNavigation(
+      WebNavigationParams::CreateWithHTMLBufferForTesting(
+          SharedBuffer::Create(), KURL("https://example.com")),
+      nullptr /* extra_data */);
   Document& document = dummy_page_holder->GetDocument();
   Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
-  document.SetSecureContextModeForTesting(SecureContextMode::kSecureContext);
   WebFeature feature = WebFeature::kCSSPaintFunction;
   EXPECT_FALSE(document.IsUseCounted(feature));
   document.documentElement()->setInnerHTML(
@@ -670,6 +674,9 @@ TEST(CSSPropertyParserTest, InternalLightDarkAuthor) {
       context));
   ASSERT_FALSE(CSSParser::ParseSingleValue(
       CSSPropertyID::kColor, "-internal-light-dark(red, green)", context));
+  ASSERT_FALSE(CSSParser::ParseSingleValue(
+      CSSPropertyID::kBackgroundImage,
+      "-internal-light-dark(url(light.png), url(dark.png))", context));
 }
 
 TEST(CSSPropertyParserTest, UAInternalLightDarkColor) {
@@ -708,6 +715,76 @@ TEST(CSSPropertyParserTest, UAInternalLightDarkColorSerialization) {
   EXPECT_EQ("-internal-light-dark(red, rgb(170, 170, 170))", value->CssText());
 }
 
+TEST(CSSPropertyParserTest, UAInternalLightDarkBackgroundImage) {
+  auto* ua_context = MakeGarbageCollected<CSSParserContext>(
+      kUASheetMode, SecureContextMode::kInsecureContext);
+
+  const struct {
+    const char* value;
+    bool valid;
+  } tests[] = {
+      {"-internal-light-dark()", false},
+      {"-internal-light-dark(url(light.png))", false},
+      {"-internal-light-dark(url(light.png) url(dark.png))", false},
+      {"-internal-light-dark(url(light.png),,url(dark.png))", false},
+      {"-internal-light-dark(url(light.png), url(dark.png))", true},
+      {"-internal-light-dark(url(light.png), none)", true},
+      {"-internal-light-dark(none, -webkit-image-set(url(dark.png) 1x))", true},
+      {"-internal-light-dark(  none  ,  none   )", true},
+      {"-internal-light-dark(  url(light.png)  ,  url(dark.png)   )", true},
+  };
+
+  for (const auto& test : tests) {
+    EXPECT_EQ(!!CSSParser::ParseSingleValue(CSSPropertyID::kBackgroundImage,
+                                            test.value, ua_context),
+              test.valid)
+        << test.value;
+  }
+}
+
+namespace {
+
+bool ParseCSSValue(CSSPropertyID property_id,
+                   const String& value,
+                   const CSSParserContext* context) {
+  CSSTokenizer tokenizer(value);
+  const auto tokens = tokenizer.TokenizeToEOF();
+  const CSSParserTokenRange range(tokens);
+  HeapVector<CSSPropertyValue, 256> parsed_properties;
+  return CSSPropertyParser::ParseValue(property_id, false, range, context,
+                                       parsed_properties,
+                                       StyleRule::RuleType::kStyle);
+}
+
+}  // namespace
+
+TEST(CSSPropertyParserTest, UAInternalLightDarkBackgroundShorthand) {
+  auto* ua_context = MakeGarbageCollected<CSSParserContext>(
+      kUASheetMode, SecureContextMode::kInsecureContext);
+
+  const struct {
+    const char* value;
+    bool valid;
+  } tests[] = {
+      {"-internal-light-dark()", false},
+      {"-internal-light-dark(url(light.png))", false},
+      {"-internal-light-dark(url(light.png) url(dark.png))", false},
+      {"-internal-light-dark(url(light.png),,url(dark.png))", false},
+      {"-internal-light-dark(url(light.png), url(dark.png))", true},
+      {"-internal-light-dark(url(light.png), none)", true},
+      {"-internal-light-dark(none, -webkit-image-set(url(dark.png) 1x))", true},
+      {"-internal-light-dark(  none  ,  none   )", true},
+      {"-internal-light-dark(  url(light.png)  ,  url(dark.png)   )", true},
+  };
+
+  for (const auto& test : tests) {
+    EXPECT_EQ(
+        !!ParseCSSValue(CSSPropertyID::kBackground, test.value, ua_context),
+        test.valid)
+        << test.value;
+  }
+}
+
 TEST(CSSPropertyParserTest, ParseRevert) {
   auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLStandardMode, SecureContextMode::kInsecureContext);
@@ -716,20 +793,10 @@ TEST(CSSPropertyParserTest, ParseRevert) {
   CSSTokenizer tokenizer(string);
   const auto tokens = tokenizer.TokenizeToEOF();
 
-  {
-    ScopedCSSRevertForTest scoped_revert(true);
-    const CSSValue* value = CSSPropertyParser::ParseSingleValue(
-        CSSPropertyID::kMarginLeft, CSSParserTokenRange(tokens), context);
-    ASSERT_TRUE(value);
-    EXPECT_TRUE(value->IsRevertValue());
-  }
-
-  {
-    ScopedCSSRevertForTest scoped_revert(false);
-    const CSSValue* value = CSSPropertyParser::ParseSingleValue(
-        CSSPropertyID::kMarginLeft, CSSParserTokenRange(tokens), context);
-    EXPECT_FALSE(value);
-  }
+  const CSSValue* value = CSSPropertyParser::ParseSingleValue(
+      CSSPropertyID::kMarginLeft, CSSParserTokenRange(tokens), context);
+  ASSERT_TRUE(value);
+  EXPECT_TRUE(value->IsRevertValue());
 }
 
 }  // namespace blink

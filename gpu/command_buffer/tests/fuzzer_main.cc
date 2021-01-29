@@ -10,7 +10,7 @@
 
 #include "base/at_exit.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/i18n/icu_util.h"
 #include "base/logging.h"
@@ -59,7 +59,8 @@ const uint32_t kTransferBufferSize = 16384;
 const uint32_t kSmallTransferBufferSize = 16;
 const uint32_t kTinyTransferBufferSize = 3;
 
-#if !defined(GPU_FUZZER_USE_ANGLE) && !defined(GPU_FUZZER_USE_SWIFTSHADER)
+#if !defined(GPU_FUZZER_USE_ANGLE) && !defined(GPU_FUZZER_USE_SWIFTSHADER) && \
+    !defined(GPU_FUZZER_USE_SWANGLE)
 #define GPU_FUZZER_USE_STUB
 #endif
 
@@ -170,6 +171,7 @@ constexpr const char* kExtensions[] = {
     "GL_OES_compressed_ETC1_RGB8_texture",
     "GL_OES_depth24",
     "GL_OES_depth_texture",
+    "GL_OES_draw_buffers_indexed",
     "GL_OES_EGL_image_external",
     "GL_OES_element_index_uint",
     "GL_OES_fbo_render_mipmap",
@@ -241,8 +243,13 @@ struct Config {
     ALLOW_UNUSED_LOCAL(es3);
     attrib_helper.context_type = CONTEXT_TYPE_OPENGLES2;
 #else
-    attrib_helper.context_type =
-        es3 ? CONTEXT_TYPE_OPENGLES3 : CONTEXT_TYPE_OPENGLES2;
+    bool es31 = it.GetBit();
+    if (es3) {
+      attrib_helper.context_type =
+          es31 ? CONTEXT_TYPE_OPENGLES31_FOR_TESTING : CONTEXT_TYPE_OPENGLES3;
+    } else {
+      attrib_helper.context_type = CONTEXT_TYPE_OPENGLES2;
+    }
 #endif
     attrib_helper.enable_oop_rasterization = it.GetBit();
 
@@ -278,8 +285,9 @@ struct Config {
     gl_context_attribs.robust_resource_initialization = true;
     gl_context_attribs.robust_buffer_access = true;
     gl_context_attribs.client_major_es_version =
-        IsWebGL2OrES3ContextType(attrib_helper.context_type) ? 3 : 2;
-    gl_context_attribs.client_minor_es_version = 0;
+        IsWebGL2OrES3OrHigherContextType(attrib_helper.context_type) ? 3 : 2;
+    gl_context_attribs.client_minor_es_version =
+        IsES31ForTestingContextType(attrib_helper.context_type) ? 1 : 0;
 #endif
 
     return it.consumed_bytes();
@@ -319,8 +327,13 @@ class CommandBufferSetup {
 #if defined(GPU_FUZZER_USE_ANGLE)
     command_line->AppendSwitchASCII(switches::kUseGL,
                                     gl::kGLImplementationANGLEName);
+#if defined(GPU_FUZZER_USE_SWANGLE)
+    command_line->AppendSwitchASCII(switches::kUseANGLE,
+                                    gl::kANGLEImplementationSwiftShaderName);
+#else
     command_line->AppendSwitchASCII(switches::kUseANGLE,
                                     gl::kANGLEImplementationNullName);
+#endif
 
     CHECK(gl::init::InitializeStaticGLBindingsImplementation(
         gl::kGLImplementationEGLANGLE, false));
@@ -412,7 +425,8 @@ class CommandBufferSetup {
       mailbox.SetName(name);
       shared_image_factory_->CreateSharedImage(
           mailbox, viz::RGBA_8888, gfx::Size(256, 256),
-          gfx::ColorSpace::CreateSRGB(), gfx::kNullAcceleratedWidget, usage);
+          gfx::ColorSpace::CreateSRGB(), kTopLeft_GrSurfaceOrigin,
+          kPremul_SkAlphaType, gfx::kNullAcceleratedWidget, usage);
     }
 
 #if defined(GPU_FUZZER_USE_RASTER_DECODER)

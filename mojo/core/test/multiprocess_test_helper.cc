@@ -67,7 +67,7 @@ int RunClientFunction(base::OnceCallback<int(MojoHandle)> handler,
 
 }  // namespace
 
-MultiprocessTestHelper::MultiprocessTestHelper() {}
+MultiprocessTestHelper::MultiprocessTestHelper() = default;
 
 MultiprocessTestHelper::~MultiprocessTestHelper() {
   CHECK(!test_child_.IsValid());
@@ -122,7 +122,7 @@ ScopedMessagePipeHandle MultiprocessTestHelper::StartChildWithExtraSwitch(
 #if !defined(OS_FUCHSIA)
     case LaunchType::NAMED_CHILD:
     case LaunchType::NAMED_PEER: {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
       server_name = NamedPlatformChannel::ServerNameFromUTF8(
           "mojo.test." + base::NumberToString(base::RandUint64()));
 #elif defined(OS_POSIX)
@@ -132,7 +132,7 @@ ScopedMessagePipeHandle MultiprocessTestHelper::StartChildWithExtraSwitch(
           temp_dir.AppendASCII(base::NumberToString(base::RandUint64()))
               .value();
 #elif defined(OS_WIN)
-      server_name = base::NumberToString16(base::RandUint64());
+      server_name = base::NumberToWString(base::RandUint64());
 #else
 #error "Platform not yet supported."
 #endif

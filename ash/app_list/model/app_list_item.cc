@@ -9,9 +9,7 @@
 namespace ash {
 
 AppListItem::AppListItem(const std::string& id)
-    : metadata_(std::make_unique<AppListItemMetadata>()),
-      is_installing_(false),
-      percent_downloaded_(-1) {
+    : metadata_(std::make_unique<AppListItemMetadata>()) {
   metadata_->id = id;
 }
 
@@ -45,22 +43,14 @@ const gfx::ImageSkia& AppListItem::GetIcon(
   return metadata_->icon;
 }
 
-void AppListItem::SetIsInstalling(bool is_installing) {
-  if (is_installing_ == is_installing)
+void AppListItem::SetNotificationBadgeColor(const SkColor color) {
+  if (notification_badge_color_ == color)
     return;
 
-  is_installing_ = is_installing;
-  for (auto& observer : observers_)
-    observer.ItemIsInstallingChanged();
-}
-
-void AppListItem::SetPercentDownloaded(int percent_downloaded) {
-  if (percent_downloaded_ == percent_downloaded)
-    return;
-
-  percent_downloaded_ = percent_downloaded;
-  for (auto& observer : observers_)
-    observer.ItemPercentDownloadedChanged();
+  notification_badge_color_ = color;
+  for (auto& observer : observers_) {
+    observer.ItemBadgeColorChanged();
+  }
 }
 
 void AppListItem::AddObserver(AppListItemObserver* observer) {
@@ -108,6 +98,16 @@ void AppListItem::SetNameAndShortName(const std::string& name,
   short_name_ = short_name;
   for (auto& observer : observers_)
     observer.ItemNameChanged();
+}
+
+void AppListItem::UpdateNotificationBadge(bool has_badge) {
+  if (has_notification_badge_ == has_badge)
+    return;
+
+  has_notification_badge_ = has_badge;
+  for (auto& observer : observers_) {
+    observer.ItemBadgeVisibilityChanged();
+  }
 }
 
 }  // namespace ash

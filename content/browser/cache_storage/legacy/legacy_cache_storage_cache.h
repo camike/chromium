@@ -17,6 +17,8 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
+#include "components/services/storage/public/mojom/cache_storage_control.mojom.h"
+#include "content/browser/cache_storage/blob_storage_context_wrapper.h"
 #include "content/browser/cache_storage/cache_storage_cache.h"
 #include "content/browser/cache_storage/cache_storage_handle.h"
 #include "content/browser/cache_storage/cache_storage_manager.h"
@@ -41,7 +43,6 @@ class CacheStorageBlobToDiskCache;
 class CacheStorageCacheEntryHandler;
 class CacheStorageCacheObserver;
 class CacheStorageScheduler;
-enum class CacheStorageOwner;
 class LegacyCacheStorage;
 struct PutContext;
 
@@ -64,7 +65,7 @@ class CONTENT_EXPORT LegacyCacheStorageCache : public CacheStorageCache {
 
   static std::unique_ptr<LegacyCacheStorageCache> CreateMemoryCache(
       const url::Origin& origin,
-      CacheStorageOwner owner,
+      storage::mojom::CacheStorageOwner owner,
       const std::string& cache_name,
       LegacyCacheStorage* cache_storage,
       scoped_refptr<base::SequencedTaskRunner> scheduler_task_runner,
@@ -73,7 +74,7 @@ class CONTENT_EXPORT LegacyCacheStorageCache : public CacheStorageCache {
       std::unique_ptr<crypto::SymmetricKey> cache_padding_key);
   static std::unique_ptr<LegacyCacheStorageCache> CreatePersistentCache(
       const url::Origin& origin,
-      CacheStorageOwner owner,
+      storage::mojom::CacheStorageOwner owner,
       const std::string& cache_name,
       LegacyCacheStorage* cache_storage,
       const base::FilePath& path,
@@ -147,11 +148,15 @@ class CONTENT_EXPORT LegacyCacheStorageCache : public CacheStorageCache {
   // will exit early. Close should only be called once per CacheStorageCache.
   void Close(base::OnceClosure callback);
 
-  // The size of the cache's contents.
+  // The size of the cache's contents.  The callback reports the padded
+  // size.  If you want the unpadded size you may call the cache_size()
+  // getter method on the cache object when the callback is invoked; the
+  // getter will have an up-to-date value at that point.
   void Size(SizeCallback callback);
 
   // Gets the cache's size, closes the backend, and then runs |callback| with
-  // the cache's size.
+  // the cache's size.  As per the comment for Size(), this also returns the
+  // padded size.
   void GetSizeThenClose(SizeCallback callback);
 
   void Put(blink::mojom::FetchAPIRequestPtr request,
@@ -244,7 +249,7 @@ class CONTENT_EXPORT LegacyCacheStorageCache : public CacheStorageCache {
 
   LegacyCacheStorageCache(
       const url::Origin& origin,
-      CacheStorageOwner owner,
+      storage::mojom::CacheStorageOwner owner,
       const std::string& cache_name,
       const base::FilePath& path,
       LegacyCacheStorage* cache_storage,
@@ -305,6 +310,13 @@ class CONTENT_EXPORT LegacyCacheStorageCache : public CacheStorageCache {
       int64_t trace_id,
       blink::mojom::CacheStorageError error,
       std::unique_ptr<QueryCacheResults> query_cache_results);
+
+  // Utility method to write metadata headers to an entry.
+  using WriteMetadataCallback =
+      base::OnceCallback<void(int exepected_bytes, int rv)>;
+  void WriteMetadata(disk_cache::Entry* entry,
+                     const proto::CacheMetadata& metadata,
+                     WriteMetadataCallback callback);
 
   // WriteSideData callbacks
   void WriteSideDataDidGetQuota(ErrorCallback callback,
@@ -509,7 +521,7 @@ class CONTENT_EXPORT LegacyCacheStorageCache : public CacheStorageCache {
   std::unique_ptr<disk_cache::Backend> backend_;
 
   url::Origin origin_;
-  CacheStorageOwner owner_;
+  storage::mojom::CacheStorageOwner owner_;
   const std::string cache_name_;
   base::FilePath path_;
 

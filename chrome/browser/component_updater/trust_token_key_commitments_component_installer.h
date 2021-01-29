@@ -46,6 +46,8 @@ class TrustTokenKeyCommitmentsComponentInstallerPolicy
  private:
   FRIEND_TEST_ALL_PREFIXES(TrustTokenKeyCommitmentsComponentInstallerTest,
                            LoadsCommitments);
+  FRIEND_TEST_ALL_PREFIXES(TrustTokenKeyCommitmentsComponentInstallerTest,
+                           LoadsCommitmentsFromOverriddenPath);
 
   // The following methods override ComponentInstallerPolicy.
   bool SupportsGroupPolicyEnabledComponentUpdates() const override;
@@ -63,7 +65,6 @@ class TrustTokenKeyCommitmentsComponentInstallerPolicy
   void GetHash(std::vector<uint8_t>* hash) const override;
   std::string GetName() const override;
   update_client::InstallerAttributes GetInstallerAttributes() const override;
-  std::vector<std::string> GetMimeTypes() const override;
 
   static base::FilePath GetInstalledPath(const base::FilePath& base);
 
@@ -73,8 +74,7 @@ class TrustTokenKeyCommitmentsComponentInstallerPolicy
 // Call once during startup to make the component update service aware of
 // the component.
 void RegisterTrustTokenKeyCommitmentsComponentIfTrustTokensEnabled(
-    ComponentUpdateService* cus,
-    const base::FilePath& user_data_dir);
+    ComponentUpdateService* cus);
 
 }  // namespace component_updater
 

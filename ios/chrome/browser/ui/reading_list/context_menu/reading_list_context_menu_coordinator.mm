@@ -4,6 +4,7 @@
 
 #import "ios/chrome/browser/ui/reading_list/context_menu/reading_list_context_menu_coordinator.h"
 
+#import "base/ios/ios_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
@@ -91,6 +92,19 @@ enum UMAContextMenuAction {
                   }
                    style:UIAlertActionStyleDefault];
 
+  if (base::ios::IsMultipleScenesSupported()) {
+    // Add "Open In New Window" option.
+    NSString* openInNewWindowTitle =
+        l10n_util::GetNSString(IDS_IOS_CONTENT_CONTEXT_OPENINNEWWINDOW);
+    [self
+        addItemWithTitle:openInNewWindowTitle
+                  action:^{
+                    [weakDelegate
+                        openURLInNewWindowForContextMenuWithParams:weakParams];
+                  }
+                   style:UIAlertActionStyleDefault];
+  }
+
   // Add "Open In New Incognito Tab" option;
   NSString* openInNewTabIncognitoTitle =
       l10n_util::GetNSString(IDS_IOS_CONTENT_CONTEXT_OPENLINKNEWINCOGNITOTAB);
@@ -133,8 +147,6 @@ enum UMAContextMenuAction {
   // Add "Cancel" option.
   [self addItemWithTitle:l10n_util::GetNSString(IDS_APP_CANCEL)
                   action:^{
-                    [weakDelegate
-                        cancelReadingListContextMenuWithParams:weakParams];
                     UMA_HISTOGRAM_ENUMERATION("ReadingList.ContextMenu", CANCEL,
                                               ENUM_MAX);
                   }

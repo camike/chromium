@@ -7,6 +7,7 @@
 #include "base/mac/foundation_util.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
+#include "components/browsing_data/core/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/browsing_data/browsing_data_features.h"
@@ -30,6 +31,8 @@
 #import "ios/chrome/browser/ui/table_view/cells/table_view_text_button_item.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_text_link_item.h"
 #import "ios/chrome/browser/ui/table_view/chrome_table_view_styler.h"
+#import "ios/chrome/browser/ui/table_view/table_view_utils.h"
+#include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/common/ui/colors/UIColor+cr_semantic_colors.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
@@ -41,8 +44,9 @@
 #endif
 
 @interface ClearBrowsingDataTableViewController () <
-    TableViewTextLinkCellDelegate,
-    ClearBrowsingDataConsumer>
+    TableViewLinkHeaderFooterItemDelegate,
+    ClearBrowsingDataConsumer,
+    UIGestureRecognizerDelegate>
 
 // TODO(crbug.com/850699): remove direct dependency and replace with
 // delegate.
@@ -60,7 +64,7 @@
 // Coordinator for displaying a modal overlay with native activity indicator to
 // prevent the user from interacting with the page.
 @property(nonatomic, strong)
-    ChromeActivityOverlayCoordinator* chromeActivityOverlayCoordinator;
+    ChromeActivityOverlayCoordinator* overlayCoordinator;
 
 @property(nonatomic, readonly, strong)
     UIBarButtonItem* clearBrowsingDataBarButton;
@@ -89,7 +93,10 @@
 #pragma mark - ViewController Lifecycle.
 
 - (instancetype)initWithBrowser:(Browser*)browser {
-  self = [super initWithStyle:UITableViewStylePlain];
+  UITableViewStyle style = base::FeatureList::IsEnabled(kSettingsRefresh)
+                               ? ChromeTableViewStyle()
+                               : UITableViewStylePlain;
+  self = [super initWithStyle:style];
   if (self) {
     _browser = browser;
     _browserState = browser->GetBrowserState();
@@ -130,16 +137,20 @@
   ]
                animated:YES];
 
-  self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-  self.styler.cellBackgroundColor = UIColor.cr_systemBackgroundColor;
-  self.styler.tableViewBackgroundColor = UIColor.cr_systemBackgroundColor;
-  self.tableView.accessibilityIdentifier =
-      kClearBrowsingDataViewAccessibilityIdentifier;
-  self.tableView.backgroundColor = self.styler.tableViewBackgroundColor;
-  // TableView configuration
-  self.tableView.estimatedRowHeight = 56;
-  self.tableView.rowHeight = UITableViewAutomaticDimension;
-  self.tableView.estimatedSectionHeaderHeight = 0;
+  if (!base::FeatureList::IsEnabled(kSettingsRefresh)) {
+    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
+    self.tableView.accessibilityIdentifier =
+        kClearBrowsingDataViewAccessibilityIdentifier;
+    self.styler.tableViewBackgroundColor =
+        [UIColor colorNamed:kPrimaryBackgroundColor];
+    self.tableView.backgroundColor = self.styler.tableViewBackgroundColor;
+
+    // TableView configuration
+    self.tableView.estimatedRowHeight = 56;
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedSectionHeaderHeight = 0;
+  }
+
   // Navigation controller configuration.
   self.title = l10n_util::GetNSString(IDS_IOS_CLEAR_BROWSING_DATA_TITLE);
   // Adds the "Done" button and hooks it up to |dismiss|.
@@ -168,18 +179,6 @@
   self.navigationController.toolbarHidden = NO;
 }
 
-- (void)viewWillDisappear:(BOOL)animated {
-  [super viewWillDisappear:animated];
-  // Write data type cell selection states back to the browser state.
-  NSArray* dataTypeItems = [self.tableViewModel
-      itemsInSectionWithIdentifier:SectionIdentifierDataTypes];
-  for (TableViewClearBrowsingDataItem* dataTypeItem in dataTypeItems) {
-    DCHECK([dataTypeItem isKindOfClass:[TableViewClearBrowsingDataItem class]]);
-    self.browserState->GetPrefs()->SetBoolean(dataTypeItem.prefName,
-                                              dataTypeItem.checked);
-  }
-}
-
 - (void)loadModel {
   [super loadModel];
   [self.dataManager loadModel:self.tableViewModel];
@@ -202,6 +201,24 @@
     [self.alertCoordinator stop];
     self.alertCoordinator = nil;
   }
+  if (self.overlayCoordinator.started) {
+    [self.overlayCoordinator stop];
+    self.navigationController.interactivePopGestureRecognizer.delegate = nil;
+    self.overlayCoordinator = nil;
+  }
+}
+
+#pragma mark - UIGestureRecognizerDelegate
+
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer*)gestureRecognizer {
+  if (gestureRecognizer ==
+      self.navigationController.interactivePopGestureRecognizer) {
+    // This view controller should only be observing gestures when the activity
+    // overlay is showing (e.g. when Clear Browsing Data is in progress and the
+    // user should not be able to swipe away from this view).
+    return NO;
+  }
+  return YES;
 }
 
 #pragma mark - UITableViewDataSource
@@ -212,18 +229,6 @@
                              cellForRowAtIndexPath:indexPath];
   TableViewItem* item = [self.tableViewModel itemAtIndexPath:indexPath];
   switch (item.type) {
-    case ItemTypeFooterSavedSiteData:
-    case ItemTypeFooterClearSyncAndSavedSiteData:
-    case ItemTypeFooterGoogleAccountAndMyActivity: {
-      TableViewTextLinkCell* tableViewTextLinkCell =
-          base::mac::ObjCCastStrict<TableViewTextLinkCell>(cellToReturn);
-      [tableViewTextLinkCell setDelegate:self];
-      tableViewTextLinkCell.selectionStyle = UITableViewCellSelectionStyleNone;
-      // Hide the cell separator inset for footnotes.
-      tableViewTextLinkCell.separatorInset =
-          UIEdgeInsetsMake(0, tableViewTextLinkCell.bounds.size.width, 0, 0);
-      break;
-    }
     case ItemTypeDataTypeBrowsingHistory:
     case ItemTypeDataTypeCookiesSiteData:
     case ItemTypeDataTypeCache:
@@ -241,13 +246,30 @@
 
 #pragma mark - UITableViewDelegate
 
+- (UIView*)tableView:(UITableView*)tableView
+    viewForFooterInSection:(NSInteger)section {
+  UIView* view = [super tableView:tableView viewForFooterInSection:section];
+  NSInteger sectionIdentifier =
+      [self.tableViewModel sectionIdentifierForSection:section];
+  switch (sectionIdentifier) {
+    case SectionIdentifierSavedSiteData:
+    case SectionIdentifierGoogleAccount: {
+      TableViewLinkHeaderFooterView* linkView =
+          base::mac::ObjCCastStrict<TableViewLinkHeaderFooterView>(view);
+      linkView.delegate = self;
+    } break;
+    default:
+      break;
+  }
+  return view;
+}
+
 - (CGFloat)tableView:(UITableView*)tableView
     heightForHeaderInSection:(NSInteger)section {
   NSInteger sectionIdentifier =
       [self.tableViewModel sectionIdentifierForSection:section];
   switch (sectionIdentifier) {
     case SectionIdentifierGoogleAccount:
-    case SectionIdentifierClearSyncAndSavedSiteData:
     case SectionIdentifierSavedSiteData:
       return 5;
     default:
@@ -276,9 +298,10 @@
       DCHECK([item isKindOfClass:[TableViewClearBrowsingDataItem class]]);
       TableViewClearBrowsingDataItem* clearBrowsingDataItem =
           base::mac::ObjCCastStrict<TableViewClearBrowsingDataItem>(item);
-      clearBrowsingDataItem.checked = !clearBrowsingDataItem.checked;
-      [self reconfigureCellsForItems:@[ clearBrowsingDataItem ]];
-      [self.tableView deselectRowAtIndexPath:indexPath animated:YES];
+
+      self.browserState->GetPrefs()->SetBoolean(clearBrowsingDataItem.prefName,
+                                                !clearBrowsingDataItem.checked);
+      // UI update will be trigerred by data manager.
       break;
     }
     default:
@@ -287,25 +310,32 @@
   [self updateToolbarButtons];
 }
 
-#pragma mark - TableViewTextLinkCellDelegate
+#pragma mark - TableViewLinkHeaderFooterItemDelegate
 
-- (void)tableViewTextLinkCell:(TableViewTextLinkCell*)cell
-            didRequestOpenURL:(const GURL&)URL {
+- (void)TableViewLinkHeaderFooterView:(TableViewLinkHeaderFooterView*)cell
+                    didRequestOpenURL:(const GURL&)URL {
   GURL copiedURL(URL);
   [self.delegate openURL:copiedURL];
 }
 
 #pragma mark - ClearBrowsingDataConsumer
 
-- (void)updateCellsForItem:(ListItem*)item {
+- (void)updateCellsForItem:(TableViewItem*)item reload:(BOOL)reload {
   if (self.suppressTableViewUpdates)
     return;
 
-  // Reload the item instead of reconfiguring it. This might update
-  // TableViewTextLinkItems which which can have different number of lines,
-  // thus the cell height needs to adapt accordingly.
-  [self reloadCellsForItems:@[ item ]
-           withRowAnimation:UITableViewRowAnimationAutomatic];
+  if (!reload) {
+    [self reconfigureCellsForItems:@[ item ]];
+    NSIndexPath* indexPath = [self.tableViewModel
+        indexPathForItem:static_cast<TableViewItem*>(item)];
+    [self.tableView deselectRowAtIndexPath:indexPath animated:YES];
+  } else {
+    // Reload the item instead of reconfiguring it. This might update
+    // TableViewLinkHeaderFooterView which which can have different number of
+    // lines, thus the cell height needs to adapt accordingly.
+    [self reloadCellsForItems:@[ item ]
+             withRowAnimation:UITableViewRowAnimationAutomatic];
+  }
 }
 
 - (void)removeBrowsingDataForBrowserState:(ChromeBrowserState*)browserState
@@ -316,14 +346,19 @@
       base::UserMetricsAction("MobileClearBrowsingDataTriggeredFromUIRefresh"));
 
   // Show activity indicator modal while removal is happening.
-  self.chromeActivityOverlayCoordinator =
-      [[ChromeActivityOverlayCoordinator alloc]
-          initWithBaseViewController:self.navigationController
-                             browser:_browser];
-  self.chromeActivityOverlayCoordinator.messageText =
-      l10n_util::GetNSStringWithFixup(
-          IDS_IOS_CLEAR_BROWSING_DATA_ACTIVITY_MODAL);
-  [self.chromeActivityOverlayCoordinator start];
+  self.overlayCoordinator = [[ChromeActivityOverlayCoordinator alloc]
+      initWithBaseViewController:self.navigationController
+                         browser:_browser];
+
+  self.overlayCoordinator.messageText = l10n_util::GetNSStringWithFixup(
+      IDS_IOS_CLEAR_BROWSING_DATA_ACTIVITY_MODAL);
+
+  self.overlayCoordinator.blockAllWindows = YES;
+
+  // Observe Gestures while overlay is visible to prevent user from swiping away
+  // from this view during the process of clear browsing data.
+  self.navigationController.interactivePopGestureRecognizer.delegate = self;
+  [self.overlayCoordinator start];
 
   __weak ClearBrowsingDataTableViewController* weakSelf = self;
   dispatch_time_t timeOneSecondLater =
@@ -337,11 +372,22 @@
     // (<1sec), so ensure that overlay displays for at
     // least 1 second instead of looking like a glitch.
     dispatch_after(timeOneSecondLater, dispatch_get_main_queue(), ^{
-      [self.chromeActivityOverlayCoordinator stop];
+      [self.overlayCoordinator stop];
+      self.navigationController.interactivePopGestureRecognizer.delegate = nil;
       if (completionBlock)
         completionBlock();
     });
   };
+
+  // If browsing History will be cleared set the kLastClearBrowsingDataTime.
+  // TODO(crbug.com/1085419): This pref is used by the Feed to prevent the
+  // showing of customized content after history has been cleared. We might want
+  // to create a specific Pref for this.
+  if (IsRemoveDataMaskSet(removeMask, BrowsingDataRemoveMask::REMOVE_HISTORY)) {
+    browserState->GetPrefs()->SetInt64(
+        browsing_data::prefs::kLastClearBrowsingDataTime,
+        base::Time::Now().ToTimeT());
+  }
 
   [self.dispatcher
       removeBrowsingDataForBrowserState:browserState
@@ -393,7 +439,7 @@
 
 - (BOOL)presentationControllerShouldDismiss:
     (UIPresentationController*)presentationController {
-  return !self.chromeActivityOverlayCoordinator.started;
+  return !self.overlayCoordinator.started;
 }
 
 #pragma mark - Private Helpers

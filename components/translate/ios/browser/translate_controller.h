@@ -84,7 +84,12 @@ class TranslateController : public web::WebStateObserver {
   FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest, TranslationSuccess);
   FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest, TranslationFailure);
   FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest, OnTranslateLoadJavascript);
-  FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest, OnTranslateSendRequest);
+  FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest,
+                           OnTranslateSendRequestWithValidCommand);
+  FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest,
+                           OnTranslateSendRequestWithBadURL);
+  FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest,
+                           OnTranslateSendRequestWithBadMethod);
 
   // Called when a JavaScript command is received.
   bool OnJavascriptCommandReceived(const base::DictionaryValue& command,
@@ -122,7 +127,7 @@ class TranslateController : public web::WebStateObserver {
   std::unique_ptr<network::SimpleURLLoader> script_fetcher_;
 
   // Subscription for JS message.
-  std::unique_ptr<web::WebState::ScriptCommandSubscription> subscription_;
+  base::CallbackListSubscription subscription_;
 
   Observer* observer_;
   __strong JsTranslateManager* js_manager_;

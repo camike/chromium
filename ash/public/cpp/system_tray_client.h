@@ -54,6 +54,9 @@ class ASH_PUBLIC_EXPORT SystemTrayClient {
   // Shows settings related to MultiDevice features.
   virtual void ShowConnectedDevicesSettings() = 0;
 
+  // Shows settings related to tether network.
+  virtual void ShowTetherNetworkSettings() = 0;
+
   // Shows the about chrome OS page and checks for updates after the page is
   // loaded.
   virtual void ShowAboutChromeOS() = 0;
@@ -89,6 +92,9 @@ class ASH_PUBLIC_EXPORT SystemTrayClient {
   // Shows UI to create a new network connection. |type| is the ONC network type
   // (see onc_spec.md). TODO(stevenjb): Use NetworkType from onc.mojo (TBD).
   virtual void ShowNetworkCreate(const std::string& type) = 0;
+
+  // Opens the physical SIM cellular setup flow in OS Settings.
+  virtual void ShowSettingsCellularSetupPsimFlow() = 0;
 
   // Shows the "add network" UI to create a third-party extension-backed VPN
   // connection (e.g. Cisco AnyConnect).

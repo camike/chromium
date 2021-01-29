@@ -10,17 +10,18 @@
 #include "base/macros.h"
 #include "base/one_shot_event.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/unloaded_extension_reason.h"
 
 class Profile;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 namespace chromeos {
 class DeviceLocalAccountManagementPolicyProvider;
 class SigninScreenPolicyProvider;
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace extensions {
 
@@ -54,7 +55,8 @@ class ExtensionSystemImpl : public ExtensionSystem {
   RuntimeData* runtime_data() override;            // shared
   ManagementPolicy* management_policy() override;  // shared
   ServiceWorkerManager* service_worker_manager() override;  // shared
-  SharedUserScriptMaster* shared_user_script_master() override;  // shared
+  ExtensionUserScriptManager* extension_user_script_manager()
+      override;                                                    // shared
   StateStore* state_store() override;                              // shared
   StateStore* rules_store() override;                              // shared
   scoped_refptr<ValueStoreFactory> store_factory() override;       // shared
@@ -71,6 +73,7 @@ class ExtensionSystemImpl : public ExtensionSystem {
       const UnloadedExtensionReason reason) override;
 
   const base::OneShotEvent& ready() const override;
+  bool is_ready() const override;
   ContentVerifier* content_verifier() override;  // shared
   std::unique_ptr<ExtensionSet> GetDependentExtensions(
       const Extension* extension) override;
@@ -112,11 +115,12 @@ class ExtensionSystemImpl : public ExtensionSystem {
     RuntimeData* runtime_data();
     ManagementPolicy* management_policy();
     ServiceWorkerManager* service_worker_manager();
-    SharedUserScriptMaster* shared_user_script_master();
+    ExtensionUserScriptManager* extension_user_script_manager();
     InfoMap* info_map();
     QuotaService* quota_service();
     AppSorting* app_sorting();
     const base::OneShotEvent& ready() const { return ready_; }
+    bool is_ready() const { return ready_.is_signaled(); }
     ContentVerifier* content_verifier();
 
    private:
@@ -133,9 +137,9 @@ class ExtensionSystemImpl : public ExtensionSystem {
     std::unique_ptr<ServiceWorkerManager> service_worker_manager_;
     // Shared memory region manager for scripts statically declared in extension
     // manifests. This region is shared between all extensions.
-    std::unique_ptr<SharedUserScriptMaster> shared_user_script_master_;
+    std::unique_ptr<ExtensionUserScriptManager> extension_user_script_manager_;
     std::unique_ptr<RuntimeData> runtime_data_;
-    // ExtensionService depends on StateStore, Blacklist and RuntimeData.
+    // ExtensionService depends on StateStore, Blocklist and RuntimeData.
     std::unique_ptr<ExtensionService> extension_service_;
     std::unique_ptr<ManagementPolicy> management_policy_;
     // extension_info_map_ needs to outlive process_manager_.
@@ -149,7 +153,7 @@ class ExtensionSystemImpl : public ExtensionSystem {
 
     std::unique_ptr<UninstallPingSender> uninstall_ping_sender_;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     std::unique_ptr<chromeos::DeviceLocalAccountManagementPolicyProvider>
         device_local_account_management_policy_provider_;
     std::unique_ptr<chromeos::SigninScreenPolicyProvider>

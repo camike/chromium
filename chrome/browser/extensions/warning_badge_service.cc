@@ -8,8 +8,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
-#include "base/stl_util.h"
+#include "base/containers/contains.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/warning_badge_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -30,6 +29,8 @@ namespace {
 class ErrorBadge : public GlobalError {
  public:
   explicit ErrorBadge(WarningBadgeService* badge_service);
+  ErrorBadge(const ErrorBadge&) = delete;
+  ErrorBadge& operator=(const ErrorBadge&) = delete;
   ~ErrorBadge() override;
 
   // Implementation for GlobalError:
@@ -47,8 +48,6 @@ class ErrorBadge : public GlobalError {
 
  private:
   WarningBadgeService* badge_service_;
-
-  DISALLOW_COPY_AND_ASSIGN(ErrorBadge);
 };
 
 ErrorBadge::ErrorBadge(WarningBadgeService* badge_service)

@@ -15,6 +15,8 @@ namespace content {
 class WebContents;
 }
 
+namespace weblayer {
+
 // WebLayer's implementation of PageInfoClient.
 class PageInfoClientImpl : public page_info::PageInfoClient {
  public:
@@ -23,9 +25,12 @@ class PageInfoClientImpl : public page_info::PageInfoClient {
   PageInfoClientImpl() = default;
   ~PageInfoClientImpl() = default;
 
+  // PageInfoClient implementation.
   std::unique_ptr<PageInfoDelegate> CreatePageInfoDelegate(
       content::WebContents* web_contents) override;
   int GetJavaResourceId(int native_resource_id) override;
 };
+
+}  // namespace weblayer
 
 #endif  // WEBLAYER_BROWSER_URL_BAR_PAGE_INFO_CLIENT_IMPL_H_

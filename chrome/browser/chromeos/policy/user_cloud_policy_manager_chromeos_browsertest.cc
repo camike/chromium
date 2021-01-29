@@ -10,17 +10,16 @@
 #include "base/stl_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/values.h"
+#include "chrome/browser/chromeos/login/test/logged_in_user_mixin.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/supervised_user/logged_in_user_mixin.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/test/base/mixin_based_in_process_browser_test.h"
-#include "chromeos/constants/chromeos_switches.h"
 #include "components/arc/arc_features.h"
 #include "components/arc/arc_prefs.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
@@ -30,6 +29,7 @@
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
+#include "content/public/test/browser_test.h"
 
 namespace policy {
 
@@ -58,16 +58,12 @@ class UserCloudPolicyManagerTest
     MixinBasedInProcessBrowserTest::TearDown();
   }
 
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(chromeos::switches::kOobeSkipPostLogin);
-    MixinBasedInProcessBrowserTest::SetUpCommandLine(command_line);
-  }
-
   // Sets up fake GAIA for specified user login, and requests login for the user
   // (using LoggedInUserMixin).
   void StartUserLogIn(bool wait_for_active_session) {
-    logged_in_user_mixin_.LogInUser(false /*issue_any_scope_token*/,
-                                    wait_for_active_session);
+    logged_in_user_mixin_.LogInUser(true /*issue_any_scope_token*/,
+                                    wait_for_active_session,
+                                    /*request_policy_update=*/false);
   }
 
  protected:
@@ -210,10 +206,7 @@ IN_PROC_BROWSER_TEST_P(UserCloudPolicyManagerTest,
 
 using UserCloudPolicyManagerChildTest = UserCloudPolicyManagerTest;
 
-// TODO(crbug/1052604): Fix the flaky test failures related to invalid
-// FakeGaiaMixin OAuth tokens.
-IN_PROC_BROWSER_TEST_P(UserCloudPolicyManagerChildTest,
-                       DISABLED_PolicyForChildUser) {
+IN_PROC_BROWSER_TEST_P(UserCloudPolicyManagerChildTest, PolicyForChildUser) {
   policy::BrowserPolicyConnector::SetNonEnterpriseDomainForTesting(
       "example.com");
   EXPECT_TRUE(policy::BrowserPolicyConnector::IsNonEnterpriseUser(

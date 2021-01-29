@@ -17,6 +17,7 @@ namespace feedwire {
 class Request;
 }  // namespace feedwire
 namespace feedstore {
+class Content;
 class StreamData;
 }  // namespace feedstore
 
@@ -24,12 +25,12 @@ class StreamData;
 
 namespace feed {
 using ContentId = feedwire::ContentId;
-struct ChromeInfo;
 
 std::string ContentIdString(const feedwire::ContentId&);
 bool Equal(const feedwire::ContentId& a, const feedwire::ContentId& b);
 bool CompareContentId(const feedwire::ContentId& a,
                       const feedwire::ContentId& b);
+bool CompareContent(const feedstore::Content& a, const feedstore::Content& b);
 
 class ContentIdCompareFunctor {
  public:
@@ -39,15 +40,23 @@ class ContentIdCompareFunctor {
   }
 };
 
-feedwire::ClientInfo CreateClientInfo(const ChromeInfo& chrome_info);
+class ContentCompareFunctor {
+ public:
+  bool operator()(const feedstore::Content& a,
+                  const feedstore::Content& b) const {
+    return CompareContent(a, b);
+  }
+};
+
+feedwire::ClientInfo CreateClientInfo(const RequestMetadata& request_metadata);
 
 feedwire::Request CreateFeedQueryRefreshRequest(
     feedwire::FeedQuery::RequestReason request_reason,
-    const ChromeInfo& chrome_info,
+    const RequestMetadata& request_metadata,
     const std::string& consistency_token);
 
 feedwire::Request CreateFeedQueryLoadMoreRequest(
-    const ChromeInfo& chrome_info,
+    const RequestMetadata& request_metadata,
     const std::string& consistency_token,
     const std::string& next_page_token);
 
@@ -55,7 +64,7 @@ feedwire::Request CreateFeedQueryLoadMoreRequest(
 
 namespace feedstore {
 
-void SetLastAddedTime(base::Time t, feedstore::StreamData* data);
+void SetLastAddedTime(base::Time t, feedstore::StreamData& data);
 base::Time GetLastAddedTime(const feedstore::StreamData& data);
 
 }  // namespace feedstore

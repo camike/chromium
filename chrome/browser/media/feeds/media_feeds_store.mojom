@@ -10,6 +10,7 @@ import "mojo/public/mojom/base/time.mojom";
 import "url/mojom/origin.mojom";
 import "ui/gfx/geometry/mojom/geometry.mojom";
 import "url/mojom/url.mojom";
+import "mojo/public/mojom/base/unguessable_token.mojom";
 
 struct MediaFeed {
   // The ID of the field in storage.
@@ -67,10 +68,40 @@ struct MediaFeed {
   // have been deleted and the feed status has been reset to default.
   ResetReason reset_reason;
 
-  // An associated origin is an origin associated with the feed. If the cookies
-  // are deleted or expire on the origin then we will delete the feed items.
-  // https://wicg.github.io/media-feeds/#dfn-associated-origin
-  array<url.mojom.Origin> associated_origins;
+  // Token used to invalidate ongoing fetches for the feed. If there is a token
+  // mismatch when feed fetch data returns (the reset token when the fetch began
+  // does not match the feed's current reset token), the data is stale and
+  // shouldn't be stored because the feed has been reset.
+  mojo_base.mojom.UnguessableToken? reset_token;
+
+  // Contains details about the user signed into the website.
+  UserIdentifier? user_identifier;
+
+  // If set then changes to the cookie name provided on the feed origin or any
+  // associated origin will trigger the feed to be reset.
+  string cookie_name_filter;
+
+  // The result of safe search checking this media feed.
+  SafeSearchResult safe_search_result;
+
+  // The aggregate watchtime for the media feed.
+  mojo_base.mojom.TimeDelta? aggregate_watchtime;
+
+  // The favicon of the page that hosts the Media Feed.
+  url.mojom.Url? favicon;
+};
+
+// Contains details about the user signed into the website.
+// https://wicg.github.io/media-feeds/#dfn-currently-logged-in-user
+struct UserIdentifier {
+  // The name of the user’s account.
+  string name;
+
+  // The email address of the users’ account.
+  string? email;
+
+  // The image of the user’s account.
+  MediaImage? image;
 };
 
 // The result of fetching the feed. This enum is committed to storage so do not
@@ -87,6 +118,12 @@ enum FetchResult {
 
   // The feed failed to fetch because of a network error.
   kFailedNetworkError = 3,
+
+  // The feed failed to fetch because the feed data was invalid.
+  kInvalidFeed = 4,
+
+  // The feed was reset while the feed was being fetched.
+  kFailedDueToResetWhileInflight = 5,
 };
 
 // The reason why a feed has been reset. This enum is committed to storage so
@@ -114,6 +151,9 @@ enum FeedUserStatus {
 
   // The user has opted out of seeing the feed.
   kDisabled = 1,
+
+  // The user has opted into seeing the feed.
+  kEnabled = 2,
 };
 
 // The type of the feed item. This enum is committed to storage so do not
@@ -268,6 +308,9 @@ enum SafeSearchResult {
 // Content attributes describe the image's type and defines its suggested
 // usages.
 enum ContentAttribute {
+  // An unknown or unexpected content attribute.
+  kUnknown,
+
   // The image is an artistic render of the show. Usually a poster or banner.
   kIconic,
 
@@ -320,10 +363,22 @@ struct MediaImage {
   array<ContentAttribute> content_attributes;
 };
 
+// Whether the feed item can be considered "family friendly". If this is not
+// specified then this will be |kUnknown|. This enum is committed to storage
+// so do not change the numbering.
+enum IsFamilyFriendly {
+  kUnknown = 0,
+  kYes = 1,
+  kNo = 2,
+};
+
 // The Media Feed Item is an individual item stored in a Media Feed. It
 // represents a single recommendation such as a video or TV show.
 // https://wicg.github.io/media-feeds/index.html#media-feed-item
 struct MediaFeedItem {
+  // The ID of the feed item in storage.
+  int64 id;
+
   // The type of this feed item such as a video or TV show.
   MediaFeedItemType type;
 
@@ -337,7 +392,7 @@ struct MediaFeedItem {
   mojo_base.mojom.Time date_published;
 
   // Whether the media item is considered "family friendly".
-  bool is_family_friendly;
+  IsFamilyFriendly is_family_friendly;
 
   // The action status for this feed item.
   MediaFeedItemActionStatus action_status;
@@ -382,9 +437,33 @@ struct MediaFeedItem {
   SafeSearchResult safe_search_result;
 };
 
+// Information for debugging Media Feeds for the internal WebUI.
+struct DebugInformation {
+  // Whether the MediaFeedsSafeSearch feature is enabled.
+  bool safe_search_feature_enabled;
+
+  // The value of the Media Feeds Safe Search checking consent pref.
+  bool safe_search_pref_value;
+
+  // Whether the MediaFeedsBackgroundFetching feature is enabled.
+  bool background_fetching_feature_enabled;
+
+  // The value of the Media Feeds background fetching pref.
+  bool background_fetching_pref_value;
+};
+
 // MediaFeedStore allows the Media Feeds WebUI to access data from the Media
 // Feeds backend in the browser process for diagnostic purposes.
 interface MediaFeedsStore {
+  // Gets debugging information for media feeds.
+  GetDebugInformation() => (DebugInformation info);
+
+  // Updates the Safe Search checking enabled pref to |value|.
+  SetSafeSearchEnabledPref(bool value) => ();
+
+  // Updates the background fetching enabled pref to |value|.
+  SetBackgroundFetchingPref(bool value) => ();
+
   // Gets all the discovered media feeds.
   GetMediaFeeds() => (array<MediaFeed> feeds);
 
@@ -392,8 +471,8 @@ interface MediaFeedsStore {
   GetItemsForMediaFeed(int64 feed_id) => (array<MediaFeedItem> items);
 
   // Fetch the details of a previously-discovered media feed and store them in
-  // media history. The feed ID and URL both come from the media history store.
-  // The feed ID is the unique ID for the feed and the URL is the location where
-  // the feed was discovered.
-  FetchMediaFeed(int64 feed_id, url.mojom.Url url) => ();
+  // media history. The feed ID is the unique ID for the feed from the Media
+  // History store. The logs contain information about any problems fetching or
+  // parsing the feed.
+  FetchMediaFeed(int64 feed_id) => (string logs);
 };

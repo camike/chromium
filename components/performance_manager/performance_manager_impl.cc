@@ -35,10 +35,14 @@ namespace {
 PerformanceManagerImpl* g_performance_manager = nullptr;
 
 // The performance manager TaskRunner. Thread-safe.
+//
+// NOTE: This task runner has to block shutdown as some of the tasks posted to
+// it should be guaranteed to run before shutdown (e.g. removing some entries
+// from the site data store).
 base::LazyThreadPoolSequencedTaskRunner g_performance_manager_task_runner =
     LAZY_THREAD_POOL_SEQUENCED_TASK_RUNNER_INITIALIZER(
         base::TaskTraits(base::TaskPriority::USER_VISIBLE,
-                         base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN,
+                         base::TaskShutdownBehavior::BLOCK_SHUTDOWN,
                          base::MayBlock()));
 
 // Indicates if a task posted to |g_performance_manager_task_runner| will have
@@ -113,14 +117,14 @@ std::unique_ptr<FrameNodeImpl> PerformanceManagerImpl::CreateFrameNode(
     FrameNodeImpl* parent_frame_node,
     int frame_tree_node_id,
     int render_frame_id,
-    const base::UnguessableToken& dev_tools_token,
+    const blink::LocalFrameToken& frame_token,
     int32_t browsing_instance_id,
     int32_t site_instance_id,
     FrameNodeCreationCallback creation_callback) {
   return CreateNodeImpl<FrameNodeImpl>(
       std::move(creation_callback), process_node, page_node, parent_frame_node,
-      frame_tree_node_id, render_frame_id, dev_tools_token,
-      browsing_instance_id, site_instance_id);
+      frame_tree_node_id, render_frame_id, frame_token, browsing_instance_id,
+      site_instance_id);
 }
 
 // static
@@ -139,9 +143,10 @@ std::unique_ptr<PageNodeImpl> PerformanceManagerImpl::CreatePageNode(
 
 // static
 std::unique_ptr<ProcessNodeImpl> PerformanceManagerImpl::CreateProcessNode(
+    content::ProcessType process_type,
     RenderProcessHostProxy proxy) {
   return CreateNodeImpl<ProcessNodeImpl>(
-      base::OnceCallback<void(ProcessNodeImpl*)>(), proxy);
+      base::OnceCallback<void(ProcessNodeImpl*)>(), process_type, proxy);
 }
 
 // static
@@ -149,10 +154,10 @@ std::unique_ptr<WorkerNodeImpl> PerformanceManagerImpl::CreateWorkerNode(
     const std::string& browser_context_id,
     WorkerNode::WorkerType worker_type,
     ProcessNodeImpl* process_node,
-    const base::UnguessableToken& dev_tools_token) {
+    const blink::WorkerToken& worker_token) {
   return CreateNodeImpl<WorkerNodeImpl>(
       base::OnceCallback<void(WorkerNodeImpl*)>(), browser_context_id,
-      worker_type, process_node, dev_tools_token);
+      worker_type, process_node, worker_token);
 }
 
 // static
@@ -210,6 +215,7 @@ PerformanceManagerImpl::GetTaskRunner() {
 }
 
 PerformanceManagerImpl* PerformanceManagerImpl::GetInstance() {
+  DCHECK(GetTaskRunner()->RunsTasksInCurrentSequence());
   return g_performance_manager;
 }
 
@@ -353,8 +359,10 @@ void PerformanceManagerImpl::SetOnDestroyedCallbackImpl(
     base::OnceClosure callback) {
   DCHECK(GetTaskRunner()->RunsTasksInCurrentSequence());
 
-  if (g_performance_manager)
+  if (g_performance_manager) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(g_performance_manager->sequence_checker_);
     g_performance_manager->on_destroyed_callback_ = std::move(callback);
+  }
 }
 
 }  // namespace performance_manager

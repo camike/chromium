@@ -10,7 +10,9 @@
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/test_file_util.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
@@ -21,7 +23,7 @@
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #endif
 
@@ -78,14 +80,15 @@ TestingProfile* TestingProfileManager::CreateTestingProfile(
     int avatar_id,
     const std::string& supervised_user_id,
     TestingProfile::TestingFactories testing_factories,
-    base::Optional<bool> override_new_profile,
+    base::Optional<bool> is_new_profile,
     base::Optional<std::unique_ptr<policy::PolicyService>> policy_service) {
   DCHECK(called_set_up_);
 
   // Create a path for the profile based on the name.
   base::FilePath profile_path(profiles_path_);
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (profile_name != chrome::kInitialProfile &&
+      profile_name != chrome::kLockScreenProfile &&
       profile_name != chromeos::ProfileHelper::GetLockScreenAppProfileName()) {
     profile_path =
         profile_path.Append(chromeos::ProfileHelper::Get()->GetUserProfileDir(
@@ -104,8 +107,7 @@ TestingProfile* TestingProfileManager::CreateTestingProfile(
   builder.SetPrefService(std::move(prefs));
   builder.SetSupervisedUserId(supervised_user_id);
   builder.SetProfileName(profile_name);
-  if (override_new_profile)
-    builder.OverrideIsNewProfile(*override_new_profile);
+  builder.SetIsNewProfile(is_new_profile.value_or(false));
   if (policy_service)
     builder.SetPolicyService(std::move(*policy_service));
 
@@ -124,7 +126,7 @@ TestingProfile* TestingProfileManager::CreateTestingProfile(
   DCHECK(success);
   entry->SetAvatarIconIndex(avatar_id);
   entry->SetSupervisedUserId(supervised_user_id);
-  entry->SetLocalProfileName(user_name);
+  entry->SetLocalProfileName(user_name, entry->IsUsingDefaultName());
 
   testing_profiles_.insert(std::make_pair(profile_name, profile_ptr));
 
@@ -134,10 +136,16 @@ TestingProfile* TestingProfileManager::CreateTestingProfile(
 TestingProfile* TestingProfileManager::CreateTestingProfile(
     const std::string& name) {
   DCHECK(called_set_up_);
+  return CreateTestingProfile(name, /*testing_factories=*/{});
+}
+
+TestingProfile* TestingProfileManager::CreateTestingProfile(
+    const std::string& name,
+    TestingProfile::TestingFactories testing_factories) {
+  DCHECK(called_set_up_);
   return CreateTestingProfile(
       name, std::unique_ptr<sync_preferences::PrefServiceSyncable>(),
-      base::UTF8ToUTF16(name), 0, std::string(),
-      TestingProfile::TestingFactories());
+      base::UTF8ToUTF16(name), 0, std::string(), std::move(testing_factories));
 }
 
 TestingProfile* TestingProfileManager::CreateGuestProfile() {
@@ -154,9 +162,11 @@ TestingProfile* TestingProfileManager::CreateGuestProfile() {
   profile_ptr->set_profile_name(kGuestProfileName);
 
   // Set up a profile with an off the record profile.
-  TestingProfile::Builder off_the_record_builder;
-  off_the_record_builder.SetGuestSession();
-  off_the_record_builder.BuildIncognito(profile_ptr);
+  if (!TestingProfile::IsEphemeralGuestProfileEnabled()) {
+    TestingProfile::Builder off_the_record_builder;
+    off_the_record_builder.SetGuestSession();
+    off_the_record_builder.BuildIncognito(profile_ptr);
+  }
 
   profile_manager_->AddProfile(std::move(profile));
   profile_manager_->SetNonPersonalProfilePrefs(profile_ptr);
@@ -267,8 +277,7 @@ void TestingProfileManager::SetUpInternal(const base::FilePath& profiles_path) {
 
   // Set up the directory for profiles.
   if (profiles_path.empty()) {
-    ASSERT_TRUE(profiles_dir_.CreateUniqueTempDir());
-    profiles_path_ = profiles_dir_.GetPath();
+    profiles_path_ = base::CreateUniqueTempDirectoryScopedToTest();
   } else {
     profiles_path_ = profiles_path;
   }

@@ -18,7 +18,7 @@ namespace views {
 AXWidgetObjWrapper::AXWidgetObjWrapper(AXAuraObjCache* aura_obj_cache,
                                        Widget* widget)
     : AXAuraObjWrapper(aura_obj_cache), widget_(widget) {
-  widget_observer_.Add(widget);
+  widget_observation_.Observe(widget);
   widget->AddRemovalsObserver(this);
 }
 
@@ -67,6 +67,15 @@ std::string AXWidgetObjWrapper::ToString() const {
 }
 
 void AXWidgetObjWrapper::OnWidgetDestroying(Widget* widget) {
+  aura_obj_cache_->Remove(widget);
+}
+
+void AXWidgetObjWrapper::OnWidgetDestroyed(Widget* widget) {
+  // Normally this does not run because of OnWidgetDestroying should have
+  // removed |this| from cache. However, some code could trigger a destroying
+  // widget to be created after OnWidgetDestroying. This guards against such
+  // situation and ensures the destroyed widget is removed from cache.
+  // See https://crbug.com/1091545
   aura_obj_cache_->Remove(widget);
 }
 

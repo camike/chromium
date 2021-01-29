@@ -10,8 +10,8 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/stl_util.h"
-#include "base/task/post_task.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/task_manager/sampling/shared_sampler.h"
 #include "chrome/browser/task_manager/task_manager_observer.h"
 #include "components/nacl/browser/nacl_browser.h"
@@ -33,9 +33,9 @@ const int kBackgroundRefreshTypesMask =
 #if defined(OS_WIN)
     REFRESH_TYPE_START_TIME | REFRESH_TYPE_CPU_TIME |
 #endif  // defined(OS_WIN)
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_MAC)
     REFRESH_TYPE_FD_COUNT |
-#endif  // defined(OS_LINUX) || defined(OS_MACOSX)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_MAC)
 #if BUILDFLAG(ENABLE_NACL)
     REFRESH_TYPE_NACL |
 #endif  // BUILDFLAG(ENABLE_NACL)
@@ -84,7 +84,7 @@ TaskGroup::TaskGroup(
     base::ProcessHandle proc_handle,
     base::ProcessId proc_id,
     bool is_running_in_vm,
-    const base::Closure& on_background_calculations_done,
+    const base::RepeatingClosure& on_background_calculations_done,
     const scoped_refptr<SharedSampler>& shared_sampler,
     const scoped_refptr<base::SequencedTaskRunner>& blocking_pool_runner)
     : process_handle_(proc_handle),
@@ -93,9 +93,9 @@ TaskGroup::TaskGroup(
       on_background_calculations_done_(on_background_calculations_done),
       worker_thread_sampler_(nullptr),
       shared_sampler_(shared_sampler),
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
       arc_shared_sampler_(nullptr),
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
       expected_on_bg_done_flags_(kBackgroundRefreshTypesMask),
       current_on_bg_done_flags_(0),
       platform_independent_cpu_usage_(std::numeric_limits<double>::quiet_NaN()),
@@ -114,40 +114,40 @@ TaskGroup::TaskGroup(
 #if BUILDFLAG(ENABLE_NACL)
       nacl_debug_stub_port_(nacl::kGdbDebugStubPortUnknown),
 #endif  // BUILDFLAG(ENABLE_NACL)
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_MAC)
       open_fd_count_(-1),
-#endif  // defined(OS_LINUX) || defined(OS_MACOSX)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_MAC)
       idle_wakeups_per_second_(-1),
       gpu_memory_has_duplicates_(false),
       is_backgrounded_(false) {
   if (process_id_ != base::kNullProcessId && !is_running_in_vm_) {
     worker_thread_sampler_ = base::MakeRefCounted<TaskGroupSampler>(
         base::Process::Open(process_id_), blocking_pool_runner,
-        base::Bind(&TaskGroup::OnCpuRefreshDone,
-                   weak_ptr_factory_.GetWeakPtr()),
-        base::Bind(&TaskGroup::OnSwappedMemRefreshDone,
-                   weak_ptr_factory_.GetWeakPtr()),
-        base::Bind(&TaskGroup::OnIdleWakeupsRefreshDone,
-                   weak_ptr_factory_.GetWeakPtr()),
-#if defined(OS_LINUX) || defined(OS_MACOSX)
-        base::Bind(&TaskGroup::OnOpenFdCountRefreshDone,
-                   weak_ptr_factory_.GetWeakPtr()),
-#endif  // defined(OS_LINUX) || defined(OS_MACOSX)
-        base::Bind(&TaskGroup::OnProcessPriorityDone,
-                   weak_ptr_factory_.GetWeakPtr()));
+        base::BindRepeating(&TaskGroup::OnCpuRefreshDone,
+                            weak_ptr_factory_.GetWeakPtr()),
+        base::BindRepeating(&TaskGroup::OnSwappedMemRefreshDone,
+                            weak_ptr_factory_.GetWeakPtr()),
+        base::BindRepeating(&TaskGroup::OnIdleWakeupsRefreshDone,
+                            weak_ptr_factory_.GetWeakPtr()),
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_MAC)
+        base::BindRepeating(&TaskGroup::OnOpenFdCountRefreshDone,
+                            weak_ptr_factory_.GetWeakPtr()),
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_MAC)
+        base::BindRepeating(&TaskGroup::OnProcessPriorityDone,
+                            weak_ptr_factory_.GetWeakPtr()));
 
     shared_sampler_->RegisterCallback(
-        process_id_,
-        base::Bind(&TaskGroup::OnSamplerRefreshDone, base::Unretained(this)));
+        process_id_, base::BindRepeating(&TaskGroup::OnSamplerRefreshDone,
+                                         base::Unretained(this)));
   }
 }
 
 TaskGroup::~TaskGroup() {
   shared_sampler_->UnregisterCallback(process_id_);
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (arc_shared_sampler_)
     arc_shared_sampler_->UnregisterCallback(process_id_);
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
 void TaskGroup::AddTask(Task* task) {
@@ -250,7 +250,7 @@ bool TaskGroup::AreBackgroundCalculationsDone() const {
   return expected_on_bg_done_flags_ == current_on_bg_done_flags_;
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 void TaskGroup::SetArcSampler(ArcSharedSampler* sampler) {
   DCHECK(sampler);
   arc_shared_sampler_ = sampler;
@@ -258,7 +258,7 @@ void TaskGroup::SetArcSampler(ArcSharedSampler* sampler) {
       process_id_, base::BindRepeating(&TaskGroup::OnArcSamplerRefreshDone,
                                        weak_ptr_factory_.GetWeakPtr()));
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 void TaskGroup::RefreshGpuMemory(
     const gpu::VideoMemoryUsageStats& gpu_memory_stats) {
@@ -285,8 +285,8 @@ void TaskGroup::RefreshWindowsHandles() {
 
 #if BUILDFLAG(ENABLE_NACL)
 void TaskGroup::RefreshNaClDebugStubPort(int child_process_unique_id) {
-  base::PostTaskAndReplyWithResult(
-      FROM_HERE, {content::BrowserThread::IO},
+  content::GetIOThreadTaskRunner({})->PostTaskAndReplyWithResult(
+      FROM_HERE,
       base::BindOnce(&GetNaClDebugStubPortOnIoThread, child_process_unique_id),
       base::BindOnce(&TaskGroup::OnRefreshNaClDebugStubPortDone,
                      weak_ptr_factory_.GetWeakPtr()));
@@ -300,14 +300,14 @@ void TaskGroup::OnRefreshNaClDebugStubPortDone(int nacl_debug_stub_port) {
 }
 #endif  // BUILDFLAG(ENABLE_NACL)
 
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_MAC)
 void TaskGroup::OnOpenFdCountRefreshDone(int open_fd_count) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   open_fd_count_ = open_fd_count;
   OnBackgroundRefreshTypeFinished(REFRESH_TYPE_FD_COUNT);
 }
-#endif  // defined(OS_LINUX) || defined(OS_MACOSX)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_MAC)
 
 void TaskGroup::OnCpuRefreshDone(double cpu_usage) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -365,13 +365,13 @@ void TaskGroup::OnSamplerRefreshDone(
                                   shared_sampler_->GetSupportedFlags());
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 void TaskGroup::OnArcSamplerRefreshDone(
     base::Optional<ArcSharedSampler::MemoryFootprintBytes> memory_footprint) {
   if (memory_footprint)
     set_footprint_bytes(*memory_footprint);
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 void TaskGroup::OnBackgroundRefreshTypeFinished(int64_t finished_refresh_type) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);

@@ -2,29 +2,32 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import {Commands} from './commands.js';
+import {NavigationManager} from './navigation_manager.js';
+import {Navigator} from './navigator.js';
+import {KeyboardRootNode} from './nodes/keyboard_node.js';
+import {PreferenceManager} from './preference_manager.js';
+import {SAConstants} from './switch_access_constants.js';
+
+const AutomationNode = chrome.automation.AutomationNode;
+
 /**
  * The top-level class for the Switch Access accessibility feature. Handles
  * initialization and small matters that don't fit anywhere else in the
  * codebase.
  */
-class SwitchAccess {
+export class SwitchAccess {
   static initialize() {
-    window.switchAccess = new SwitchAccess();
+    SwitchAccess.instance = new SwitchAccess();
 
     chrome.automation.getDesktop((desktop) => {
-      AutoScanManager.initialize();
-      NavigationManager.initialize(desktop);
+      // NavigationManager must be initialized first.
+      Navigator.setSingletonInstance(new NavigationManager(desktop));
 
       Commands.initialize();
       KeyboardRootNode.startWatchingVisibility();
-      MenuManager.initialize();
-      SwitchAccessPreferences.initialize();
-      TextNavigationManager.initialize();
+      PreferenceManager.initialize();
     });
-  }
-
-  static get instance() {
-    return window.switchAccess;
   }
 
   /** @private */
@@ -51,32 +54,61 @@ class SwitchAccess {
   }
 
   /**
-   * Sets up the connection between the menuPanel and menuManager.
-   * @param {!PanelInterface} menuPanel
+   * Helper function to robustly find a node fitting a given FindParams, even if
+   * that node has not yet been created.
+   * Used to find the menu and back button.
+   * @param {!chrome.automation.FindParams} findParams
+   * @param {!function(!AutomationNode): void} foundCallback
    */
-  connectMenuPanel(menuPanel) {
-    // Because this may be called before init_(), check if navigationManager_
-    // is initialized.
-
-    if (NavigationManager.instance) {
-      NavigationManager.instance.connectMenuPanel(menuPanel);
-      MenuManager.instance.connectMenuPanel(menuPanel);
-    } else {
-      window.menuPanel = menuPanel;
+  static findNodeMatching(findParams, foundCallback) {
+    const desktop = Navigator.instance.desktopNode;
+    // First, check if the node is currently in the tree.
+    let node = desktop.find(findParams);
+    if (node) {
+      foundCallback(node);
+      return;
     }
+    // If it's not currently in the tree, listen for changes to the desktop
+    // tree.
+    const eventHandler = new EventHandler(
+        desktop, chrome.automation.EventType.CHILDREN_CHANGED,
+        null /** callback */);
+
+    const onEvent = (event) => {
+      if (event.target.matches(findParams)) {
+        // If the event target is the node we're looking for, we've found it.
+        eventHandler.stop();
+        foundCallback(event.target);
+      } else if (event.target.children.length > 0) {
+        // Otherwise, see if one of its children is the node we're looking for.
+        node = event.target.find(findParams);
+        if (node) {
+          eventHandler.stop();
+          foundCallback(node);
+        }
+      }
+    };
+
+    eventHandler.setCallback(onEvent);
+    eventHandler.start();
   }
 
-  /*
+  /**
    * Creates and records the specified error.
    * @param {SAConstants.ErrorType} errorType
    * @param {string} errorString
+   * @param {boolean} shouldRecover
    * @return {!Error}
    */
-  static error(errorType, errorString) {
+  static error(errorType, errorString, shouldRecover = false) {
+    if (shouldRecover) {
+      setTimeout(
+          Navigator.instance.moveToValidNode.bind(Navigator.instance), 0);
+    }
     const errorTypeCountForUMA = Object.keys(SAConstants.ErrorType).length;
     chrome.metricsPrivate.recordEnumerationValue(
-        'Accessibility.CrosSwitchAccess.Error', errorType,
-        errorTypeCountForUMA);
+        'Accessibility.CrosSwitchAccess.Error',
+        /** @type {number} */ (errorType), errorTypeCountForUMA);
     return new Error(errorString);
   }
 }

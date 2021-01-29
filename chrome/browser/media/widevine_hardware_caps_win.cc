@@ -2,7 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/media/widevine_hardware_caps_win.h"
+#include "chrome/browser/media/widevine_hardware_caps.h"
+
+#include "base/check.h"
+#include "base/notreached.h"
 
 void GetWidevineHardwareCaps(
     base::flat_set<media::VideoCodec>* video_codecs,

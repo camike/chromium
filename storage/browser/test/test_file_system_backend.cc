@@ -82,17 +82,17 @@ class TestFileSystemBackend::QuotaUtil : public FileSystemQuotaUtil,
     return scoped_refptr<QuotaReservation>();
   }
 
-  void GetOriginsForTypeOnFileTaskRunner(
-      FileSystemType type,
-      std::set<url::Origin>* origins) override {
+  std::vector<url::Origin> GetOriginsForTypeOnFileTaskRunner(
+      FileSystemType type) override {
     NOTREACHED();
+    return std::vector<url::Origin>();
   }
 
-  void GetOriginsForHostOnFileTaskRunner(
+  std::vector<url::Origin> GetOriginsForHostOnFileTaskRunner(
       FileSystemType type,
-      const std::string& host,
-      std::set<url::Origin>* origins) override {
+      const std::string& host) override {
     NOTREACHED();
+    return std::vector<url::Origin>();
   }
 
   int64_t GetOriginUsageOnFileTaskRunner(FileSystemContext* context,
@@ -118,8 +118,8 @@ TestFileSystemBackend::TestFileSystemBackend(
     const base::FilePath& base_path)
     : base_path_(base_path),
       task_runner_(task_runner),
-      file_util_(
-          std::make_unique<AsyncFileUtilAdapter>(new TestFileUtil(base_path))),
+      file_util_(std::make_unique<AsyncFileUtilAdapter>(
+          std::make_unique<TestFileUtil>(base_path))),
       quota_util_(std::make_unique<QuotaUtil>()),
       require_copy_or_move_validator_(false) {
   update_observers_ =
@@ -176,7 +176,7 @@ FileSystemOperation* TestFileSystemBackend::CreateFileSystemOperation(
     FileSystemContext* context,
     base::File::Error* error_code) const {
   std::unique_ptr<FileSystemOperationContext> operation_context(
-      new FileSystemOperationContext(context));
+      std::make_unique<FileSystemOperationContext>(context));
   operation_context->set_update_observers(*GetUpdateObservers(url.type()));
   operation_context->set_change_observers(*GetChangeObservers(url.type()));
   return FileSystemOperation::Create(url, context,

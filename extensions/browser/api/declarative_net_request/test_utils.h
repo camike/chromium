@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <ostream>
+#include <string>
 #include <vector>
 
 #include "base/optional.h"
@@ -30,7 +31,7 @@ class Extension;
 
 namespace declarative_net_request {
 
-class RulesetSource;
+class FileBackedRulesetSource;
 class RulesetMatcher;
 struct TestRule;
 
@@ -46,8 +47,7 @@ RequestAction CreateRequestActionForTesting(
     RequestAction::Type type,
     uint32_t rule_id = kMinValidID,
     uint32_t rule_priority = kDefaultPriority,
-    api::declarative_net_request::SourceType source_type =
-        api::declarative_net_request::SOURCE_TYPE_MANIFEST,
+    RulesetID ruleset_id = kMinValidStaticRulesetID,
     const ExtensionId& extension_id = "extensionid");
 
 // Test helpers for help with gtest expectations and assertions.
@@ -57,6 +57,7 @@ std::ostream& operator<<(std::ostream& output, const RequestAction& action);
 std::ostream& operator<<(std::ostream& output, const ParseResult& result);
 std::ostream& operator<<(std::ostream& output,
                          const base::Optional<RequestAction>& action);
+std::ostream& operator<<(std::ostream& output, LoadRulesetResult result);
 
 // Returns true if the given extension's indexed static rulesets are all valid.
 // Should be called on a sequence where file IO is allowed.
@@ -66,21 +67,20 @@ bool AreAllIndexedStaticRulesetsValid(const Extension& extension,
 // Helper to create a verified ruleset matcher. Populates |matcher| and
 // |expected_checksum|. Returns true on success.
 bool CreateVerifiedMatcher(const std::vector<TestRule>& rules,
-                           const RulesetSource& source,
+                           const FileBackedRulesetSource& source,
                            std::unique_ptr<RulesetMatcher>* matcher,
                            int* expected_checksum = nullptr);
 
-// Helper to return a RulesetSource bound to temporary files.
-RulesetSource CreateTemporarySource(
-    size_t id = 1,
-    api::declarative_net_request::SourceType source_type =
-        api::declarative_net_request::SOURCE_TYPE_MANIFEST,
+// Helper to return a FileBackedRulesetSource bound to temporary files.
+FileBackedRulesetSource CreateTemporarySource(
+    RulesetID id = kMinValidStaticRulesetID,
     size_t rule_count_limit = 100,
     ExtensionId extension_id = "extensionid");
 
 api::declarative_net_request::ModifyHeaderInfo CreateModifyHeaderInfo(
     api::declarative_net_request::HeaderOperation operation,
-    std::string header);
+    std::string header,
+    base::Optional<std::string> value);
 
 bool EqualsForTesting(
     const api::declarative_net_request::ModifyHeaderInfo& lhs,
@@ -119,19 +119,27 @@ class RulesetManagerObserver : public RulesetManager::TestObserver {
   SEQUENCE_CHECKER(sequence_checker_);
 };
 
-// Test helper to increment the indexed ruleset format version while in scope.
-// Resets it to the original value when it goes out of scope.
-class ScopedIncrementIndexedRulesetFormatVersion {
+// Helper to wait for warnings thrown for a given extension. This must be
+// constructed before warnings are added.
+class WarningServiceObserver : public WarningService::Observer {
  public:
-  ScopedIncrementIndexedRulesetFormatVersion();
-  ~ScopedIncrementIndexedRulesetFormatVersion();
-  ScopedIncrementIndexedRulesetFormatVersion(
-      const ScopedIncrementIndexedRulesetFormatVersion&) = delete;
-  ScopedIncrementIndexedRulesetFormatVersion& operator=(
-      const ScopedIncrementIndexedRulesetFormatVersion&) = delete;
+  WarningServiceObserver(WarningService* warning_service,
+                         const ExtensionId& extension_id);
+  ~WarningServiceObserver();
+  WarningServiceObserver(const WarningServiceObserver&) = delete;
+  WarningServiceObserver& operator=(const WarningServiceObserver&) = delete;
+
+  // Should only be called once per WarningServiceObserver lifetime.
+  void WaitForWarning();
 
  private:
-  const int original_version_;
+  // WarningService::Observer override:
+  void ExtensionWarningsChanged(
+      const ExtensionIdSet& affected_extensions) override;
+
+  ScopedObserver<WarningService, WarningService::Observer> observer_;
+  const ExtensionId extension_id_;
+  base::RunLoop run_loop_;
 };
 
 }  // namespace declarative_net_request

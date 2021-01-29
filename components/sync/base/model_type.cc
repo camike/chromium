@@ -6,6 +6,10 @@
 
 #include <stddef.h>
 
+#include <ostream>
+
+#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/values.h"
@@ -82,6 +86,10 @@ const ModelTypeInfo kModelTypeInfoMap[] = {
      "Autofill Wallet Metadata",
      sync_pb::EntitySpecifics::kWalletMetadataFieldNumber,
      ModelTypeForHistograms::kAutofillWalletMetadata},
+    {AUTOFILL_WALLET_OFFER, "AUTOFILL_OFFER", "autofill_wallet_offer",
+     "Autofill Wallet Offer",
+     sync_pb::EntitySpecifics::kAutofillOfferFieldNumber,
+     ModelTypeForHistograms::kAutofillWalletOffer},
     {THEMES, "THEME", "themes", "Themes",
      sync_pb::EntitySpecifics::kThemeFieldNumber,
      ModelTypeForHistograms::kThemes},
@@ -113,12 +121,6 @@ const ModelTypeInfo kModelTypeInfoMap[] = {
     {DICTIONARY, "DICTIONARY", "dictionary", "Dictionary",
      sync_pb::EntitySpecifics::kDictionaryFieldNumber,
      ModelTypeForHistograms::kDictionary},
-    {DEPRECATED_FAVICON_IMAGES, "FAVICON_IMAGE", "favicon_images",
-     "Favicon Images", sync_pb::EntitySpecifics::kFaviconImageFieldNumber,
-     ModelTypeForHistograms::kFaviconImages},
-    {DEPRECATED_FAVICON_TRACKING, "FAVICON_TRACKING", "favicon_tracking",
-     "Favicon Tracking", sync_pb::EntitySpecifics::kFaviconTrackingFieldNumber,
-     ModelTypeForHistograms::kFaviconTracking},
     {DEVICE_INFO, "DEVICE_INFO", "device_info", "Device Info",
      sync_pb::EntitySpecifics::kDeviceInfoFieldNumber,
      ModelTypeForHistograms::kDeviceInfo},
@@ -133,10 +135,10 @@ const ModelTypeInfo kModelTypeInfoMap[] = {
     {APP_LIST, "APP_LIST", "app_list", "App List",
      sync_pb::EntitySpecifics::kAppListFieldNumber,
      ModelTypeForHistograms::kAppList},
-    {SUPERVISED_USER_WHITELISTS, "MANAGED_USER_WHITELIST",
+    {DEPRECATED_SUPERVISED_USER_ALLOWLISTS, "MANAGED_USER_WHITELIST",
      "managed_user_whitelists", "Managed User Whitelists",
      sync_pb::EntitySpecifics::kManagedUserWhitelistFieldNumber,
-     ModelTypeForHistograms::kSupervisedUserWhitelists},
+     ModelTypeForHistograms::kDeprecatedSupervisedUserAllowlists},
     {ARC_PACKAGE, "ARC_PACKAGE", "arc_package", "Arc Package",
      sync_pb::EntitySpecifics::kArcPackageFieldNumber,
      ModelTypeForHistograms::kArcPackage},
@@ -181,19 +183,16 @@ const ModelTypeInfo kModelTypeInfoMap[] = {
     {NIGORI, "NIGORI", "nigori", "Encryption Keys",
      sync_pb::EntitySpecifics::kNigoriFieldNumber,
      ModelTypeForHistograms::kNigori},
-    {DEPRECATED_EXPERIMENTS, "EXPERIMENTS", "experiments", "Experiments",
-     sync_pb::EntitySpecifics::kExperimentsFieldNumber,
-     ModelTypeForHistograms::kDeprecatedExperiments},
 };
 
 static_assert(base::size(kModelTypeInfoMap) == ModelType::NUM_ENTRIES,
               "kModelTypeInfoMap should have ModelType::NUM_ENTRIES elements");
 
-static_assert(41 == syncer::ModelType::NUM_ENTRIES,
+static_assert(39 == syncer::ModelType::NUM_ENTRIES,
               "When adding a new type, update enum SyncModelTypes in enums.xml "
               "and suffix SyncModelType in histograms.xml.");
 
-static_assert(41 == syncer::ModelType::NUM_ENTRIES,
+static_assert(39 == syncer::ModelType::NUM_ENTRIES,
               "When adding a new type, update kAllocatorDumpNameAllowlist in "
               "base/trace_event/memory_infra_background_allowlist.cc.");
 
@@ -223,6 +222,9 @@ void AddDefaultFieldValue(ModelType type, sync_pb::EntitySpecifics* specifics) {
       break;
     case AUTOFILL_WALLET_METADATA:
       specifics->mutable_wallet_metadata();
+      break;
+    case AUTOFILL_WALLET_OFFER:
+      specifics->mutable_autofill_offer();
       break;
     case THEMES:
       specifics->mutable_theme();
@@ -254,12 +256,6 @@ void AddDefaultFieldValue(ModelType type, sync_pb::EntitySpecifics* specifics) {
     case DICTIONARY:
       specifics->mutable_dictionary();
       break;
-    case DEPRECATED_FAVICON_IMAGES:
-      specifics->mutable_favicon_image();
-      break;
-    case DEPRECATED_FAVICON_TRACKING:
-      specifics->mutable_favicon_tracking();
-      break;
     case DEVICE_INFO:
       specifics->mutable_device_info();
       break;
@@ -272,7 +268,7 @@ void AddDefaultFieldValue(ModelType type, sync_pb::EntitySpecifics* specifics) {
     case APP_LIST:
       specifics->mutable_app_list();
       break;
-    case SUPERVISED_USER_WHITELISTS:
+    case DEPRECATED_SUPERVISED_USER_ALLOWLISTS:
       specifics->mutable_managed_user_whitelist();
       break;
     case ARC_PACKAGE:
@@ -301,9 +297,6 @@ void AddDefaultFieldValue(ModelType type, sync_pb::EntitySpecifics* specifics) {
       break;
     case NIGORI:
       specifics->mutable_nigori();
-      break;
-    case DEPRECATED_EXPERIMENTS:
-      specifics->mutable_experiments();
       break;
     case WEB_APPS:
       specifics->mutable_web_app();
@@ -362,7 +355,7 @@ ModelType GetModelType(const sync_pb::SyncEntity& sync_entity) {
 }
 
 ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
-  static_assert(41 == ModelType::NUM_ENTRIES,
+  static_assert(39 == ModelType::NUM_ENTRIES,
                 "When adding new protocol types, the following type lookup "
                 "logic must be updated.");
   if (specifics.has_bookmark())
@@ -399,10 +392,6 @@ ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
     return HISTORY_DELETE_DIRECTIVES;
   if (specifics.has_dictionary())
     return DICTIONARY;
-  if (specifics.has_favicon_image())
-    return DEPRECATED_FAVICON_IMAGES;
-  if (specifics.has_favicon_tracking())
-    return DEPRECATED_FAVICON_TRACKING;
   if (specifics.has_device_info())
     return DEVICE_INFO;
   if (specifics.has_priority_preference())
@@ -412,7 +401,7 @@ ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
   if (specifics.has_app_list())
     return APP_LIST;
   if (specifics.has_managed_user_whitelist())
-    return SUPERVISED_USER_WHITELISTS;
+    return DEPRECATED_SUPERVISED_USER_ALLOWLISTS;
   if (specifics.has_arc_package())
     return ARC_PACKAGE;
   if (specifics.has_printer())
@@ -425,8 +414,6 @@ ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
     return USER_CONSENTS;
   if (specifics.has_nigori())
     return NIGORI;
-  if (specifics.has_experiments())
-    return DEPRECATED_EXPERIMENTS;
   if (specifics.has_send_tab_to_self())
     return SEND_TAB_TO_SELF;
   if (specifics.has_security_event())
@@ -441,40 +428,30 @@ ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
     return OS_PRIORITY_PREFERENCES;
   if (specifics.has_sharing_message())
     return SHARING_MESSAGE;
+  if (specifics.has_autofill_offer())
+    return AUTOFILL_WALLET_OFFER;
 
   return UNSPECIFIED;
 }
 
 ModelTypeSet EncryptableUserTypes() {
-  static_assert(41 == ModelType::NUM_ENTRIES,
+  static_assert(39 == ModelType::NUM_ENTRIES,
                 "If adding an unencryptable type, remove from "
                 "encryptable_user_types below.");
   ModelTypeSet encryptable_user_types = UserTypes();
   // Wallet data is not encrypted since it actually originates on the server.
   encryptable_user_types.Remove(AUTOFILL_WALLET_DATA);
-  // We never encrypt history delete directives.
+  encryptable_user_types.Remove(AUTOFILL_WALLET_OFFER);
+  // Commit-only types are never encrypted since they are consumed server-side.
+  encryptable_user_types.RemoveAll(CommitOnlyTypes());
+  // Other types that are never encrypted because consumed server-side.
   encryptable_user_types.Remove(HISTORY_DELETE_DIRECTIVES);
-  // Device info data is not encrypted because it might be synced before
-  // encryption is ready.
   encryptable_user_types.Remove(DEVICE_INFO);
-  // Priority preferences are not encrypted because they might be synced before
-  // encryption is ready.
+  // Never encrypted because also written server-side.
   encryptable_user_types.Remove(PRIORITY_PREFERENCES);
-  // OS priority preferences are not encrypted because they might be synced
-  // before encryption is ready.
   encryptable_user_types.Remove(OS_PRIORITY_PREFERENCES);
-  // Supervised user settings are not encrypted since they are set server-side.
   encryptable_user_types.Remove(SUPERVISED_USER_SETTINGS);
-  // Supervised user whitelists are not encrypted since they are managed
-  // server-side.
-  encryptable_user_types.Remove(SUPERVISED_USER_WHITELISTS);
-  // User events and consents are not encrypted since they are consumed
-  // server-side.
-  encryptable_user_types.Remove(USER_EVENTS);
-  encryptable_user_types.Remove(USER_CONSENTS);
-  encryptable_user_types.Remove(SECURITY_EVENTS);
-  // Sharing message is not encrypted since it is consumed server-side.
-  encryptable_user_types.Remove(SHARING_MESSAGE);
+  encryptable_user_types.Remove(DEPRECATED_SUPERVISED_USER_ALLOWLISTS);
   // Proxy types have no sync representation and are therefore not encrypted.
   // Note however that proxy types map to one or more protocol types, which
   // may or may not be encrypted themselves.

@@ -3,6 +3,21 @@
 // found in the LICENSE file.
 
 /**
+ * @fileoverview
+ * @suppress {uselessCode} Temporary suppress because of the line exporting.
+ */
+
+// clang-format off
+// #import {FileOperationProgressEvent, FileOperationError} from '../../common/js/file_operation_common.m.js';
+// #import {TrashEntry} from '../../common/js/trash.m.js';
+// #import {assert} from 'chrome://resources/js/assert.m.js';
+// #import {metadataProxy} from './metadata_proxy.m.js';
+// #import {AsyncUtil} from '../../common/js/async_util.m.js';
+// #import {util} from '../../common/js/util.m.js';
+// #import {NativeEventTarget as EventTarget} from 'chrome://resources/js/cr/event_target.m.js';
+// clang-format on
+
+/**
  * Utilities for file operations.
  */
 const fileOperationUtil = {};
@@ -44,8 +59,8 @@ fileOperationUtil.resolvePath = (root, path) => {
  * @param {string} relativePath The path to be deduplicated.
  * @param {function(string)=} opt_successCallback Callback run with the
  *     deduplicated path on success.
- * @param {function(fileOperationUtil.Error)=} opt_errorCallback Callback run
- *     on error.
+ * @param {function(FileOperationError)=} opt_errorCallback
+ *     Callback run on error.
  * @return {Promise} Promise fulfilled with available path.
  */
 fileOperationUtil.deduplicatePath =
@@ -83,7 +98,7 @@ fileOperationUtil.deduplicatePath =
         if (error instanceof Error) {
           return Promise.reject(error);
         }
-        return Promise.reject(new fileOperationUtil.Error(
+        return Promise.reject(new FileOperationError(
             util.FileOperationErrorType.FILESYSTEM_ERROR, error));
       });
       if (opt_successCallback) {
@@ -614,6 +629,20 @@ fileOperationUtil.Task = class {
     // For example, if 'dir' was copied as 'dir (1)', then 'dir/file.txt' should
     // become 'dir (1)/file.txt'.
     this.renamedDirectories_ = [];
+
+    /**
+     * Number of progress item sequence used in calculating moving average
+     * speed of task.
+     * @private {number}
+     */
+    this.SPEED_BUFFER_WINDOW_ = 20;
+
+    /**
+     * Speedometer object used to calculate and track speed and remaining time.
+     * @protected {fileOperationUtil.Speedometer}
+     */
+    this.speedometer_ =
+        new fileOperationUtil.Speedometer(this.SPEED_BUFFER_WINDOW_);
   }
 
 
@@ -643,15 +672,15 @@ fileOperationUtil.Task = class {
    * @param {function()} progressCallback Callback invoked periodically during
    *     the operation.
    * @param {function()} successCallback Callback run on success.
-   * @param {function(fileOperationUtil.Error)} errorCallback Callback run on
-   *     error.
+   * @param {function(FileOperationError)} errorCallback Callback
+   *     run on error.
    */
   run(entryChangedCallback, progressCallback, successCallback, errorCallback) {}
 
   /**
    * Get states of the task.
    * TODO(hirono): Removes this method and sets a task to progress events.
-   * @return {Object} Status object.
+   * @return {!fileOperationUtil.Status} Status object.
    */
   getStatus() {
     const processingEntry = this.sourceEntries[this.processingSourceIndex_];
@@ -661,7 +690,10 @@ fileOperationUtil.Task = class {
       totalBytes: this.totalBytes,
       processedBytes: this.processedBytes,
       processingEntryName: processingEntry ? processingEntry.name : '',
-      targetDirEntryName: this.targetDirEntry.name
+      targetDirEntryName: this.targetDirEntry.name,
+      currentSpeed: this.speedometer_.getCurrentSpeed(),
+      averageSpeed: this.speedometer_.getAverageSpeed(),
+      remainingTime: this.speedometer_.getRemainingTime()
     };
   }
 
@@ -785,6 +817,7 @@ fileOperationUtil.CopyTask = class extends fileOperationUtil.Task {
           this.totalBytes += this.processingEntries[i][entryURL].size;
         }
       }
+      this.speedometer_.setTotalBytes(this.totalBytes);
 
       callback();
     });
@@ -800,7 +833,7 @@ fileOperationUtil.CopyTask = class extends fileOperationUtil.Task {
    * @param {function()} progressCallback Callback invoked periodically during
    *     the copying.
    * @param {function()} successCallback On success.
-   * @param {function(fileOperationUtil.Error)} errorCallback On error.
+   * @param {function(FileOperationError)} errorCallback On error.
    * @override
    */
   run(entryChangedCallback, progressCallback, successCallback, errorCallback) {
@@ -825,7 +858,7 @@ fileOperationUtil.CopyTask = class extends fileOperationUtil.Task {
       };
 
       const onFilesystemError = err => {
-        errorCallback(new fileOperationUtil.Error(
+        errorCallback(new FileOperationError(
             util.FileOperationErrorType.FILESYSTEM_ERROR, err));
       };
 
@@ -861,6 +894,7 @@ fileOperationUtil.CopyTask = class extends fileOperationUtil.Task {
       const size = opt_size !== undefined ? opt_size : processedEntry.size;
       this.processedBytes += size - processedEntry.processedBytes;
       processedEntry.processedBytes = size;
+      this.speedometer_.update(this.processedBytes);
 
       // updateProgress can be called multiple times for a single file copy, and
       // it might not be called for a small file.
@@ -893,7 +927,7 @@ fileOperationUtil.CopyTask = class extends fileOperationUtil.Task {
         this.sourceEntries,
         (callback, entry, index) => {
           if (this.cancelRequested_) {
-            errorCallback(new fileOperationUtil.Error(
+            errorCallback(new FileOperationError(
                 util.FileOperationErrorType.FILESYSTEM_ERROR,
                 util.createDOMError(util.FileError.ABORT_ERR)));
             return;
@@ -920,6 +954,7 @@ fileOperationUtil.CopyTask = class extends fileOperationUtil.Task {
                 this.processingSourceIndex_ = index + 1;
                 this.processedBytes = this.calcProcessedBytes_();
                 this.numRemainingItems = this.calcNumRemainingItems_();
+                this.speedometer_.update(this.processedBytes);
                 errorCount = 0;
                 callback();
               },
@@ -930,6 +965,7 @@ fileOperationUtil.CopyTask = class extends fileOperationUtil.Task {
                 this.processingSourceIndex_ = index + 1;
                 this.processedBytes = this.calcProcessedBytes_();
                 this.numRemainingItems = this.calcNumRemainingItems_();
+                this.speedometer_.update(this.processedBytes);
                 errorCount++;
                 lastError = error;
                 if (errorCount <
@@ -963,7 +999,7 @@ fileOperationUtil.CopyTask = class extends fileOperationUtil.Task {
    * @param {function(string, number)} progressCallback Callback invoked
    *     periodically during the copying.
    * @param {function()} successCallback On success.
-   * @param {function(fileOperationUtil.Error)} errorCallback On error.
+   * @param {function(FileOperationError)} errorCallback On error.
    * @private
    */
   processEntry_(
@@ -972,7 +1008,7 @@ fileOperationUtil.CopyTask = class extends fileOperationUtil.Task {
     fileOperationUtil.deduplicatePath(
         destinationEntry, sourceEntry.name, destinationName => {
           if (this.cancelRequested_) {
-            errorCallback(new fileOperationUtil.Error(
+            errorCallback(new FileOperationError(
                 util.FileOperationErrorType.FILESYSTEM_ERROR,
                 util.createDOMError(util.FileError.ABORT_ERR)));
             return;
@@ -986,7 +1022,7 @@ fileOperationUtil.CopyTask = class extends fileOperationUtil.Task {
               },
               error => {
                 this.cancelCallback_ = null;
-                errorCallback(new fileOperationUtil.Error(
+                errorCallback(new FileOperationError(
                     util.FileOperationErrorType.FILESYSTEM_ERROR, error));
               });
         }, errorCallback);
@@ -1052,7 +1088,7 @@ fileOperationUtil.MoveTask = class extends fileOperationUtil.Task {
    * @param {function()} progressCallback Callback invoked periodically during
    *     the moving.
    * @param {function()} successCallback On success.
-   * @param {function(fileOperationUtil.Error)} errorCallback On error.
+   * @param {function(FileOperationError)} errorCallback On error.
    * @override
    */
   run(entryChangedCallback, progressCallback, successCallback, errorCallback) {
@@ -1065,7 +1101,7 @@ fileOperationUtil.MoveTask = class extends fileOperationUtil.Task {
         this.sourceEntries,
         (callback, entry, index) => {
           if (this.cancelRequested_) {
-            errorCallback(new fileOperationUtil.Error(
+            errorCallback(new FileOperationError(
                 util.FileOperationErrorType.FILESYSTEM_ERROR,
                 util.createDOMError(util.FileError.ABORT_ERR)));
             return;
@@ -1095,7 +1131,7 @@ fileOperationUtil.MoveTask = class extends fileOperationUtil.Task {
    * @param {function(util.EntryChangedKind, Entry)} entryChangedCallback
    *     Callback invoked when an entry is changed.
    * @param {function()} successCallback On success.
-   * @param {function(fileOperationUtil.Error)} errorCallback On error.
+   * @param {function(FileOperationError)} errorCallback On error.
    * @private
    */
   static processEntry_(
@@ -1115,7 +1151,7 @@ fileOperationUtil.MoveTask = class extends fileOperationUtil.Task {
                 successCallback();
               },
               error => {
-                errorCallback(new fileOperationUtil.Error(
+                errorCallback(new FileOperationError(
                     util.FileOperationErrorType.FILESYSTEM_ERROR, error));
               });
         }, errorCallback);
@@ -1182,7 +1218,7 @@ fileOperationUtil.ZipTask = class extends fileOperationUtil.Task {
    * @param {function()} progressCallback Callback invoked periodically during
    *     the moving.
    * @param {function()} successCallback On complete.
-   * @param {function(fileOperationUtil.Error)} errorCallback On error.
+   * @param {function(FileOperationError)} errorCallback On error.
    * @override
    */
   run(entryChangedCallback, progressCallback, successCallback, errorCallback) {
@@ -1217,7 +1253,7 @@ fileOperationUtil.ZipTask = class extends fileOperationUtil.Task {
                 successCallback();
               },
               error => {
-                errorCallback(new fileOperationUtil.Error(
+                errorCallback(new FileOperationError(
                     util.FileOperationErrorType.FILESYSTEM_ERROR, error));
               });
         }, errorCallback);
@@ -1226,30 +1262,33 @@ fileOperationUtil.ZipTask = class extends fileOperationUtil.Task {
 
 /**
  * @typedef {{
+ *   operationType: !util.FileOperationType,
+ *   numRemainingItems: number,
+ *   totalBytes: number,
+ *   processedBytes: number,
+ *   processingEntryName: string,
+ *   targetDirEntryName: string,
+ *   currentSpeed: number,
+ *   averageSpeed: number,
+ *   remainingTime: number,
+ * }}
+ */
+fileOperationUtil.Status;
+
+/**
+ * @typedef {{
+ *  operationType: !util.FileOperationType,
  *  entries: Array<Entry>,
  *  taskId: string,
  *  entrySize: Object,
  *  totalBytes: number,
  *  processedBytes: number,
- *  cancelRequested: boolean
+ *  cancelRequested: boolean,
+ *  trashedEntries: Array<!TrashEntry>,
  * }}
  */
 fileOperationUtil.DeleteTask;
 
-/**
- * Error class used to report problems with a copy operation.
- * If the code is UNEXPECTED_SOURCE_FILE, data should be a path of the file.
- * If the code is TARGET_EXISTS, data should be the existing Entry.
- * If the code is FILESYSTEM_ERROR, data should be the FileError.
- *
- * @param {util.FileOperationErrorType} code Error type.
- * @param {string|Entry|DOMError} data Additional data.
- * @constructor
- */
-fileOperationUtil.Error = function(code, data) {
-  this.code = code;
-  this.data = data;
-};
 
 /**
  * Manages Event dispatching.
@@ -1271,15 +1310,15 @@ fileOperationUtil.EventRouter = class extends cr.EventTarget {
    * Dispatches a simple "copy-progress" event with reason and current
    * FileOperationManager status. If it is an ERROR event, error should be set.
    *
-   * @param {fileOperationUtil.EventRouter.EventType} type Event type.
-   * @param {Object} status Current FileOperationManager's status. See also
-   *     FileOperationManager.Task.getStatus().
+   * @param {FileOperationProgressEvent.EventType} type Event type.
+   * @param {!fileOperationUtil.Status} status Current FileOperationManager's
+   *     status. See also FileOperationManager.Task.getStatus().
    * @param {string} taskId ID of task related with the event.
-   * @param {fileOperationUtil.Error=} opt_error The info for the error. This
-   *     should be set iff the reason is "ERROR".
+   * @param {FileOperationError=} opt_error The info for the
+   *     error. This should be set iff the reason is "ERROR".
    */
   sendProgressEvent(type, status, taskId, opt_error) {
-    const EventType = fileOperationUtil.EventRouter.EventType;
+    const EventType = FileOperationProgressEvent.EventType;
     // Before finishing operation, dispatch pending entries-changed events.
     if (type === EventType.SUCCESS || type === EventType.CANCELED) {
       this.entryChangedEventRateLimiter_.runImmediately();
@@ -1347,29 +1386,194 @@ fileOperationUtil.EventRouter = class extends cr.EventTarget {
   /**
    * Dispatches an event to notify entries are changed for delete task.
    *
-   * @param {fileOperationUtil.EventRouter.EventType} reason Event type.
+   * @param {FileOperationProgressEvent.EventType} reason Event type.
    * @param {!Object} task Delete task related with the event.
+   * @param {FileOperationError=} error
    */
-  sendDeleteEvent(reason, task) {
+  sendDeleteEvent(reason, task, error) {
     const event =
         /** @type {FileOperationProgressEvent} */ (new Event('delete'));
     event.reason = reason;
+    event.error = error;
     event.taskId = task.taskId;
     event.entries = task.entries;
-    event.totalBytes = task.totalBytes;
-    event.processedBytes = task.processedBytes;
+    event.status = {
+      operationType: task.operationType,
+      numRemainingItems: task.entries.length,
+      totalBytes: task.totalBytes,
+      processedBytes: task.processedBytes,
+      processingEntryName: task.entries.length > 0 ? task.entries[0].name : '',
+      targetDirEntryName: '',
+      currentSpeed: 0,
+      averageSpeed: 0,
+      remainingTime: 0,
+    };
+    event.trashedEntries = task.trashedEntries;
     this.dispatchEvent(event);
   }
 };
 
 /**
- * Types of events emitted by the EventRouter.
- * @enum {string}
+ * Class to calculate transfer speed and remaining time. Each update from
+ * transfer task stores the last speed in a ring buffer and recalculates the
+ * cumulative moving average (CMA).
+ *
+ * Current speed (average of window) and remaining time is calculated per calls
+ * from progress updater in the task.
+ *
+ * The length of buffer specifies the moving window length.
  */
-fileOperationUtil.EventRouter.EventType = {
-  BEGIN: 'BEGIN',
-  CANCELED: 'CANCELED',
-  ERROR: 'ERROR',
-  PROGRESS: 'PROGRESS',
-  SUCCESS: 'SUCCESS'
+fileOperationUtil.Speedometer = class {
+  /**
+   * @param {number} bufferLength Max number of recent data used in
+   * calculation as time window.
+   */
+  constructor(bufferLength) {
+    /***
+     * The buffer length controlling average window length.
+     * @type {number}
+     * @private
+     */
+    this.length_ = bufferLength;
+
+    /**
+     * @private {!Array} internal buffer to track recent data.
+     */
+    this.buffer_ = [];
+
+    /**
+     * @private {number} index of current position in buffer.
+     */
+    this.index_ = 0;
+
+    /**
+     * @private {number} Count of how many updates have been processed.
+     * It helps to update CMA speed without keeping all data.
+     */
+    this.count_ = 0;
+
+    /**
+     * @private {number} Current cumulative moving average speed in bytes per
+     *     second.
+     */
+    this.cma_ = 0;
+
+    /**
+     * @private {number} Last timestamp the speed calculated in millisecond.
+     */
+    this.lastTimestamp_ = 0;
+
+    /**
+     * @private {number} Last reported processed bytes.
+     */
+    this.lastProcessedBytes_ = 0;
+
+    /**
+     *
+     * @private {number} Total bytes to be processed by the task.
+     */
+    this.totalBytes_ = 0;
+  }
+
+  /**
+   * Pushes the new speed into the internal queue and call to update CMA.
+   * @param {number} speed The last calculated speed to track.
+   */
+  push_(speed) {
+    this.buffer_[this.index_] = speed;
+    this.index_ = (this.index_ + 1) % this.length_;
+  }
+
+  /**
+   * Updates cumulative average speed and count.
+   *
+   * It updates cma progressively using this formula:
+   * CMAnew = (CMAprev * count_ + SPEEDcurr) / (count_ + 1)
+   *
+   * @param {number} speed The last speed added to the ring.
+   */
+  updateCMA_(speed) {
+    this.count_++;
+    this.cma_ = Math.floor((this.cma_ * this.count_ + speed) / (this.count_));
+  }
+
+  /**
+   * Returns internal buffer for unit testing purposes.
+   *
+   * @returns {!Array} The internal buffer.
+   */
+  getBufferForTesting() {
+    return this.buffer_;
+  }
+
+  /**
+   * Calculates and returns the current speed in bytes per second.
+   */
+  getCurrentSpeed() {
+    if (this.buffer_.length == 0) {
+      return 0;
+    }
+
+    const sum =
+        this.buffer_.reduce((accumulated, current) => accumulated + current, 0);
+    return Math.floor(sum / this.buffer_.length);
+  }
+
+  /**
+   * @returns {number} Returns calculated cumulative average speed in bytes per
+   *     second.
+   */
+  getAverageSpeed() {
+    return this.cma_;
+  }
+
+  /**
+   * Calculates the remaining time of the task based on remaining bytes and
+   * current speed.
+   *
+   * @returns {number} The remaining time in seconds.
+   */
+  getRemainingTime() {
+    // Return zero if no data added yet or the last calculated speed was zero.
+    // It is mapped in UI to show unknown remaining time.
+    const currentSpeed = this.getCurrentSpeed();
+    if (currentSpeed == 0) {
+      return 0;
+    }
+
+    return Math.ceil(
+        (this.totalBytes_ - this.lastProcessedBytes_) / currentSpeed);
+  }
+
+  /**
+   *
+   * @param {number} totalBytes Number of total bytes task handles.
+   */
+  setTotalBytes(totalBytes) {
+    this.totalBytes_ = totalBytes;
+  }
+
+  /**
+   * Update speedometer with the latest status.
+   *
+   * It calculates speed using the processed bytes reported in the status and
+   * previous status.
+   * @param {number} processedBytes Number of processed bytes calculated by the
+   *     task.
+   * processed bytes.
+   */
+  update(processedBytes) {
+    const currentTime = Date.now();
+    const currSpeed = Math.floor(
+        (processedBytes - this.lastProcessedBytes_) /
+        ((currentTime - this.lastTimestamp_) / 1000));
+    this.push_(currSpeed);
+    this.updateCMA_(currSpeed);
+
+    this.lastProcessedBytes_ = processedBytes;
+    this.lastTimestamp_ = currentTime;
+  }
 };
+
+// eslint-disable-next-line semi,no-extra-semi
+/* #export */ {fileOperationUtil};

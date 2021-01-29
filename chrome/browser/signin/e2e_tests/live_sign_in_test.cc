@@ -6,6 +6,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/account_reconcilor_factory.h"
@@ -25,17 +26,20 @@
 #include "components/signin/public/identity_manager/consent_level.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/sync/driver/sync_service.h"
+#include "content/public/test/browser_test.h"
 #include "google_apis/gaia/core_account_id.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/sync/sync_ui_util.h"
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace signin {
 namespace test {
+
+const base::TimeDelta kDialogTimeout = base::TimeDelta::FromSeconds(10);
 
 // A wrapper importing the settings module when the chrome://settings serve the
 // Polymer 3 version.
@@ -61,10 +65,12 @@ class SignInTestObserver : public IdentityManager::Observer,
   }
 
   // IdentityManager::Observer:
-  void OnPrimaryAccountSet(const CoreAccountInfo&) override {
-    QuitIfConditionIsSatisfied();
-  }
-  void OnPrimaryAccountCleared(const CoreAccountInfo&) override {
+  void OnPrimaryAccountChanged(
+      const PrimaryAccountChangeEvent& event) override {
+    if (event.GetEventTypeFor(ConsentLevel::kSync) ==
+        PrimaryAccountChangeEvent::Type::kNone) {
+      return;
+    }
     QuitIfConditionIsSatisfied();
   }
   void OnRefreshTokenUpdatedForAccount(const CoreAccountInfo&) override {
@@ -116,14 +122,13 @@ class SignInTestObserver : public IdentityManager::Observer,
       return;
     }
 
-    bool has_valid_primary_sync_account = HasValidPrimarySyncAccount();
     switch (primary_sync_account_wait_) {
       case PrimarySyncAccountWait::kWaitForAdded:
-        if (!has_valid_primary_sync_account)
+        if (!HasValidPrimarySyncAccount())
           return;
         break;
       case PrimarySyncAccountWait::kWaitForCleared:
-        if (has_valid_primary_sync_account)
+        if (identity_manager_->HasPrimaryAccount(signin::ConsentLevel::kSync))
           return;
         break;
       case PrimarySyncAccountWait::kNotWait:
@@ -176,6 +181,8 @@ class SignInTestObserver : public IdentityManager::Observer,
 };
 
 // Live tests for SignIn.
+// These tests can be run with:
+// browser_tests --gtest_filter=LiveSignInTest.* --run-live-tests --run-manual
 class LiveSignInTest : public signin::test::LiveTest {
  public:
   LiveSignInTest() = default;
@@ -223,7 +230,7 @@ class LiveSignInTest : public signin::test::LiveTest {
 
     SignInTestObserver observer(identity_manager(), account_reconcilor());
     EXPECT_TRUE(login_ui_test_utils::ConfirmSyncConfirmationDialog(
-        browser(), base::TimeDelta::FromSeconds(3)));
+        browser(), kDialogTimeout));
     observer.WaitForAccountChanges(previously_signed_in_accounts + 1,
                                    PrimarySyncAccountWait::kWaitForAdded);
   }
@@ -322,12 +329,10 @@ IN_PROC_BROWSER_TEST_F(LiveSignInTest, MANUAL_WebSignOut) {
   EXPECT_TRUE(
       identity_manager()->HasAccountWithRefreshTokenInPersistentErrorState(
           primary_account.account_id));
-#if !defined(OS_CHROMEOS)
-  int unused1, unused2;
-  EXPECT_EQ(sync_ui_util::GetMessagesForAvatarSyncError(browser()->profile(),
-                                                        &unused1, &unused2),
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
+  EXPECT_EQ(sync_ui_util::GetAvatarSyncErrorType(browser()->profile()),
             sync_ui_util::AUTH_ERROR);
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
 // This test can pass. Marked as manual because it TIMED_OUT on Win7.
@@ -408,6 +413,31 @@ IN_PROC_BROWSER_TEST_F(LiveSignInTest, MANUAL_TurnOffSync) {
   EXPECT_FALSE(identity_manager()->HasPrimaryAccount());
 }
 
+// In "Sync paused" state, when the primary account is invalid, turns off sync
+// from settings. Checks that the account is removed from Chrome.
+// Regression test for https://crbug.com/1114646
+IN_PROC_BROWSER_TEST_F(LiveSignInTest, MANUAL_TurnOffSyncWhenPaused) {
+  TestAccount test_account_1;
+  CHECK(GetTestAccountsUtil()->GetAccount("TEST_ACCOUNT_1", test_account_1));
+  TurnOnSync(test_account_1, 0);
+
+  // Get in sync paused state.
+  SignOutFromWeb();
+
+  const CoreAccountInfo& primary_account =
+      identity_manager()->GetPrimaryAccountInfo();
+  EXPECT_FALSE(primary_account.IsEmpty());
+  EXPECT_TRUE(gaia::AreEmailsSame(test_account_1.user, primary_account.email));
+  EXPECT_TRUE(sync_service()->IsSyncFeatureEnabled());
+  EXPECT_TRUE(
+      identity_manager()->HasAccountWithRefreshTokenInPersistentErrorState(
+          primary_account.account_id));
+
+  TurnOffSync();
+  EXPECT_TRUE(identity_manager()->GetAccountsWithRefreshTokens().empty());
+  EXPECT_FALSE(identity_manager()->HasPrimaryAccount());
+}
+
 // This test can pass. Marked as manual because it TIMED_OUT on Win7.
 // See crbug.com/1025335.
 // Signs in an account on the web. Goes to the Chrome settings to enable Sync
@@ -430,7 +460,7 @@ IN_PROC_BROWSER_TEST_F(LiveSignInTest, MANUAL_CancelSyncWithWebAccount) {
       settings_tab, base::StringPrintf(kSettingsScriptWrapperFormat,
                                        start_syncing_script.c_str())));
   EXPECT_TRUE(login_ui_test_utils::CancelSyncConfirmationDialog(
-      browser(), base::TimeDelta::FromSeconds(3)));
+      browser(), kDialogTimeout));
   observer.WaitForAccountChanges(1, PrimarySyncAccountWait::kWaitForCleared);
 
   const AccountsInCookieJarInfo& accounts_in_cookie_jar =
@@ -456,7 +486,7 @@ IN_PROC_BROWSER_TEST_F(LiveSignInTest, MANUAL_CancelSync) {
 
   SignInTestObserver observer(identity_manager(), account_reconcilor());
   EXPECT_TRUE(login_ui_test_utils::CancelSyncConfirmationDialog(
-      browser(), base::TimeDelta::FromSeconds(3)));
+      browser(), kDialogTimeout));
   observer.WaitForAccountChanges(0, PrimarySyncAccountWait::kWaitForCleared);
 
   const AccountsInCookieJarInfo& accounts_in_cookie_jar =
@@ -499,7 +529,7 @@ IN_PROC_BROWSER_TEST_F(LiveSignInTest,
   // Click "This wasn't me" on the email confirmation dialog and wait for a new
   // browser and profile created.
   EXPECT_TRUE(login_ui_test_utils::CompleteSigninEmailConfirmationDialog(
-      browser(), base::TimeDelta::FromSeconds(3),
+      browser(), kDialogTimeout,
       SigninEmailConfirmationDialog::CREATE_NEW_USER));
   Browser* new_browser = ui_test_utils::WaitForBrowserToOpen();
   EXPECT_EQ(profile_manager->GetNumberOfProfiles(), 2U);
@@ -510,7 +540,7 @@ IN_PROC_BROWSER_TEST_F(LiveSignInTest,
   SignInTestObserver new_browser_observer(identity_manager(new_browser),
                                           account_reconcilor(new_browser));
   EXPECT_TRUE(login_ui_test_utils::ConfirmSyncConfirmationDialog(
-      new_browser, base::TimeDelta::FromSeconds(3)));
+      new_browser, kDialogTimeout));
   new_browser_observer.WaitForAccountChanges(
       1, PrimarySyncAccountWait::kWaitForAdded);
 
@@ -570,10 +600,9 @@ IN_PROC_BROWSER_TEST_F(LiveSignInTest,
   // for a primary account to be set.
   SignInTestObserver observer(identity_manager(), account_reconcilor());
   EXPECT_TRUE(login_ui_test_utils::CompleteSigninEmailConfirmationDialog(
-      browser(), base::TimeDelta::FromSeconds(3),
-      SigninEmailConfirmationDialog::START_SYNC));
+      browser(), kDialogTimeout, SigninEmailConfirmationDialog::START_SYNC));
   EXPECT_TRUE(login_ui_test_utils::ConfirmSyncConfirmationDialog(
-      browser(), base::TimeDelta::FromSeconds(5)));
+      browser(), kDialogTimeout));
   observer.WaitForAccountChanges(1, PrimarySyncAccountWait::kWaitForAdded);
 
   // Check no profile was created.
@@ -626,8 +655,7 @@ IN_PROC_BROWSER_TEST_F(LiveSignInTest,
   // removed from Chrome.
   SignInTestObserver observer(identity_manager(), account_reconcilor());
   EXPECT_TRUE(login_ui_test_utils::CompleteSigninEmailConfirmationDialog(
-      browser(), base::TimeDelta::FromSeconds(3),
-      SigninEmailConfirmationDialog::CLOSE));
+      browser(), kDialogTimeout, SigninEmailConfirmationDialog::CLOSE));
   observer.WaitForAccountChanges(0, PrimarySyncAccountWait::kWaitForCleared);
 
   // Check no profile was created.

@@ -10,7 +10,9 @@
 #include <string>
 #include <vector>
 
+#include "base/optional.h"
 #include "base/strings/string16.h"
+#include "components/search_engines/omnibox_focus_type.h"
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "third_party/metrics_proto/omnibox_input_type.pb.h"
 #include "url/gurl.h"
@@ -34,7 +36,9 @@ class AutocompleteInput {
   AutocompleteInput(const base::string16& text,
                     metrics::OmniboxEventProto::PageClassification
                         current_page_classification,
-                    const AutocompleteSchemeClassifier& scheme_classifier);
+                    const AutocompleteSchemeClassifier& scheme_classifier,
+                    bool should_use_https_as_default_scheme = false,
+                    int https_port_for_testing = 0);
   // This constructor adds |cursor_position|, related to |text|.
   // |cursor_position| represents the location of the cursor within the
   // query |text|. It may be set to base::string16::npos if the input
@@ -43,7 +47,10 @@ class AutocompleteInput {
                     size_t cursor_position,
                     metrics::OmniboxEventProto::PageClassification
                         current_page_classification,
-                    const AutocompleteSchemeClassifier& scheme_classifier);
+                    const AutocompleteSchemeClassifier& scheme_classifier,
+                    bool should_use_https_as_default_scheme = false,
+                    int https_port_for_testing = 0);
+
   // This constructor adds |desired_tld|, related to |text|. |desired_tld|
   // is the user's desired TLD, if one is not already present in the text to
   // autocomplete. When this is non-empty, it also implies that "www."
@@ -54,7 +61,10 @@ class AutocompleteInput {
                     const std::string& desired_tld,
                     metrics::OmniboxEventProto::PageClassification
                         current_page_classification,
-                    const AutocompleteSchemeClassifier& scheme_classifier);
+                    const AutocompleteSchemeClassifier& scheme_classifier,
+                    bool should_use_https_as_default_scheme = false,
+                    int https_port_for_testing = 0);
+
   AutocompleteInput(const AutocompleteInput& other);
   ~AutocompleteInput();
 
@@ -218,17 +228,13 @@ class AutocompleteInput {
     want_asynchronous_matches_ = want_asynchronous_matches;
   }
 
-  // Returns whether this input query was triggered due to the omnibox being
-  // focused.
-  bool from_omnibox_focus() const { return from_omnibox_focus_; }
-  // |from_omnibox_focus| should be true when input is created as a result
-  // of the omnibox being focused, instead of due to user input changes.
-  // Most providers should not provide matches in this case.  Providers
-  // which want to display matches on focus can use this flag to know when
-  // they can do so.
-  void set_from_omnibox_focus(bool from_omnibox_focus) {
-    from_omnibox_focus_ = from_omnibox_focus;
-  }
+  // Returns the type of UI interaction that started this autocomplete query.
+  OmniboxFocusType focus_type() const { return focus_type_; }
+  // |focus_type| should specify the UI interaction that started autocomplete.
+  // Generally, this should be left alone as DEFAULT. Most providers only
+  // provide results for DEFAULT focus type. Providers (like ZeroSuggest) that
+  // only want to display matches on-focus or on-clobber will look at this flag.
+  void set_focus_type(OmniboxFocusType focus_type) { focus_type_ = focus_type; }
 
   // Returns the terms in |text_| that start with http:// or https:// plus
   // at least one more character, stored without the scheme.  Used in
@@ -239,12 +245,29 @@ class AutocompleteInput {
     return terms_prefixed_by_http_or_https_;
   }
 
+  // Returns the ID of the query tile selected by the user, if any.
+  // If no tile was selected, returns base::nullopt.
+  const base::Optional<std::string>& query_tile_id() const {
+    return query_tile_id_;
+  }
+
+  // Called to indicate that the query tile represented by |tile_id| was
+  // clicked by the user. In the absence of a |query_tile_id_|, top level tiles
+  // will be displayed.
+  void set_query_tile_id(const std::string& tile_id) {
+    query_tile_id_ = tile_id;
+  }
+
   // Resets all internal variables to the null-constructed state.
   void Clear();
 
   // Estimates dynamic memory usage.
   // See base/trace_event/memory_usage_estimator.h for more info.
   size_t EstimateMemoryUsage() const;
+
+  bool added_default_scheme_to_typed_url() const {
+    return added_default_scheme_to_typed_url_;
+  }
 
  private:
   friend class AutocompleteProviderTest;
@@ -256,7 +279,7 @@ class AutocompleteInput {
             const AutocompleteSchemeClassifier& scheme_classifier);
 
   // NOTE: Whenever adding a new field here, please make sure to update Clear()
-  // method.
+  // and EstimateMemoryUsage() methods.
   base::string16 text_;
   size_t cursor_position_;
   GURL current_url_;
@@ -272,8 +295,19 @@ class AutocompleteInput {
   bool allow_exact_keyword_match_;
   metrics::OmniboxEventProto::KeywordModeEntryMethod keyword_mode_entry_method_;
   bool want_asynchronous_matches_;
-  bool from_omnibox_focus_;
+  OmniboxFocusType focus_type_ = OmniboxFocusType::DEFAULT;
   std::vector<base::string16> terms_prefixed_by_http_or_https_;
+  base::Optional<std::string> query_tile_id_;
+
+  // Flags for OmniboxDefaultNavigationsToHttps feature.
+  bool should_use_https_as_default_scheme_;
+  bool added_default_scheme_to_typed_url_;
+  // Port used by the embedded https server in tests. This is used to determine
+  // the correct port while upgrading URLs to https if the original URL has a
+  // non-default port.
+  // TODO(crbug.com/1168371): Remove when URLLoaderInterceptor can simulate
+  // redirects.
+  int https_port_for_testing_;
 };
 
 #endif  // COMPONENTS_OMNIBOX_BROWSER_AUTOCOMPLETE_INPUT_H_

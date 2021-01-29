@@ -13,7 +13,9 @@ namespace views {
 
 DesktopScreenWin::DesktopScreenWin() = default;
 
-DesktopScreenWin::~DesktopScreenWin() = default;
+DesktopScreenWin::~DesktopScreenWin() {
+  display::Screen::SetScreenInstance(old_screen_);
+}
 
 HWND DesktopScreenWin::GetHWNDFromNativeWindow(gfx::NativeWindow window) const {
   aura::WindowTreeHost* host = window->GetHost();
@@ -24,6 +26,11 @@ gfx::NativeWindow DesktopScreenWin::GetNativeWindowFromHWND(HWND hwnd) const {
   return ::IsWindow(hwnd)
              ? DesktopWindowTreeHostWin::GetContentWindowForHWND(hwnd)
              : gfx::kNullNativeWindow;
+}
+
+bool DesktopScreenWin::IsNativeWindowOccluded(gfx::NativeWindow window) const {
+  return window->GetHost()->GetNativeWindowOcclusionState() ==
+         aura::Window::OcclusionState::OCCLUDED;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

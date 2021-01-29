@@ -85,7 +85,7 @@ void OnWndProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
   if (message == WM_SETTINGCHANGE && wparam == SPI_SETCLIENTAREAANIMATION) {
     gfx::Animation::UpdatePrefersReducedMotion();
     for (WebContentsImpl* wc : WebContentsImpl::GetAllWebContents()) {
-      wc->GetRenderViewHost()->OnWebkitPreferencesChanged();
+      wc->OnWebPreferencesChanged();
     }
   }
 }
@@ -162,7 +162,7 @@ void BrowserAccessibilityStateImpl::
   for (size_t i = 0; i < module_count; i++) {
     TCHAR filename[MAX_PATH];
     GetModuleFileName(modules[i], filename, base::size(filename));
-    base::string16 module_name(base::FilePath(filename).BaseName().value());
+    std::string module_name(base::FilePath(filename).BaseName().AsUTF8Unsafe());
     if (base::LowerCaseEqualsASCII(module_name, "fsdomsrv.dll"))
       g_jaws = true;
     if (base::LowerCaseEqualsASCII(module_name, "vbufbackend_gecko_ia2.dll") ||

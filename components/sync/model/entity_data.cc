@@ -40,7 +40,9 @@ EntityData::EntityData(EntityData&& other)
       creation_time(other.creation_time),
       modification_time(other.modification_time),
       parent_id(std::move(other.parent_id)),
-      is_folder(other.is_folder) {
+      is_folder(other.is_folder),
+      is_bookmark_guid_in_specifics_preprocessed(
+          other.is_bookmark_guid_in_specifics_preprocessed) {
   specifics.Swap(&other.specifics);
   unique_position.Swap(&other.unique_position);
 }
@@ -56,8 +58,10 @@ EntityData& EntityData::operator=(EntityData&& other) {
   name = std::move(other.name);
   creation_time = other.creation_time;
   modification_time = other.modification_time;
-  parent_id = other.parent_id;
+  parent_id = std::move(other.parent_id);
   is_folder = other.is_folder;
+  is_bookmark_guid_in_specifics_preprocessed =
+      other.is_bookmark_guid_in_specifics_preprocessed;
   specifics.Swap(&other.specifics);
   unique_position.Swap(&other.unique_position);
   return *this;

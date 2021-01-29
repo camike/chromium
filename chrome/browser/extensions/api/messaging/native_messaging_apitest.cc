@@ -6,8 +6,10 @@
 #include "base/files/file_util.h"
 #include "base/macros.h"
 #include "base/scoped_observer.h"
+#include "base/strings/string_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/api/messaging/native_messaging_launch_from_native.h"
@@ -21,11 +23,14 @@
 #include "components/keep_alive_registry/keep_alive_registry.h"
 #include "components/keep_alive_registry/keep_alive_state_observer.h"
 #include "components/keep_alive_registry/keep_alive_types.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/test/result_catcher.h"
 
 namespace extensions {
 namespace {
+
+using ContextType = ExtensionApiTest::ContextType;
 
 class NativeMessagingApiTest : public ExtensionApiTest {
  protected:
@@ -42,7 +47,38 @@ IN_PROC_BROWSER_TEST_F(NativeMessagingApiTest, UserLevelNativeMessaging) {
   ASSERT_TRUE(RunExtensionTest("native_messaging")) << message_;
 }
 
-#if !defined(OS_CHROMEOS)
+// TODO(crbug.com/1094027): Clean up duplicate test coverage.
+class NativeMessagingLazyApiTest
+    : public NativeMessagingApiTest,
+      public testing::WithParamInterface<ContextType> {
+ protected:
+  bool RunLazyTest(const std::string& extension_name) {
+    if (GetParam() == ContextType::kEventPage) {
+      return RunExtensionTest(extension_name);
+    }
+    return RunExtensionTestWithFlags(
+        extension_name, kFlagRunAsServiceWorkerBasedExtension, kFlagNone);
+  }
+};
+
+INSTANTIATE_TEST_SUITE_P(EventPage,
+                         NativeMessagingLazyApiTest,
+                         ::testing::Values(ContextType::kEventPage));
+INSTANTIATE_TEST_SUITE_P(ServiceWorker,
+                         NativeMessagingLazyApiTest,
+                         ::testing::Values(ContextType::kServiceWorker));
+
+IN_PROC_BROWSER_TEST_P(NativeMessagingLazyApiTest, NativeMessagingBasic) {
+  ASSERT_NO_FATAL_FAILURE(test_host_.RegisterTestHost(false));
+  ASSERT_TRUE(RunLazyTest("native_messaging_lazy")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_P(NativeMessagingLazyApiTest, UserLevelNativeMessaging) {
+  ASSERT_NO_FATAL_FAILURE(test_host_.RegisterTestHost(true));
+  ASSERT_TRUE(RunLazyTest("native_messaging_lazy")) << message_;
+}
+
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 
 class TestProcessManagerObserver : public ProcessManagerObserver {
  public:
@@ -192,7 +228,7 @@ class TestKeepAliveStateObserver : public KeepAliveStateObserver {
     // On Mac, the browser remains alive when no windows are open, so observing
     // the KeepAliveRegistry cannot detect when the native messaging keep-alive
     // has been released; poll for changes instead.
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
     polling_timer_.Start(
         FROM_HERE, base::TimeDelta::FromMilliseconds(100),
         base::BindRepeating(&TestKeepAliveStateObserver::PollKeepAlive,
@@ -213,7 +249,7 @@ class TestKeepAliveStateObserver : public KeepAliveStateObserver {
 
   void OnKeepAliveRestartStateChanged(bool can_restart) override {}
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   void PollKeepAlive() {
     OnKeepAliveStateChanged(
         KeepAliveRegistry::GetInstance()->IsOriginRegistered(
@@ -340,9 +376,9 @@ class NativeMessagingLaunchBackgroundModeApiTest
   void SetUpCommandLine(base::CommandLine* command_line) override {
     NativeMessagingLaunchApiTest::SetUpCommandLine(command_line);
 
-    if (base::StringPiece(
-            ::testing::UnitTest::GetInstance()->current_test_info()->name())
-            .starts_with("PRE")) {
+    if (base::StartsWith(
+            ::testing::UnitTest::GetInstance()->current_test_info()->name(),
+            "PRE")) {
       return;
     }
     set_exit_when_last_browser_closes(false);
@@ -396,7 +432,7 @@ IN_PROC_BROWSER_TEST_F(NativeMessagingLaunchBackgroundModeApiTest,
   ASSERT_NO_FATAL_FAILURE(TestKeepAliveStateObserver().WaitForNoKeepAlive());
 }
 
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace
 }  // namespace extensions

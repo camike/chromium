@@ -13,6 +13,7 @@
 #include "base/files/file_path.h"
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_sub_menu_model.h"
@@ -35,6 +36,7 @@
 
 class AccessibilityLabelsMenuObserver;
 class ClickToCallContextMenuObserver;
+class CopyLinkToTextMenuObserver;
 class PrintPreviewContextMenuObserver;
 class Profile;
 class QuickAnswersMenuObserver;
@@ -62,6 +64,10 @@ class MediaPlayerAction;
 }
 }
 
+namespace ui {
+class DataTransferEndpoint;
+}
+
 class RenderViewContextMenu : public RenderViewContextMenuBase {
  public:
   RenderViewContextMenu(content::RenderFrameHost* render_frame_host,
@@ -72,10 +78,6 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   // Adds the spell check service item to the context menu.
   static void AddSpellCheckServiceItem(ui::SimpleMenuModel* menu,
                                        bool is_checked);
-
-  // Range of command IDs to use for the items in the send tab to self submenu.
-  static const int kMaxSendTabToSelfSubMenuCommandId =
-      send_tab_to_self::SendTabToSelfSubMenuModel::kMaxCommandId;
 
   // RenderViewContextMenuBase:
   bool IsCommandIdChecked(int command_id) const override;
@@ -138,7 +140,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   static base::string16 FormatURLForClipboard(const GURL& url);
 
   // Writes the specified text/url to the system clipboard.
-  static void WriteURLToClipboard(const GURL& url);
+  void WriteURLToClipboard(const GURL& url);
 
   // RenderViewContextMenuBase:
   void InitMenu() override;
@@ -160,7 +162,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void AppendLinkItems();
   void AppendOpenWithLinkItems();
   void AppendSmartSelectionActionItems();
-  void AppendOpenInBookmarkAppLinkItems();
+  void AppendOpenInWebAppLinkItems();
   void AppendQuickAnswersItems();
   void AppendImageItems();
   void AppendAudioItems();
@@ -171,6 +173,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void AppendPageItems();
   void AppendExitFullscreenItem();
   void AppendCopyItem();
+  void AppendCopyLinkToTextItem();
   void AppendPrintItem();
   void AppendMediaRouterItem();
   void AppendRotationItems();
@@ -193,6 +196,10 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void AppendSharingItems();
   void AppendClickToCallItem();
   void AppendSharedClipboardItem();
+  void AppendQRCodeGeneratorItem(bool for_image, bool draw_icon);
+
+  std::unique_ptr<ui::DataTransferEndpoint> CreateDataEndpoint(
+      bool notify_if_restricted) const;
 
   // Command enabled query functions.
   bool IsReloadEnabled() const;
@@ -211,7 +218,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   bool IsOpenLinkOTREnabled() const;
 
   // Command execution functions.
-  void ExecOpenBookmarkApp();
+  void ExecOpenWebApp();
   void ExecProtocolHandler(int event_flags, int handler_index);
   void ExecOpenLinkInProfile(int profile_index);
   void ExecInspectElement();
@@ -266,14 +273,14 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
       accessibility_labels_menu_observer_;
   ui::SimpleMenuModel accessibility_labels_submenu_model_;
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
   // An observer that handles the submenu for showing spelling options. This
   // submenu lets users select the spelling language, for example.
   std::unique_ptr<SpellingOptionsSubMenuObserver>
       spelling_options_submenu_observer_;
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // An observer that handles "Open with <app>" items.
   std::unique_ptr<RenderViewContextMenuObserver> open_with_menu_observer_;
   // An observer that handles smart text selection action items.
@@ -286,6 +293,8 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   // An observer that disables menu items when print preview is active.
   std::unique_ptr<PrintPreviewContextMenuObserver> print_preview_menu_observer_;
 #endif
+
+  std::unique_ptr<CopyLinkToTextMenuObserver> copy_link_to_text_menu_observer_;
 
   // In the case of a MimeHandlerView this will point to the WebContents that
   // embeds the MimeHandlerViewGuest. Otherwise this will be the same as

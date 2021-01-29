@@ -6,53 +6,73 @@
 
 #include "base/base_switches.h"
 #include "base/bind.h"
-#include "base/message_loop/message_loop_current.h"
+#include "base/json/json_reader.h"
+#include "base/task/current_thread.h"
+#include "base/task/task_traits.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "cc/base/switches.h"
 #include "components/captive_portal/core/buildflags.h"
+#include "components/prefs/pref_service.h"
 #include "components/startup_metric_utils/browser/startup_metric_utils.h"
+#include "components/subresource_filter/content/browser/ruleset_service.h"
 #include "components/translate/core/browser/translate_download_manager.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
+#include "content/public/common/page_visibility_state.h"
+#include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
-#include "services/service_manager/embedder/result_codes.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "weblayer/browser/browser_process.h"
 #include "weblayer/browser/cookie_settings_factory.h"
 #include "weblayer/browser/feature_list_creator.h"
 #include "weblayer/browser/host_content_settings_map_factory.h"
 #include "weblayer/browser/i18n_util.h"
+#include "weblayer/browser/no_state_prefetch/no_state_prefetch_manager_factory.h"
+#include "weblayer/browser/no_state_prefetch/prerender_link_manager_factory.h"
 #include "weblayer/browser/permissions/weblayer_permissions_client.h"
 #include "weblayer/browser/stateful_ssl_host_state_delegate_factory.h"
+#include "weblayer/browser/subresource_filter_profile_context_factory.h"
 #include "weblayer/browser/translate_accept_languages_factory.h"
 #include "weblayer/browser/translate_ranker_factory.h"
 #include "weblayer/browser/webui/web_ui_controller_factory.h"
+#include "weblayer/grit/weblayer_resources.h"
 #include "weblayer/public/main.h"
 
 #if defined(OS_ANDROID)
+#include "base/command_line.h"
 #include "components/crash/content/browser/child_exit_observer_android.h"
 #include "components/crash/content/browser/child_process_crash_observer_android.h"
 #include "components/crash/core/common/crash_key.h"
 #include "components/javascript_dialogs/android/app_modal_dialog_view_android.h"  // nogncheck
 #include "components/javascript_dialogs/app_modal_dialog_manager.h"  // nogncheck
+#include "components/metrics/metrics_service.h"
+#include "components/variations/variations_ids_provider.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_switches.h"
 #include "net/android/network_change_notifier_factory_android.h"
 #include "net/base/network_change_notifier.h"
 #include "weblayer/browser/android/metrics/uma_utils.h"
+#include "weblayer/browser/android/metrics/weblayer_metrics_service_client.h"
+#include "weblayer/browser/java/jni/MojoInterfaceRegistrar_jni.h"
+#include "weblayer/browser/media/local_presentation_manager_factory.h"
+#include "weblayer/browser/media/media_router_factory.h"
+#include "weblayer/browser/weblayer_factory_impl_android.h"
+#include "weblayer/common/features.h"
 #endif
 
-#if defined(USE_X11)
-#include "ui/base/x/x11_util.h"  // nogncheck
-#endif
 #if defined(USE_AURA) && defined(USE_X11)
+#include "ui/base/ui_base_features.h"
 #include "ui/events/devices/x11/touch_factory_x11.h"  // nogncheck
 #endif
-#if !defined(OS_CHROMEOS) && defined(USE_AURA) && defined(OS_LINUX)
+// TODO(crbug.com/1052397): Revisit once build flag switch of lacros-chrome is
+// complete.
+#if defined(USE_AURA) && (defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS))
 #include "ui/base/ime/init/input_method_initializer.h"
 #endif
 
@@ -63,6 +83,27 @@
 namespace weblayer {
 
 namespace {
+
+// Indexes and publishes the subresource filter ruleset data from resources in
+// the resource bundle.
+void PublishSubresourceFilterRulesetFromResourceBundle() {
+  // First obtain the version of the ruleset data from the manifest.
+  std::string ruleset_manifest_string =
+      ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(
+          IDR_SUBRESOURCE_FILTER_UNINDEXED_RULESET_MANIFEST_JSON);
+  auto ruleset_manifest = base::JSONReader::Read(ruleset_manifest_string);
+  DCHECK(ruleset_manifest);
+  std::string* content_version = ruleset_manifest->FindStringKey("version");
+
+  // Instruct the RulesetService to obtain the unindexed ruleset data from the
+  // ResourceBundle and give it the version of that data.
+  auto* ruleset_service =
+      BrowserProcess::GetInstance()->subresource_filter_ruleset_service();
+  subresource_filter::UnindexedRulesetInfo ruleset_info;
+  ruleset_info.resource_id = IDR_SUBRESOURCE_FILTER_UNINDEXED_RULESET;
+  ruleset_info.content_version = *content_version;
+  ruleset_service->IndexAndStoreAndPublishRulesetIfNeeded(ruleset_info);
+}
 
 // Instantiates all weblayer KeyedService factories, which is
 // especially important for services that should be created at profile
@@ -76,6 +117,15 @@ void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   CookieSettingsFactory::GetInstance();
   TranslateAcceptLanguagesFactory::GetInstance();
   TranslateRankerFactory::GetInstance();
+  PrerenderLinkManagerFactory::GetInstance();
+  NoStatePrefetchManagerFactory::GetInstance();
+  SubresourceFilterProfileContextFactory::GetInstance();
+#if defined(OS_ANDROID)
+  if (MediaRouterFactory::IsFeatureEnabled()) {
+    LocalPresentationManagerFactory::GetInstance();
+    MediaRouterFactory::GetInstance();
+  }
+#endif
 }
 
 void StopMessageLoop(base::OnceClosure quit_closure) {
@@ -91,8 +141,11 @@ void StopMessageLoop(base::OnceClosure quit_closure) {
 
 BrowserMainPartsImpl::BrowserMainPartsImpl(
     MainParams* params,
-    const content::MainFunctionParams& main_function_params)
-    : params_(params), main_function_params_(main_function_params) {}
+    const content::MainFunctionParams& main_function_params,
+    std::unique_ptr<PrefService> local_state)
+    : params_(params),
+      main_function_params_(main_function_params),
+      local_state_(std::move(local_state)) {}
 
 BrowserMainPartsImpl::~BrowserMainPartsImpl() = default;
 
@@ -107,24 +160,36 @@ int BrowserMainPartsImpl::PreCreateThreads() {
       std::make_unique<crash_reporter::ChildProcessCrashObserver>());
 
   crash_reporter::InitializeCrashKeys();
+
+  // WebLayer initializes the MetricsService once consent is determined.
+  // Determining consent is async and potentially slow. VariationsIdsProvider
+  // is responsible for updating the X-Client-Data header. To ensure the header
+  // is always provided, VariationsIdsProvider is registered now.
+  //
+  // Chrome registers the VariationsIdsProvider from PreCreateThreads() as well.
+  auto* metrics_client = WebLayerMetricsServiceClient::GetInstance();
+  metrics_client->GetMetricsService()
+      ->synthetic_trial_registry()
+      ->AddSyntheticTrialObserver(
+          variations::VariationsIdsProvider::GetInstance());
 #endif
 
-  return service_manager::RESULT_CODE_NORMAL_EXIT;
+  return content::RESULT_CODE_NORMAL_EXIT;
 }
 
 void BrowserMainPartsImpl::PreMainMessageLoopStart() {
 #if defined(USE_AURA) && defined(USE_X11)
-  ui::TouchFactory::SetTouchDeviceListFromCommandLine();
+  if (!features::IsUsingOzonePlatform())
+    ui::TouchFactory::SetTouchDeviceListFromCommandLine();
 #endif
 }
 
 int BrowserMainPartsImpl::PreEarlyInitialization() {
-  browser_process_ = std::make_unique<BrowserProcess>();
+  browser_process_ = std::make_unique<BrowserProcess>(std::move(local_state_));
 
-#if defined(USE_X11)
-  ui::SetDefaultX11ErrorHandlers();
-#endif
-#if defined(USE_AURA) && defined(OS_LINUX)
+// TODO(crbug.com/1052397): Revisit once build flag switch of lacros-chrome is
+// complete.
+#if defined(USE_AURA) && (defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS))
   ui::InitializeInputMethodForTesting();
 #endif
 #if defined(OS_ANDROID)
@@ -138,7 +203,7 @@ int BrowserMainPartsImpl::PreEarlyInitialization() {
       BrowserProcess::GetInstance()->GetSharedURLLoaderFactory());
   download_manager->set_application_locale(i18n::GetApplicationLocale());
 
-  return service_manager::RESULT_CODE_NORMAL_EXIT;
+  return content::RESULT_CODE_NORMAL_EXIT;
 }
 
 void BrowserMainPartsImpl::PreMainMessageLoopRun() {
@@ -157,6 +222,17 @@ void BrowserMainPartsImpl::PreMainMessageLoopRun() {
       WebUIControllerFactory::GetInstance());
 
   BrowserProcess::GetInstance()->PreMainMessageLoopRun();
+
+  // Publish the ruleset data. On the vast majority of runs this will
+  // effectively be a no-op as the version of the data changes at most once per
+  // release. Nonetheless, post it as a best-effort task to take it off the
+  // critical path of startup. Note that best-effort tasks are guaranteed to
+  // execute within a reasonable delay (assuming of course that the app isn't
+  // shut down first).
+  content::GetUIThreadTaskRunner({base::TaskPriority::BEST_EFFORT})
+      ->PostTask(
+          FROM_HERE,
+          base::BindOnce(&PublishSubresourceFilterRulesetFromResourceBundle));
 
   if (main_function_params_.ui_task) {
     std::move(*main_function_params_.ui_task).Run();
@@ -187,6 +263,9 @@ void BrowserMainPartsImpl::PreMainMessageLoopRun() {
                 base::android::AttachCurrentThread(), controller,
                 controller->web_contents()->GetTopLevelNativeWindow());
           }));
+
+  Java_MojoInterfaceRegistrar_registerMojoInterfaces(
+      base::android::AttachCurrentThread());
 #endif
 }
 

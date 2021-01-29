@@ -11,13 +11,16 @@
 #include "components/invalidation/public/invalidation_util.h"
 #include "components/invalidation/public/invalidator_state.h"
 
-namespace syncer {
+namespace invalidation {
 
 class TopicInvalidationMap;
 
 class INVALIDATION_EXPORT InvalidationHandler {
  public:
-  InvalidationHandler();
+  InvalidationHandler() = default;
+  InvalidationHandler(const InvalidationHandler& other) = delete;
+  InvalidationHandler& operator=(const InvalidationHandler& other) = delete;
+  virtual ~InvalidationHandler() = default;
 
   // Called when the invalidator state changes.
   virtual void OnInvalidatorStateChange(InvalidatorState state) = 0;
@@ -36,14 +39,11 @@ class INVALIDATION_EXPORT InvalidationHandler {
   // Called on change of |client_id|. Client id is used to identify the
   // the invalidator. The id is only relevant to some handlers, e.g. Sync
   // where the reflection blocking logic is based on it.
-  virtual void OnInvalidatorClientIdChange(const std::string& client_id) {}
+  virtual void OnInvalidatorClientIdChange(const std::string& client_id);
 
   virtual bool IsPublicTopic(const Topic& topic) const;
-
- protected:
-  virtual ~InvalidationHandler();
 };
 
-}  // namespace syncer
+}  // namespace invalidation
 
 #endif  // COMPONENTS_INVALIDATION_PUBLIC_INVALIDATION_HANDLER_H_

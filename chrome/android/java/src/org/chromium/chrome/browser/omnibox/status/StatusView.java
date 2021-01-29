@@ -4,8 +4,6 @@
 
 package org.chromium.chrome.browser.omnibox.status;
 
-import static org.chromium.chrome.browser.toolbar.top.ToolbarPhone.URL_FOCUS_CHANGE_ANIMATION_DURATION_MS;
-
 import android.content.Context;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
@@ -22,12 +20,11 @@ import android.widget.TextView;
 import androidx.annotation.ColorRes;
 import androidx.annotation.Nullable;
 import androidx.annotation.StringRes;
-import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.omnibox.LocationBarDataProvider;
 import org.chromium.chrome.browser.omnibox.SearchEngineLogoUtils;
-import org.chromium.chrome.browser.toolbar.ToolbarCommonPropertiesModel;
 import org.chromium.components.browser_ui.widget.CompositeTouchDelegate;
 import org.chromium.ui.widget.Toast;
 
@@ -35,18 +32,7 @@ import org.chromium.ui.widget.Toast;
  * StatusView is a location bar's view displaying status (icons and/or text).
  */
 public class StatusView extends LinearLayout {
-    @VisibleForTesting
-    static class StatusViewDelegate {
-        /** @see {@link SearchEngineLogoUtils#shouldShowSearchEngineLogo} */
-        boolean shouldShowSearchEngineLogo(boolean isIncognito) {
-            return SearchEngineLogoUtils.shouldShowSearchEngineLogo(isIncognito);
-        }
-
-        /** @see {@link SearchEngineLogoUtils#isSearchEngineLogoEnabled()} */
-        boolean isSearchEngineLogoEnabled() {
-            return SearchEngineLogoUtils.isSearchEngineLogoEnabled();
-        }
-    }
+    public static final int ICON_ANIMATION_DURATION_MS = 225;
 
     private @Nullable View mIncognitoBadge;
     private int mIncognitoBadgeEndPaddingWithIcon;
@@ -69,16 +55,15 @@ public class StatusView extends LinearLayout {
 
     private TouchDelegate mTouchDelegate;
     private CompositeTouchDelegate mCompositeTouchDelegate;
-    private StatusViewDelegate mDelegate;
 
     private boolean mLastTouchDelegateRtlness;
     private Rect mLastTouchDelegateRect;
 
-    private ToolbarCommonPropertiesModel mToolbarCommonPropertiesModel;
+    private LocationBarDataProvider mLocationBarDataProvider;
+    private SearchEngineLogoUtils mSearchEngineLogoUtils;
 
     public StatusView(Context context, AttributeSet attributes) {
         super(context, attributes);
-        mDelegate = new StatusViewDelegate();
     }
 
     @Override
@@ -93,9 +78,12 @@ public class StatusView extends LinearLayout {
         configureAccessibilityDescriptions();
     }
 
-    void setToolbarCommonPropertiesModel(
-            ToolbarCommonPropertiesModel toolbarCommonPropertiesModel) {
-        mToolbarCommonPropertiesModel = toolbarCommonPropertiesModel;
+    void setLocationBarDataProvider(LocationBarDataProvider toolbarCommonPropertiesModel) {
+        mLocationBarDataProvider = toolbarCommonPropertiesModel;
+    }
+
+    void setSearchEngineLogoUtils(SearchEngineLogoUtils searchEngineLogoUtils) {
+        mSearchEngineLogoUtils = searchEngineLogoUtils;
     }
 
     /**
@@ -103,32 +91,31 @@ public class StatusView extends LinearLayout {
      */
     public void updateSearchEngineStatusIcon(boolean shouldShowSearchEngineLogo,
             boolean isSearchEngineGoogle, String searchEngineUrl) {
-        if (mToolbarCommonPropertiesModel != null
-                && mDelegate.shouldShowSearchEngineLogo(
-                        mToolbarCommonPropertiesModel.isIncognito())) {
-            LinearLayout.LayoutParams layoutParams =
-                    new LinearLayout.LayoutParams(mIconView.getLayoutParams());
-            layoutParams.setMarginEnd(0);
-            layoutParams.width =
-                    getResources().getDimensionPixelSize(R.dimen.location_bar_status_icon_width);
-            mIconView.setLayoutParams(layoutParams);
-            // Setup the padding once we're loaded, the other padding changes will happen with post-
-            // layout positioning.
-            setPaddingRelative(getPaddingStart(), getPaddingTop(),
-                    getEndPaddingPixelSizeForFocusState(false), getPaddingBottom());
-            // Note: the margins and implicit padding were removed from the status view for the
-            // dse icon experiment. Moving padding values that were there to the verbose status
-            // text view and the verbose text extra space.
-            mVerboseStatusTextView.setPaddingRelative(
-                    getResources().getDimensionPixelSize(
-                            R.dimen.sei_location_bar_verbose_start_padding_verbose_text),
-                    mVerboseStatusTextView.getPaddingTop(), mVerboseStatusTextView.getPaddingEnd(),
-                    mVerboseStatusTextView.getPaddingBottom());
-            layoutParams = new LinearLayout.LayoutParams(mStatusExtraSpace.getLayoutParams());
-            layoutParams.width = getResources().getDimensionPixelSize(
-                    R.dimen.sei_location_bar_status_extra_padding_width);
-            mStatusExtraSpace.setLayoutParams(layoutParams);
-        }
+        if (!mSearchEngineLogoUtils.isSearchEngineLogoEnabled()) return;
+
+        LinearLayout.LayoutParams layoutParams =
+                new LinearLayout.LayoutParams(mIconView.getLayoutParams());
+        layoutParams.setMarginEnd(0);
+        layoutParams.width =
+                getResources().getDimensionPixelSize(R.dimen.location_bar_status_icon_width);
+        mIconView.setLayoutParams(layoutParams);
+        // Setup the padding once we're loaded, the other padding changes will happen with post-
+        // layout positioning.
+        setPaddingRelative(getPaddingStart(), getPaddingTop(),
+                getResources().getDimensionPixelOffset(R.dimen.sei_location_bar_icon_end_padding),
+                getPaddingBottom());
+        // Note: the margins and implicit padding were removed from the status view for the
+        // dse icon experiment. Moving padding values that were there to the verbose status
+        // text view and the verbose text extra space.
+        mVerboseStatusTextView.setPaddingRelative(
+                getResources().getDimensionPixelSize(
+                        R.dimen.sei_location_bar_verbose_start_padding_verbose_text),
+                mVerboseStatusTextView.getPaddingTop(), mVerboseStatusTextView.getPaddingEnd(),
+                mVerboseStatusTextView.getPaddingBottom());
+        layoutParams = new LinearLayout.LayoutParams(mStatusExtraSpace.getLayoutParams());
+        layoutParams.width = getResources().getDimensionPixelSize(
+                R.dimen.sei_location_bar_status_extra_padding_width);
+        mStatusExtraSpace.setLayoutParams(layoutParams);
     }
 
     /**
@@ -152,9 +139,9 @@ public class StatusView extends LinearLayout {
         // This is to prevent the visibility of the view being changed both implicitly here and
         // explicitly in setStatusIconShown. The visibility should only be set here through code not
         // related to the dse icon.
-        if (mToolbarCommonPropertiesModel != null
-                && mDelegate.shouldShowSearchEngineLogo(
-                        mToolbarCommonPropertiesModel.isIncognito())) {
+        if (mLocationBarDataProvider != null
+                && mSearchEngineLogoUtils.shouldShowSearchEngineLogo(
+                        mLocationBarDataProvider.isIncognito())) {
             return;
         }
 
@@ -168,7 +155,7 @@ public class StatusView extends LinearLayout {
             updateIncognitoBadgeEndPadding();
             mIconView.animate()
                     .alpha(1.0f)
-                    .setDuration(URL_FOCUS_CHANGE_ANIMATION_DURATION_MS)
+                    .setDuration(ICON_ANIMATION_DURATION_MS)
                     .withEndAction(() -> {
                         mAnimatingStatusIconShow = false;
                         // Wait until the icon is visible so the bounds will be properly set.
@@ -187,7 +174,7 @@ public class StatusView extends LinearLayout {
             // back and forth between secure and insecure sites, which seems like a glitch.
             // See bug: crbug.com/919449
             mIconView.animate()
-                    .setDuration(mAnimationsEnabled ? URL_FOCUS_CHANGE_ANIMATION_DURATION_MS : 0)
+                    .setDuration(mAnimationsEnabled ? ICON_ANIMATION_DURATION_MS : 0)
                     .alpha(0.0f)
                     .withEndAction(() -> {
                         mIconView.setVisibility(View.GONE);
@@ -250,8 +237,7 @@ public class StatusView extends LinearLayout {
 
                 // Note: crossfade controls blending, not animation.
                 newImage.setCrossFadeEnabled(true);
-                newImage.startTransition(
-                        mAnimationsEnabled ? URL_FOCUS_CHANGE_ANIMATION_DURATION_MS : 0);
+                newImage.startTransition(mAnimationsEnabled ? ICON_ANIMATION_DURATION_MS : 0);
 
                 // Update the touch delegate only if the icons are swapped without animating the
                 // image view.
@@ -313,9 +299,9 @@ public class StatusView extends LinearLayout {
         // This is to prevent the visibility of the view being changed both explicitly here and
         // implicitly in animateStatusIcon. The visibility should only be set here through code
         // related to the dse icon.
-        if (mToolbarCommonPropertiesModel != null
-                && !mDelegate.shouldShowSearchEngineLogo(
-                        mToolbarCommonPropertiesModel.isIncognito())) {
+        if (mLocationBarDataProvider != null
+                && !mSearchEngineLogoUtils.shouldShowSearchEngineLogo(
+                        mLocationBarDataProvider.isIncognito())) {
             // Let developers know that they shouldn't use this code-path.
             assert false : "Only DSE icon code should set the status icon visibility manually.";
             return;
@@ -412,7 +398,7 @@ public class StatusView extends LinearLayout {
         if (mIncognitoBadge == null) return;
 
         int endPadding = -1;
-        if (mDelegate.isSearchEngineLogoEnabled()) {
+        if (mSearchEngineLogoUtils.isSearchEngineLogoEnabled()) {
             endPadding = 0;
         } else {
             endPadding = isIconVisible() ? mIncognitoBadgeEndPaddingWithIcon
@@ -420,19 +406,6 @@ public class StatusView extends LinearLayout {
         }
         mIncognitoBadge.setPaddingRelative(mIncognitoBadge.getPaddingStart(),
                 mIncognitoBadge.getPaddingTop(), endPadding, mIncognitoBadge.getPaddingBottom());
-    }
-
-    /**
-     * @returns The end padding for the given state.
-     */
-    public int getEndPaddingPixelSizeForFocusState(boolean hasFocus) {
-        if (hasFocus) {
-            return getResources().getDimensionPixelOffset(
-                    R.dimen.sei_location_bar_icon_end_padding_focused);
-        } else {
-            return getResources().getDimensionPixelOffset(
-                    R.dimen.sei_location_bar_icon_end_padding);
-        }
     }
 
     /**
@@ -465,8 +438,8 @@ public class StatusView extends LinearLayout {
                     getResources().getDimensionPixelSize(R.dimen.location_bar_lateral_padding);
         }
         if (mTouchDelegateEndOffset == 0) {
-            mTouchDelegateEndOffset = getResources().getDimensionPixelSize(
-                    R.dimen.location_bar_start_icon_margin_end);
+            mTouchDelegateEndOffset =
+                    getResources().getDimensionPixelSize(R.dimen.location_bar_icon_margin_end);
         }
         touchDelegateBounds.left -= isRtl ? mTouchDelegateEndOffset : mTouchDelegateStartOffset;
         touchDelegateBounds.right += isRtl ? mTouchDelegateStartOffset : mTouchDelegateEndOffset;
@@ -513,9 +486,5 @@ public class StatusView extends LinearLayout {
 
     TouchDelegate getTouchDelegateForTesting() {
         return mTouchDelegate;
-    }
-
-    void setDelegateForTesting(StatusViewDelegate delegate) {
-        mDelegate = delegate;
     }
 }

@@ -12,7 +12,9 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/optional.h"
 #include "build/build_config.h"
+#include "chrome/browser/ui/ash/screenshot_area.h"
 #include "ui/gfx/image/image.h"
 #include "ui/message_center/public/cpp/notification.h"
 #include "ui/snapshot/screenshot_grabber.h"
@@ -42,8 +44,8 @@ class ChromeScreenshotGrabber : public ash::ScreenshotDelegate {
  public:
   // Callback called with the |result| of trying to create a local writable
   // |path| for the possibly remote path.
-  using FileCallback = base::Callback<void(ScreenshotFileResult result,
-                                           const base::FilePath& path)>;
+  using FileCallback = base::OnceCallback<void(ScreenshotFileResult result,
+                                               const base::FilePath& path)>;
 
   ChromeScreenshotGrabber();
   ~ChromeScreenshotGrabber() override;
@@ -66,6 +68,7 @@ class ChromeScreenshotGrabber : public ash::ScreenshotDelegate {
   // callback from ScreenshotGrabber.
   void OnTookScreenshot(const base::Time& screenshot_time,
                         const base::Optional<int>& display_num,
+                        const ScreenshotArea& area,
                         ui::ScreenshotResult result,
                         scoped_refptr<base::RefCountedMemory> png_data);
 
@@ -78,7 +81,7 @@ class ChromeScreenshotGrabber : public ash::ScreenshotDelegate {
 
   // Prepares a writable file for |path|.
   void PrepareFileAndRunOnBlockingPool(const base::FilePath& path,
-                                       const FileCallback& callback);
+                                       FileCallback callback);
 
   // Called once all file writing is completed, or on error.
   void OnScreenshotCompleted(ui::ScreenshotResult result,
@@ -119,7 +122,9 @@ class ChromeScreenshotGrabber : public ash::ScreenshotDelegate {
 
   Profile* GetProfile();
 
-  bool ScreenshotsAllowed() const;
+  // Returns whether taking a screenshot for |area| is allowed or not.
+  // If not, shows a corresponding notification as well.
+  bool CheckIfScreenshotAllowed(const ScreenshotArea& area);
 
   std::unique_ptr<ui::ScreenshotGrabber> screenshot_grabber_;
 

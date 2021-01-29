@@ -55,10 +55,12 @@ class BrowserSwitcherPrefsTest : public testing::Test {
  public:
   void SetUp() override {
     BrowserSwitcherPrefs::RegisterProfilePrefs(prefs_backend_.registry());
-    policy_provider_ =
-        std::make_unique<policy::MockConfigurationPolicyProvider>();
-    EXPECT_CALL(*policy_provider_, IsInitializationComplete(_))
-        .WillRepeatedly(Return(true));
+    policy_provider_ = std::make_unique<
+        testing::NiceMock<policy::MockConfigurationPolicyProvider>>();
+    ON_CALL(*policy_provider_, IsInitializationComplete(_))
+        .WillByDefault(Return(true));
+    ON_CALL(*policy_provider_, IsFirstPolicyLoadComplete(_))
+        .WillByDefault(Return(true));
     std::vector<policy::ConfigurationPolicyProvider*> providers = {
         policy_provider_.get()};
     policy_service_ = std::make_unique<policy::PolicyServiceImpl>(providers);
@@ -133,8 +135,8 @@ TEST_F(BrowserSwitcherPrefsTest, TriggersObserversOnPolicyChange) {
   policy::PolicyMap policy_map;
   policy_map.Set(policy::key::kAlternativeBrowserPath,
                  policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_MACHINE,
-                 policy::POLICY_SOURCE_PLATFORM,
-                 std::make_unique<base::Value>("notepad.exe"), nullptr);
+                 policy::POLICY_SOURCE_PLATFORM, base::Value("notepad.exe"),
+                 nullptr);
 
   base::RunLoop run_loop;
   auto subscription = prefs()->RegisterPrefsChangedCallback(base::BindRepeating(

@@ -5,9 +5,11 @@
 package org.chromium.chrome.browser.download.home;
 
 import org.chromium.base.Callback;
+import org.chromium.chrome.browser.profiles.OTRProfileID;
 import org.chromium.components.offline_items_collection.ContentId;
 import org.chromium.components.offline_items_collection.OfflineContentProvider;
 import org.chromium.components.offline_items_collection.OfflineItem;
+import org.chromium.components.offline_items_collection.OfflineItemSchedule;
 import org.chromium.components.offline_items_collection.ShareCallback;
 import org.chromium.components.offline_items_collection.VisualsCallback;
 
@@ -48,7 +50,7 @@ public interface LegacyDownloadProvider {
     void getItemById(ContentId id, Callback<OfflineItem> callback);
 
     /** @see OfflineContentProvider#getAllItems(Callback) */
-    void getAllItems(Callback<ArrayList<OfflineItem>> callback, boolean offTheRecord);
+    void getAllItems(Callback<ArrayList<OfflineItem>> callback, OTRProfileID otrProfileID);
 
     /** @see OfflineContentProvider#getVisualsForItem(ContentId, VisualsCallback) */
     void getVisualsForItem(ContentId id, VisualsCallback callback);
@@ -58,4 +60,7 @@ public interface LegacyDownloadProvider {
 
     /** @see OfflineContentProvider#renameItem(ContentId, String, Callback)*/
     void renameItem(OfflineItem item, String name, Callback</*RenameResult*/ Integer> callback);
+
+    /** @see OfflineContentProvider#changeSchedule(ContentId, OfflineItemSchedule) */
+    void changeSchedule(final OfflineItem item, final OfflineItemSchedule schedule);
 }

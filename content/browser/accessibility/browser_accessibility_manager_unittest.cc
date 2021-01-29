@@ -79,7 +79,7 @@ TEST_F(BrowserAccessibilityManagerTest, DISABLED_TestFatalError) {
   std::unique_ptr<BrowserAccessibilityManager> manager;
   ASSERT_FALSE(test_browser_accessibility_delegate_->got_fatal_error());
   manager.reset(BrowserAccessibilityManager::Create(
-      MakeAXTreeUpdate(root), test_browser_accessibility_delegate_.get()));
+      MakeAXTreeUpdate({root}), test_browser_accessibility_delegate_.get()));
   ASSERT_TRUE(test_browser_accessibility_delegate_->got_fatal_error());
 
   ui::AXNodeData root2;
@@ -109,8 +109,8 @@ TEST_F(BrowserAccessibilityManagerTest, DISABLED_TestFatalError) {
 
   test_browser_accessibility_delegate_->reset_got_fatal_error();
   manager.reset(BrowserAccessibilityManager::Create(
-      MakeAXTreeUpdate(root2, child1, child2, grandchild4, grandchild5,
-                       grandchild6),
+      MakeAXTreeUpdate(
+          {root2, child1, child2, grandchild4, grandchild5, grandchild6}),
       test_browser_accessibility_delegate_.get()));
   ASSERT_TRUE(test_browser_accessibility_delegate_->got_fatal_error());
 }
@@ -126,17 +126,17 @@ TEST_F(BrowserAccessibilityManagerTest, BoundsForRange) {
 
   ui::AXNodeData static_text;
   static_text.id = 2;
-  static_text.SetName("Hello, world.");
   static_text.role = ax::mojom::Role::kStaticText;
+  static_text.SetName("Hello, world.");
   static_text.relative_bounds.bounds = gfx::RectF(100, 100, 29, 18);
   root.child_ids.push_back(2);
 
   ui::AXNodeData inline_text1;
   inline_text1.id = 3;
-  inline_text1.SetName("Hello, ");
   inline_text1.role = ax::mojom::Role::kInlineTextBox;
+  inline_text1.SetName("Hello, ");
   inline_text1.relative_bounds.bounds = gfx::RectF(100, 100, 29, 9);
-  inline_text1.SetTextDirection(ax::mojom::TextDirection::kLtr);
+  inline_text1.SetTextDirection(ax::mojom::WritingDirection::kLtr);
   std::vector<int32_t> character_offsets1;
   character_offsets1.push_back(6);   // 0
   character_offsets1.push_back(11);  // 1
@@ -151,10 +151,10 @@ TEST_F(BrowserAccessibilityManagerTest, BoundsForRange) {
 
   ui::AXNodeData inline_text2;
   inline_text2.id = 4;
-  inline_text2.SetName("world.");
   inline_text2.role = ax::mojom::Role::kInlineTextBox;
+  inline_text2.SetName("world.");
   inline_text2.relative_bounds.bounds = gfx::RectF(100, 109, 28, 9);
-  inline_text2.SetTextDirection(ax::mojom::TextDirection::kLtr);
+  inline_text2.SetTextDirection(ax::mojom::WritingDirection::kLtr);
   std::vector<int32_t> character_offsets2;
   character_offsets2.push_back(5);
   character_offsets2.push_back(10);
@@ -168,7 +168,7 @@ TEST_F(BrowserAccessibilityManagerTest, BoundsForRange) {
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, static_text, inline_text1, inline_text2),
+          MakeAXTreeUpdate({root, static_text, inline_text1, inline_text2}),
           test_browser_accessibility_delegate_.get()));
 
   BrowserAccessibility* root_accessible = manager->GetRoot();
@@ -232,17 +232,17 @@ TEST_F(BrowserAccessibilityManagerTest, BoundsForRangeMultiElement) {
 
   ui::AXNodeData static_text;
   static_text.id = 2;
-  static_text.SetName("ABC");
   static_text.role = ax::mojom::Role::kStaticText;
+  static_text.SetName("ABC");
   static_text.relative_bounds.bounds = gfx::RectF(0, 20, 33, 9);
   root.child_ids.push_back(2);
 
   ui::AXNodeData inline_text1;
   inline_text1.id = 3;
-  inline_text1.SetName("ABC");
   inline_text1.role = ax::mojom::Role::kInlineTextBox;
+  inline_text1.SetName("ABC");
   inline_text1.relative_bounds.bounds = gfx::RectF(0, 20, 33, 9);
-  inline_text1.SetTextDirection(ax::mojom::TextDirection::kLtr);
+  inline_text1.SetTextDirection(ax::mojom::WritingDirection::kLtr);
   std::vector<int32_t> character_offsets{10, 21, 33};
   inline_text1.AddIntListAttribute(
       ax::mojom::IntListAttribute::kCharacterOffsets, character_offsets);
@@ -250,25 +250,25 @@ TEST_F(BrowserAccessibilityManagerTest, BoundsForRangeMultiElement) {
 
   ui::AXNodeData static_text2;
   static_text2.id = 4;
-  static_text2.SetName("ABC");
   static_text2.role = ax::mojom::Role::kStaticText;
+  static_text2.SetName("ABC");
   static_text2.relative_bounds.bounds = gfx::RectF(10, 40, 33, 9);
   root.child_ids.push_back(4);
 
   ui::AXNodeData inline_text2;
   inline_text2.id = 5;
-  inline_text2.SetName("ABC");
   inline_text2.role = ax::mojom::Role::kInlineTextBox;
+  inline_text2.SetName("ABC");
   inline_text2.relative_bounds.bounds = gfx::RectF(10, 40, 33, 9);
-  inline_text2.SetTextDirection(ax::mojom::TextDirection::kLtr);
+  inline_text2.SetTextDirection(ax::mojom::WritingDirection::kLtr);
   inline_text2.AddIntListAttribute(
       ax::mojom::IntListAttribute::kCharacterOffsets, character_offsets);
   static_text2.child_ids.push_back(5);
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, static_text, inline_text1, static_text2,
-                           inline_text2),
+          MakeAXTreeUpdate(
+              {root, static_text, inline_text1, static_text2, inline_text2}),
           test_browser_accessibility_delegate_.get()));
 
   BrowserAccessibility* root_accessible = manager->GetRoot();
@@ -350,17 +350,17 @@ TEST_F(BrowserAccessibilityManagerTest, BoundsForRangeBiDi) {
 
   ui::AXNodeData static_text;
   static_text.id = 2;
-  static_text.SetName("123abc");
   static_text.role = ax::mojom::Role::kStaticText;
+  static_text.SetName("123abc");
   static_text.relative_bounds.bounds = gfx::RectF(100, 100, 60, 20);
   root.child_ids.push_back(2);
 
   ui::AXNodeData inline_text1;
   inline_text1.id = 3;
-  inline_text1.SetName("123");
   inline_text1.role = ax::mojom::Role::kInlineTextBox;
+  inline_text1.SetName("123");
   inline_text1.relative_bounds.bounds = gfx::RectF(100, 100, 30, 20);
-  inline_text1.SetTextDirection(ax::mojom::TextDirection::kLtr);
+  inline_text1.SetTextDirection(ax::mojom::WritingDirection::kLtr);
   std::vector<int32_t> character_offsets1;
   character_offsets1.push_back(10);  // 0
   character_offsets1.push_back(20);  // 1
@@ -371,10 +371,10 @@ TEST_F(BrowserAccessibilityManagerTest, BoundsForRangeBiDi) {
 
   ui::AXNodeData inline_text2;
   inline_text2.id = 4;
-  inline_text2.SetName("abc");
   inline_text2.role = ax::mojom::Role::kInlineTextBox;
+  inline_text2.SetName("abc");
   inline_text2.relative_bounds.bounds = gfx::RectF(130, 100, 30, 20);
-  inline_text2.SetTextDirection(ax::mojom::TextDirection::kRtl);
+  inline_text2.SetTextDirection(ax::mojom::WritingDirection::kRtl);
   std::vector<int32_t> character_offsets2;
   character_offsets2.push_back(10);
   character_offsets2.push_back(20);
@@ -385,7 +385,7 @@ TEST_F(BrowserAccessibilityManagerTest, BoundsForRangeBiDi) {
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, static_text, inline_text1, inline_text2),
+          MakeAXTreeUpdate({root, static_text, inline_text1, inline_text2}),
           test_browser_accessibility_delegate_.get()));
 
   BrowserAccessibility* root_accessible = manager->GetRoot();
@@ -447,17 +447,17 @@ TEST_F(BrowserAccessibilityManagerTest, BoundsForRangeScrolledWindow) {
 
   ui::AXNodeData static_text;
   static_text.id = 2;
-  static_text.SetName("ABC");
   static_text.role = ax::mojom::Role::kStaticText;
+  static_text.SetName("ABC");
   static_text.relative_bounds.bounds = gfx::RectF(100, 100, 16, 9);
   root.child_ids.push_back(2);
 
   ui::AXNodeData inline_text;
   inline_text.id = 3;
-  inline_text.SetName("ABC");
   inline_text.role = ax::mojom::Role::kInlineTextBox;
+  inline_text.SetName("ABC");
   inline_text.relative_bounds.bounds = gfx::RectF(100, 100, 16, 9);
-  inline_text.SetTextDirection(ax::mojom::TextDirection::kLtr);
+  inline_text.SetTextDirection(ax::mojom::WritingDirection::kLtr);
   std::vector<int32_t> character_offsets1;
   character_offsets1.push_back(6);   // 0
   character_offsets1.push_back(11);  // 1
@@ -468,7 +468,7 @@ TEST_F(BrowserAccessibilityManagerTest, BoundsForRangeScrolledWindow) {
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, static_text, inline_text),
+          MakeAXTreeUpdate({root, static_text, inline_text}),
           test_browser_accessibility_delegate_.get()));
 
   BrowserAccessibility* root_accessible = manager->GetRoot();
@@ -513,30 +513,30 @@ TEST_F(BrowserAccessibilityManagerTest, BoundsForRangeOnParentElement) {
 
   ui::AXNodeData static_text1;
   static_text1.id = 3;
-  static_text1.SetName("AB");
   static_text1.role = ax::mojom::Role::kStaticText;
+  static_text1.SetName("AB");
   static_text1.relative_bounds.bounds = gfx::RectF(100, 100, 40, 20);
   static_text1.child_ids.push_back(6);
 
   ui::AXNodeData img;
   img.id = 4;
-  img.SetName("Test image");
   img.role = ax::mojom::Role::kImage;
+  img.SetName("Test image");
   img.relative_bounds.bounds = gfx::RectF(140, 100, 20, 20);
 
   ui::AXNodeData static_text2;
   static_text2.id = 5;
-  static_text2.SetName("CD");
   static_text2.role = ax::mojom::Role::kStaticText;
+  static_text2.SetName("CD");
   static_text2.relative_bounds.bounds = gfx::RectF(160, 100, 40, 20);
   static_text2.child_ids.push_back(7);
 
   ui::AXNodeData inline_text1;
   inline_text1.id = 6;
-  inline_text1.SetName("AB");
   inline_text1.role = ax::mojom::Role::kInlineTextBox;
+  inline_text1.SetName("AB");
   inline_text1.relative_bounds.bounds = gfx::RectF(100, 100, 40, 20);
-  inline_text1.SetTextDirection(ax::mojom::TextDirection::kLtr);
+  inline_text1.SetTextDirection(ax::mojom::WritingDirection::kLtr);
   std::vector<int32_t> character_offsets1;
   character_offsets1.push_back(20);  // 0
   character_offsets1.push_back(40);  // 1
@@ -545,10 +545,10 @@ TEST_F(BrowserAccessibilityManagerTest, BoundsForRangeOnParentElement) {
 
   ui::AXNodeData inline_text2;
   inline_text2.id = 7;
-  inline_text2.SetName("CD");
   inline_text2.role = ax::mojom::Role::kInlineTextBox;
+  inline_text2.SetName("CD");
   inline_text2.relative_bounds.bounds = gfx::RectF(160, 100, 40, 20);
-  inline_text2.SetTextDirection(ax::mojom::TextDirection::kLtr);
+  inline_text2.SetTextDirection(ax::mojom::WritingDirection::kLtr);
   std::vector<int32_t> character_offsets2;
   character_offsets2.push_back(20);  // 0
   character_offsets2.push_back(40);  // 1
@@ -557,8 +557,8 @@ TEST_F(BrowserAccessibilityManagerTest, BoundsForRangeOnParentElement) {
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, div, static_text1, img, static_text2,
-                           inline_text1, inline_text2),
+          MakeAXTreeUpdate({root, div, static_text1, img, static_text2,
+                            inline_text1, inline_text2}),
           test_browser_accessibility_delegate_.get()));
   BrowserAccessibility* root_accessible = manager->GetRoot();
   ASSERT_NE(nullptr, root_accessible);
@@ -626,7 +626,7 @@ TEST_F(BrowserAccessibilityManagerTest, TestNextPreviousInTreeOrder) {
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, node2, node3, node4, node5),
+          MakeAXTreeUpdate({root, node2, node3, node4, node5}),
           test_browser_accessibility_delegate_.get()));
 
   BrowserAccessibility* root_accessible = manager->GetRoot();
@@ -729,7 +729,7 @@ TEST_F(BrowserAccessibilityManagerTest, TestNextNonDescendantInTreeOrder) {
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, node2, node3, node4, node5),
+          MakeAXTreeUpdate({root, node2, node3, node4, node5}),
           test_browser_accessibility_delegate_.get()));
 
   BrowserAccessibility* root_accessible = manager->GetRoot();
@@ -804,8 +804,8 @@ TEST_F(BrowserAccessibilityManagerTest, TestNextPreviousTextOnlyObject) {
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, node2, node3, node4, node5, text1, text2,
-                           text3, text4, link),
+          MakeAXTreeUpdate({root, node2, node3, node4, node5, text1, text2,
+                            text3, text4, link}),
           test_browser_accessibility_delegate_.get()));
 
   BrowserAccessibility* root_accessible = manager->GetRoot();
@@ -916,9 +916,9 @@ TEST_F(BrowserAccessibilityManagerTest, TestFindIndicesInCommonParent) {
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, div, button, button_text, line_break,
-                           paragraph, paragraph_text, paragraph_line1,
-                           paragraph_line2),
+          MakeAXTreeUpdate({root, div, button, button_text, line_break,
+                            paragraph, paragraph_text, paragraph_line1,
+                            paragraph_line2}),
           test_browser_accessibility_delegate_.get()));
 
   BrowserAccessibility* root_accessible = manager->GetRoot();
@@ -1075,9 +1075,9 @@ TEST_F(BrowserAccessibilityManagerTest, TestGetTextForRange) {
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, div, button, button_text, container,
-                           container_text, line_break, paragraph,
-                           paragraph_text, paragraph_line1, paragraph_line2),
+          MakeAXTreeUpdate({root, div, button, button_text, container,
+                            container_text, line_break, paragraph,
+                            paragraph_text, paragraph_line1, paragraph_line2}),
           test_browser_accessibility_delegate_.get()));
 
   BrowserAccessibility* root_accessible = manager->GetRoot();
@@ -1206,7 +1206,7 @@ TEST_F(BrowserAccessibilityManagerTest, DeletingFocusedNodeDoesNotCrash) {
   ui::AXNodeData node2;
   node2.id = 2;
 
-  ui::AXTreeUpdate initial_state = MakeAXTreeUpdate(root, node2);
+  ui::AXTreeUpdate initial_state = MakeAXTreeUpdate({root, node2});
   initial_state.has_tree_data = true;
   initial_state.tree_data.focus_id = 2;
   std::unique_ptr<BrowserAccessibilityManager> manager(
@@ -1224,7 +1224,7 @@ TEST_F(BrowserAccessibilityManagerTest, DeletingFocusedNodeDoesNotCrash) {
 
   AXEventNotificationDetails events2;
   events2.updates.resize(1);
-  events2.updates[0] = MakeAXTreeUpdate(root2);
+  events2.updates[0] = MakeAXTreeUpdate({root2});
   ASSERT_TRUE(manager->OnAccessibilityEvents(events2));
 
   // Make sure that the focused node was updated to the new root and
@@ -1252,7 +1252,8 @@ TEST_F(BrowserAccessibilityManagerTest, DeletingFocusedNodeDoesNotCrash2) {
   ui::AXNodeData node4;
   node4.id = 4;
 
-  ui::AXTreeUpdate initial_state = MakeAXTreeUpdate(root, node2, node3, node4);
+  ui::AXTreeUpdate initial_state =
+      MakeAXTreeUpdate({root, node2, node3, node4});
   initial_state.has_tree_data = true;
   initial_state.tree_data.focus_id = 2;
   std::unique_ptr<BrowserAccessibilityManager> manager(
@@ -1271,7 +1272,7 @@ TEST_F(BrowserAccessibilityManagerTest, DeletingFocusedNodeDoesNotCrash2) {
   // Make an update the explicitly clears the previous root.
   AXEventNotificationDetails events2;
   events2.updates.resize(1);
-  events2.updates[0] = MakeAXTreeUpdate(root2);
+  events2.updates[0] = MakeAXTreeUpdate({root2});
   events2.updates[0].node_id_to_clear = 1;
   ASSERT_TRUE(manager->OnAccessibilityEvents(events2));
 
@@ -1342,10 +1343,11 @@ TEST_F(BrowserAccessibilityManagerTest, TestHitTestScaled) {
 
   ui::AXNodeData child_child;
   child_child.id = 2;
+  child_child.role = ax::mojom::Role::kGenericContainer;
   child_child.SetName("child_child");
   child_child.relative_bounds.bounds = gfx::RectF(0, 0, 100, 100);
 
-  ui::AXTreeUpdate child_update = MakeAXTreeUpdate(child_root, child_child);
+  ui::AXTreeUpdate child_update = MakeAXTreeUpdate({child_root, child_child});
 
   // Next, create the parent tree's nodes and tree-update, with kChildTreeId
   // pointing to the child tree.
@@ -1358,6 +1360,7 @@ TEST_F(BrowserAccessibilityManagerTest, TestHitTestScaled) {
 
   ui::AXNodeData parent_child;
   parent_child.id = 2;
+  parent_child.role = ax::mojom::Role::kGenericContainer;
   parent_child.SetName("parent_child");
   parent_child.relative_bounds.bounds = gfx::RectF(0, 0, 100, 100);
 
@@ -1370,7 +1373,7 @@ TEST_F(BrowserAccessibilityManagerTest, TestHitTestScaled) {
   parent_childtree.relative_bounds.bounds = gfx::RectF(100, 100, 100, 100);
 
   ui::AXTreeUpdate parent_update =
-      MakeAXTreeUpdate(parent_root, parent_child, parent_childtree);
+      MakeAXTreeUpdate({parent_root, parent_child, parent_childtree});
 
   // Link the child tree to its parent.
   child_update.tree_data.parent_tree_id = parent_update.tree_data.tree_id;
@@ -1408,10 +1411,12 @@ TEST_F(BrowserAccessibilityManagerTest, TestShouldFireEventForNode) {
   ui::AXNodeData inline_text;
   inline_text.id = 1111;
   inline_text.role = ax::mojom::Role::kInlineTextBox;
+  inline_text.SetName("One two three.");
 
   ui::AXNodeData text;
   text.id = 111;
   text.role = ax::mojom::Role::kStaticText;
+  text.SetName("One two three.");
   text.child_ids = {inline_text.id};
 
   ui::AXNodeData paragraph;
@@ -1426,13 +1431,76 @@ TEST_F(BrowserAccessibilityManagerTest, TestShouldFireEventForNode) {
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, paragraph, text, inline_text),
+          MakeAXTreeUpdate({root, paragraph, text, inline_text}),
           test_browser_accessibility_delegate_.get()));
 
   EXPECT_TRUE(manager->ShouldFireEventForNode(manager->GetFromID(1)));
   EXPECT_TRUE(manager->ShouldFireEventForNode(manager->GetFromID(11)));
   EXPECT_TRUE(manager->ShouldFireEventForNode(manager->GetFromID(111)));
+#if defined(OS_ANDROID)
+  // On Android, ShouldFireEventForNode walks up the ancestor that's a leaf node
+  // node and the event is fired on the updated target.
+  EXPECT_TRUE(manager->ShouldFireEventForNode(manager->GetFromID(1111)));
+#else
   EXPECT_FALSE(manager->ShouldFireEventForNode(manager->GetFromID(1111)));
+#endif
+}
+
+TEST_F(BrowserAccessibilityManagerTest, NestedChildRoot) {
+  ui::AXNodeData root;
+  root.id = 1;
+  root.role = ax::mojom::Role::kRootWebArea;
+
+  ui::AXNodeData popup_button;
+  popup_button.id = 2;
+  popup_button.role = ax::mojom::Role::kPopUpButton;
+  root.child_ids.push_back(2);
+
+  ui::AXNodeData child_tree_root;
+  child_tree_root.id = 3;
+  child_tree_root.role = ax::mojom::Role::kRootWebArea;
+  root.child_ids.push_back(3);
+
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          MakeAXTreeUpdate({root, popup_button, child_tree_root}),
+          test_browser_accessibility_delegate_.get()));
+
+  ASSERT_NE(manager->GetPopupRoot(), nullptr);
+  EXPECT_EQ(manager->GetPopupRoot()->GetId(), 3);
+
+  // Update tree to change the role of the nested child root, add new child root
+  // in same update.
+  child_tree_root.role = ax::mojom::Role::kGroup;
+  ui::AXNodeData second_child_tree_root;
+  second_child_tree_root.id = 4;
+  second_child_tree_root.role = ax::mojom::Role::kRootWebArea;
+  root.child_ids.push_back(4);
+
+  manager->Initialize(
+      MakeAXTreeUpdate({root, child_tree_root, second_child_tree_root}));
+
+  ASSERT_NE(manager->GetPopupRoot(), nullptr);
+  EXPECT_EQ(manager->GetPopupRoot()->GetId(), 4);
+
+  // Update tree to change the role of the nested child root, so that there is
+  // no longer any nested child root.
+  second_child_tree_root.role = ax::mojom::Role::kGroup;
+  manager->Initialize(MakeAXTreeUpdate({second_child_tree_root}));
+  EXPECT_EQ(manager->GetPopupRoot(), nullptr);
+
+  // Test deleting child root.
+
+  // First, ensure a child root exists.
+  second_child_tree_root.role = ax::mojom::Role::kRootWebArea;
+  manager->Initialize(MakeAXTreeUpdate({second_child_tree_root}));
+  ASSERT_NE(manager->GetPopupRoot(), nullptr);
+  EXPECT_EQ(manager->GetPopupRoot()->GetId(), 4);
+
+  // Now remove the child root from the tree.
+  root.child_ids = {2, 3};
+  manager->Initialize(MakeAXTreeUpdate({root}));
+  EXPECT_EQ(manager->GetPopupRoot(), nullptr);
 }
 
 }  // namespace content

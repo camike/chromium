@@ -5,9 +5,9 @@
 package org.chromium.weblayer.test;
 
 import android.net.Uri;
-import android.support.test.filters.SmallTest;
 
 import androidx.fragment.app.FragmentManager;
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -20,6 +20,7 @@ import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.weblayer.CookieChangeCause;
 import org.chromium.weblayer.CookieChangedCallback;
 import org.chromium.weblayer.CookieManager;
+import org.chromium.weblayer.Profile;
 import org.chromium.weblayer.shell.InstrumentationActivity;
 
 import java.util.concurrent.TimeoutException;
@@ -71,7 +72,11 @@ public class CookieManagerTest {
     @Test
     @SmallTest
     public void testSetCookieNotSet() throws Exception {
-        Assert.assertFalse(setCookie("foo=bar; Secure"));
+        // Attempting to set a Secure cookie from an insecure origin is rejected.
+        // A different hostname must be used because non-cryptographic localhost origins such as
+        // http://127.0.0.1 are considered trustworthy and are allowed to set Secure cookies.
+        Assert.assertFalse(mActivityTestRule.setCookie(
+                mCookieManager, Uri.parse("http://a.test/path"), "foo=bar; Secure"));
     }
 
     @Test
@@ -146,13 +151,14 @@ public class CookieManagerTest {
     public void testCookieChangedRemoveCallbackAfterProfileDestroyed() throws Exception {
         // Removing change callback should be a no-op after the profile is destroyed.
         TestThreadUtils.runOnUiThreadBlocking(() -> {
+            Profile profile = mActivityTestRule.getActivity().getBrowser().getProfile();
             Runnable remove = mCookieManager.addCookieChangedCallback(
                     mBaseUri, null, new CookieChangedCallbackHelper());
             // We need to remove the fragment before calling Profile#destroy().
             FragmentManager fm = mActivityTestRule.getActivity().getSupportFragmentManager();
             fm.beginTransaction().remove(fm.getFragments().get(0)).commitNow();
 
-            mActivityTestRule.getActivity().getBrowser().getProfile().destroy();
+            profile.destroy();
             remove.run();
         });
     }

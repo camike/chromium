@@ -44,6 +44,7 @@ content::WebContents* AddSelectedTabWithURL(Browser* browser,
 void AddWebContents(Browser* browser,
                     content::WebContents* source_contents,
                     std::unique_ptr<content::WebContents> new_contents,
+                    const GURL& target_url,
                     WindowOpenDisposition disposition,
                     const gfx::Rect& initial_rect);
 
@@ -56,6 +57,9 @@ void CloseWebContents(Browser* browser,
 // Configures |nav_params| to create a new tab group with the source, if
 // applicable.
 void ConfigureTabGroupForNavigation(NavigateParams* nav_params);
+
+// Decides whether or not to create a new tab group.
+bool ShouldAutoCreateGroupForNavigation(NavigateParams* nav_params);
 
 }  // namespace chrome
 

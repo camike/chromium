@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "ash/public/cpp/notification_utils.h"
-#include "ash/public/cpp/vector_icons/vector_icons.h"
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/memory/singleton.h"
@@ -32,6 +31,8 @@
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
+#include "chromeos/ui/vector_icons/vector_icons.h"
+#include "components/account_manager_core/account.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "dbus/message.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -60,9 +61,9 @@ void SetupAccountManager(Profile* profile, const AccountId& account_id) {
   // |AccountManager::UpsertAccount| is idempotent and safe to call multiple
   // times.
   account_manager->UpsertAccount(
-      AccountManager::AccountKey{
+      ::account_manager::AccountKey{
           account_id.GetObjGuid(),
-          account_manager::AccountType::ACCOUNT_TYPE_ACTIVE_DIRECTORY},
+          account_manager::AccountType::kActiveDirectory},
       account_id.GetUserEmail(), AccountManager::kActiveDirectoryDummyToken);
 }
 
@@ -85,7 +86,7 @@ AuthPolicyCredentialsManager::AuthPolicyCredentialsManager(Profile* profile)
   // have changed.
   AuthPolicyClient::Get()->ConnectToSignal(
       authpolicy::kUserKerberosFilesChangedSignal,
-      base::Bind(
+      base::BindRepeating(
           &AuthPolicyCredentialsManager::OnUserKerberosFilesChangedCallback,
           weak_factory_.GetWeakPtr()),
       base::BindOnce(&AuthPolicyCredentialsManager::OnSignalConnectedCallback,
@@ -207,9 +208,9 @@ void AuthPolicyCredentialsManager::OnGetUserKerberosFilesCallback(
 }
 
 void AuthPolicyCredentialsManager::ScheduleGetUserStatus() {
-  // Unretained is safe here because it is a CancelableClosure and owned by this
-  // object.
-  scheduled_get_user_status_call_.Reset(base::Bind(
+  // Unretained is safe here because it is a CancelableOnceClosure and owned by
+  // this object.
+  scheduled_get_user_status_call_.Reset(base::BindOnce(
       &AuthPolicyCredentialsManager::GetUserStatus, base::Unretained(this)));
   // TODO(rsorokin): This does not re-schedule after wake from sleep
   // (and thus the maximal interval between two calls can be (sleep time +
@@ -282,7 +283,7 @@ void AuthPolicyCredentialsManager::ShowNotification(int message_id) {
           l10n_util::GetStringUTF16(message_id),
           l10n_util::GetStringUTF16(IDS_SIGNIN_ERROR_DISPLAY_SOURCE),
           GURL(notification_id), notifier_id, data, std::move(delegate),
-          ash::kNotificationWarningIcon,
+          chromeos::kNotificationWarningIcon,
           message_center::SystemNotificationWarningLevel::WARNING);
   notification->SetSystemPriority();
 

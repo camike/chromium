@@ -5,8 +5,8 @@
 #include "chrome/browser/profiling_host/background_profiling_triggers.h"
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/rand_util.h"
-#include "base/stl_util.h"
 #include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -15,7 +15,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiling_host/profiling_process_host.h"
 #include "chrome/browser/ui/browser_otr_state.h"
-#include "components/heap_profiling/supervisor.h"
+#include "components/heap_profiling/multi_process/supervisor.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/process_type.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
@@ -103,7 +103,7 @@ bool BackgroundProfilingTriggers::IsAllowedToUpload() const {
   if (!ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled())
     return false;
 
-  return !chrome::IsIncognitoSessionActive();
+  return !chrome::IsOffTheRecordSessionActive();
 }
 
 bool BackgroundProfilingTriggers::IsOverTriggerThreshold(

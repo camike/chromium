@@ -56,14 +56,14 @@ net::ClientCertIdentityList CertificateListToIdentityList(
 PlatformKeysCertificateSelector::PlatformKeysCertificateSelector(
     const net::CertificateList& certificates,
     const std::string& extension_name,
-    const CertificateSelectedCallback& callback,
+    CertificateSelectedCallback callback,
     content::WebContents* web_contents)
     : CertificateSelector(CertificateListToIdentityList(certificates),
                           web_contents),
       extension_name_(extension_name),
-      callback_(callback) {
+      callback_(std::move(callback)) {
   DCHECK(!callback_.is_null());
-  DialogDelegate::SetCancelCallback(base::BindOnce(
+  SetCancelCallback(base::BindOnce(
       [](PlatformKeysCertificateSelector* dialog) {
         std::move(dialog->callback_).Run(nullptr);
       },
@@ -82,12 +82,10 @@ PlatformKeysCertificateSelector::~PlatformKeysCertificateSelector() {
 void PlatformKeysCertificateSelector::Init() {
   const base::string16 name = base::ASCIIToUTF16(extension_name_);
 
+  auto label = std::make_unique<views::StyledLabel>();
   size_t offset;
-  const base::string16 text = l10n_util::GetStringFUTF16(
-      IDS_PLATFORM_KEYS_SELECT_CERT_DIALOG_TEXT, name, &offset);
-
-  std::unique_ptr<views::StyledLabel> label(
-      new views::StyledLabel(text, nullptr /* no listener */));
+  label->SetText(l10n_util::GetStringFUTF16(
+      IDS_PLATFORM_KEYS_SELECT_CERT_DIALOG_TEXT, name, &offset));
 
   views::StyledLabel::RangeStyleInfo bold_style;
   bold_style.text_style = STYLE_EMPHASIZED;
@@ -105,11 +103,10 @@ void ShowPlatformKeysCertificateSelector(
     content::WebContents* web_contents,
     const std::string& extension_name,
     const net::CertificateList& certificates,
-    const base::Callback<void(const scoped_refptr<net::X509Certificate>&)>&
-        callback) {
+    CertificateSelectedCallback callback) {
   PlatformKeysCertificateSelector* selector =
       new PlatformKeysCertificateSelector(certificates, extension_name,
-                                          callback, web_contents);
+                                          std::move(callback), web_contents);
   selector->Init();
   selector->Show();
 }

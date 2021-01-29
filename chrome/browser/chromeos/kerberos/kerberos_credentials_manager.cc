@@ -19,8 +19,10 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
+#include "chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/webui_url_constants.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/dbus/kerberos/kerberos_client.h"
 #include "chromeos/dbus/kerberos/kerberos_service.pb.h"
 #include "chromeos/network/onc/variable_expander.h"
@@ -930,11 +932,18 @@ void KerberosCredentialsManager::NotifyRequiresLoginPassword(
 
 void KerberosCredentialsManager::OnTicketExpiryNotificationClick(
     const std::string& principal_name) {
+  // The correct URL path for Kerberos accounts subpage, according to the
+  // Kerberos settings section flag.
+  const std::string kSubpagePath =
+      chromeos::features::IsKerberosSettingsSectionEnabled()
+          ? chromeos::settings::mojom::kKerberosAccountsV2SubpagePath
+          : chromeos::settings::mojom::kKerberosAccountsSubpagePath;
+
   // TODO(https://crbug.com/952245): Right now, the reauth dialog is tied to the
   // settings. Consider creating a standalone reauth dialog.
   chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
       primary_profile_,
-      chrome::kKerberosAccountsSubPage + std::string("?kerberos_reauth=") +
+      kSubpagePath + "?kerberos_reauth=" +
           net::EscapeQueryParamValue(principal_name, false /* use_plus */));
 
   // Close last! |principal_name| is owned by the notification.

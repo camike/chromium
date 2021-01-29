@@ -4,6 +4,7 @@
 
 #include "components/translate/content/renderer/translate_agent.h"
 
+#include <stddef.h>
 #include <utility>
 
 #include "base/bind.h"
@@ -12,21 +13,23 @@
 #include "base/json/string_escape.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_macros_local.h"
 #include "base/notreached.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "components/translate/content/renderer/isolated_world_util.h"
 #include "components/translate/core/common/translate_constants.h"
 #include "components/translate/core/common/translate_metrics.h"
 #include "components/translate/core/common/translate_util.h"
+#include "components/translate/core/language_detection/language_detection_model.h"
 #include "components/translate/core/language_detection/language_detection_util.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
-#include "third_party/blink/public/platform/web_isolated_world_info.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_language_detection_details.h"
 #include "third_party/blink/public/web/web_local_frame.h"
@@ -38,7 +41,6 @@ using blink::WebDocument;
 using blink::WebLanguageDetectionDetails;
 using blink::WebLocalFrame;
 using blink::WebScriptSource;
-using blink::WebSecurityOrigin;
 using blink::WebString;
 using blink::WebVector;
 
@@ -59,8 +61,12 @@ const int kTranslateStatusCheckDelayMs = 400;
 // Language name passed to the Translate element for it to detect the language.
 const char kAutoDetectionLanguage[] = "auto";
 
-// Isolated world sets following content-security-policy.
-const char kContentSecurityPolicy[] = "script-src 'self' 'unsafe-eval'";
+// Returns the language detection model that is shared across the RenderFrames
+// in the renderer.
+translate::LanguageDetectionModel& GetLanguageDetectionModel() {
+  static base::NoDestructor<translate::LanguageDetectionModel> instance;
+  return *instance;
+}
 
 }  // namespace
 
@@ -104,22 +110,40 @@ void TranslateAgent::PageCaptured(const base::string16& contents) {
       WebLanguageDetectionDetails::CollectLanguageDetectionDetails(document);
   std::string content_language = web_detection_details.content_language.Utf8();
   std::string html_lang = web_detection_details.html_language.Utf8();
-  std::string cld_language;
-  bool is_cld_reliable;
-  std::string language = DeterminePageLanguage(
-      content_language, html_lang, contents, &cld_language, &is_cld_reliable);
+  std::string model_detected_language;
+  bool is_model_reliable = false;
+
+  std::string language;
+  if (translate::IsTFLiteLanguageDetectionEnabled()) {
+    translate::LanguageDetectionModel& language_detection_model =
+        GetLanguageDetectionModel();
+    bool is_available = language_detection_model.IsAvailable();
+    language = is_available ? language_detection_model.DeterminePageLanguage(
+                                  content_language, html_lang, contents,
+                                  &model_detected_language, &is_model_reliable)
+                            : translate::kUnknownLanguageCode;
+    LOCAL_HISTOGRAM_BOOLEAN(
+        "LanguageDetection.TFLiteModel.WasModelAvailableForDetection",
+        is_available);
+  } else {
+    language =
+        DeterminePageLanguage(content_language, html_lang, contents,
+                              &model_detected_language, &is_model_reliable);
+  }
 
   if (language.empty())
     return;
 
   language_determined_time_ = base::TimeTicks::Now();
 
+  // TODO(crbug.com/1157983): Update the language detection details struct to be
+  // model agnostic.
   LanguageDetectionDetails details;
   details.time = base::Time::Now();
   details.url = web_detection_details.url;
   details.content_language = content_language;
-  details.cld_language = cld_language;
-  details.is_cld_reliable = is_cld_reliable;
+  details.model_detected_language = model_detected_language;
+  details.is_model_reliable = is_model_reliable;
   details.has_notranslate = web_detection_details.has_no_translate_meta;
   details.html_root_language = html_lang;
   details.adopted_language = language;
@@ -235,10 +259,13 @@ std::string TranslateAgent::ExecuteScriptAndGetStringResult(
   }
 
   v8::Local<v8::String> v8_str = result.As<v8::String>();
-  int length = v8_str->Utf8Length(isolate) + 1;
-  std::unique_ptr<char[]> str(new char[length]);
-  v8_str->WriteUtf8(isolate, str.get(), length);
-  return std::string(str.get());
+  int length = v8_str->Utf8Length(isolate);
+  if (length <= 0)
+    return std::string();
+
+  std::string str(static_cast<size_t>(length), '\0');
+  v8_str->WriteUtf8(isolate, &str[0], length);
+  return str;
 }
 
 double TranslateAgent::ExecuteScriptAndGetDoubleResult(
@@ -320,13 +347,8 @@ void TranslateAgent::TranslateFrame(const std::string& translate_script,
   GURL url(main_frame->GetDocument().Url());
   ReportPageScheme(url.scheme());
 
-  // Set up v8 isolated world with proper content-security-policy and
-  // security-origin.
-  blink::WebIsolatedWorldInfo info;
-  info.security_origin =
-      WebSecurityOrigin::Create(GetTranslateSecurityOrigin());
-  info.content_security_policy = WebString::FromUTF8(kContentSecurityPolicy);
-  main_frame->SetIsolatedWorldInfo(world_id_, info);
+  // Set up v8 isolated world.
+  EnsureIsolatedWorldInitialized(world_id_);
 
   if (!IsTranslateLibAvailable()) {
     // Evaluate the script to add the translation related method to the global

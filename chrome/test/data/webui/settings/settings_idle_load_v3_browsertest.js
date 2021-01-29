@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-GEN('#include "services/network/public/cpp/features.h"');
+GEN('#include "content/public/test/browser_test.h"');
 
 /**
  * @constructor
@@ -18,21 +18,10 @@ SettingsIdleLoadV3BrowserTest.prototype = {
       'chrome://settings/test_loader.html?module=settings/idle_load_tests.js',
 
   /** @override */
-  extraLibraries: [
-    '//third_party/mocha/mocha.js',
-    '../mocha_adapter.js',
-  ],
+  extraLibraries: [],
 
   /** @override */
   isAsync: true,
-
-  /** @override */
-  get featureList() {
-    return {
-      enabled: ['network::features::kOutOfBlinkCors'],
-      disabled: [],
-    };
-  },
 };
 
 TEST_F('SettingsIdleLoadV3BrowserTest', 'All', function() {

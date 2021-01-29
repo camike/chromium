@@ -20,11 +20,11 @@ class APP_LIST_MODEL_EXPORT AppListItemObserver {
   // Invoked after item's name is changed.
   virtual void ItemNameChanged() {}
 
-  // Invoked after item begins or finishes installing.
-  virtual void ItemIsInstallingChanged() {}
+  // Invoked when the item's notification badge visibility is changed.
+  virtual void ItemBadgeVisibilityChanged() {}
 
-  // Invoked after item's download percentage changes.
-  virtual void ItemPercentDownloadedChanged() {}
+  // Invoked when the item's notification badge color is changed.
+  virtual void ItemBadgeColorChanged() {}
 
   // Invoked when the item is about to be destroyed.
   virtual void ItemBeingDestroyed() {}

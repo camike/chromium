@@ -4,6 +4,7 @@
 
 #include "chrome/browser/browsing_data/counters/browsing_data_counter_utils.h"
 
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
@@ -13,8 +14,9 @@
 #include "components/signin/public/base/signin_buildflags.h"
 #include "components/sync/driver/profile_sync_service.h"
 #include "components/sync/test/fake_server/fake_server_network_resources.h"
+#include "content/public/test/browser_test.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #endif
@@ -58,7 +60,7 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataCounterUtilsBrowserTest,
   // Sign the profile in.
   EXPECT_TRUE(harness->SignInPrimaryAccount());
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // On Chrome OS sync in turned on by default.
   EXPECT_TRUE(ShouldShowCookieException(profile));
 #else
@@ -72,13 +74,13 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataCounterUtilsBrowserTest,
   // Now that we're syncing, we should offer to retain the cookie.
   EXPECT_TRUE(ShouldShowCookieException(profile));
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
   // Pause sync.
   harness->SignOutPrimaryAccount();
 
   // There's no point in showing the cookie exception.
   EXPECT_FALSE(ShouldShowCookieException(profile));
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
 }  // namespace browsing_data_counter_utils

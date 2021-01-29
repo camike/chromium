@@ -5,6 +5,8 @@
 // Include test fixture.
 GEN_INCLUDE(['net_internals_test.js']);
 
+GEN('#include "content/public/test/browser_test.h"');
+
 // Anonymous namespace
 (function() {
 
@@ -50,7 +52,7 @@ CheckQueryResultTask.prototype = {
 
     // Each case has its own validation function because of the design of the
     // test reporting infrastructure.
-    if (result.error != undefined) {
+    if (result.error !== undefined) {
       this.checkError_(result);
     } else if (!result.result) {
       this.checkNotFound_(result);
@@ -119,7 +121,7 @@ CheckHSTSQueryResultTask.prototype = {
    * Starts watching for the query results.
    */
   start: function() {
-    g_browser.addHSTSObserver(this);
+    DomainSecurityPolicyView.getInstance().addHSTSObserverForTest(this);
   },
 
   /**
@@ -252,7 +254,7 @@ CheckExpectCTQueryResultTask.prototype = {
    * Starts watching for the query results.
    */
   start: function() {
-    g_browser.addExpectCTObserver(this);
+    DomainSecurityPolicyView.getInstance().addExpectCTObserverForTest(this);
   },
 
   /**
@@ -390,7 +392,7 @@ SendTestReportTask.prototype = {
    * Sends the test report and starts watching for the result.
    */
   start: function() {
-    g_browser.addExpectCTObserver(this);
+    DomainSecurityPolicyView.getInstance().addExpectCTObserverForTest(this);
     $(DomainSecurityPolicyView.TEST_REPORT_EXPECT_CT_INPUT_ID).value =
         this.reportURITask_.reportURI();
     $(DomainSecurityPolicyView.TEST_REPORT_EXPECT_CT_SUBMIT_ID).click();

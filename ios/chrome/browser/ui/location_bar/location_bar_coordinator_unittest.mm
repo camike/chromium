@@ -10,7 +10,7 @@
 
 #include "base/files/scoped_temp_dir.h"
 #include "components/omnibox/browser/test_location_bar_model.h"
-#include "components/variations/variations_http_header_provider.h"
+#include "components/variations/variations_ids_provider.h"
 #include "ios/chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #include "ios/chrome/browser/favicon/favicon_service_factory.h"
@@ -25,7 +25,7 @@
 #include "ios/chrome/browser/web_state_list/fake_web_state_list_delegate.h"
 #include "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_opener.h"
-#import "ios/web/public/test/fakes/test_web_state.h"
+#import "ios/web/public/test/fakes/fake_web_state.h"
 #import "ios/web/public/test/web_task_environment.h"
 #include "testing/platform_test.h"
 
@@ -33,7 +33,7 @@
 #error "This file requires ARC support."
 #endif
 
-using variations::VariationsHttpHeaderProvider;
+using variations::VariationsIdsProvider;
 
 @interface TestToolbarCoordinatorDelegate : NSObject<ToolbarCoordinatorDelegate>
 
@@ -46,8 +46,6 @@ using variations::VariationsHttpHeaderProvider;
 - (void)locationBarDidBecomeFirstResponder {
 }
 - (void)locationBarDidResignFirstResponder {
-}
-- (void)locationBarBeganEdit {
 }
 
 - (LocationBarModel*)locationBarModel {
@@ -91,14 +89,14 @@ class LocationBarCoordinatorTest : public PlatformTest {
         ios::FaviconServiceFactory::GetDefaultFactory());
 
     browser_state_ = test_cbs_builder.Build();
-    ASSERT_TRUE(browser_state_->CreateHistoryService(true));
+    ASSERT_TRUE(browser_state_->CreateHistoryService());
 
     browser_ =
         std::make_unique<TestBrowser>(browser_state_.get(), &web_state_list_);
     UrlLoadingNotifierBrowserAgent::CreateForBrowser(browser_.get());
     FakeUrlLoadingBrowserAgent::InjectForBrowser(browser_.get());
 
-    auto web_state = std::make_unique<web::TestWebState>();
+    auto web_state = std::make_unique<web::FakeWebState>();
     web_state->SetBrowserState(browser_state_.get());
     web_state->SetCurrentURL(GURL("http://test/"));
     web_state_list_.InsertWebState(0, std::move(web_state),
@@ -117,7 +115,7 @@ class LocationBarCoordinatorTest : public PlatformTest {
     // Started coordinator has to be stopped before WebStateList destruction.
     [coordinator_ stop];
 
-    VariationsHttpHeaderProvider::GetInstance()->ResetForTesting();
+    VariationsIdsProvider::GetInstance()->ResetForTesting();
 
     PlatformTest::TearDown();
   }
@@ -154,8 +152,8 @@ TEST_F(LocationBarCoordinatorTest, RemoveLastWebState) {
 // Verifies that URLLoader receives correct load request, which also includes
 // variations header.
 TEST_F(LocationBarCoordinatorTest, LoadGoogleUrl) {
-  ASSERT_EQ(VariationsHttpHeaderProvider::ForceIdsResult::SUCCESS,
-            VariationsHttpHeaderProvider::GetInstance()->ForceVariationIds(
+  ASSERT_EQ(VariationsIdsProvider::ForceIdsResult::SUCCESS,
+            VariationsIdsProvider::GetInstance()->ForceVariationIds(
                 /*variation_ids=*/{"100"}, /*command_line_variation_ids=*/""));
 
   GURL url("https://www.google.com/");
@@ -188,8 +186,8 @@ TEST_F(LocationBarCoordinatorTest, LoadGoogleUrl) {
 // URL. Verifies that URLLoader receives correct load request without variations
 // header.
 TEST_F(LocationBarCoordinatorTest, LoadNonGoogleUrl) {
-  ASSERT_EQ(VariationsHttpHeaderProvider::ForceIdsResult::SUCCESS,
-            VariationsHttpHeaderProvider::GetInstance()->ForceVariationIds(
+  ASSERT_EQ(VariationsIdsProvider::ForceIdsResult::SUCCESS,
+            VariationsIdsProvider::GetInstance()->ForceVariationIds(
                 /*variation_ids=*/{"100"}, /*command_line_variation_ids=*/""));
 
   GURL url("https://www.nongoogle.com/");

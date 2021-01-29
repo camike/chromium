@@ -22,6 +22,7 @@
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "net/base/net_errors.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 
 namespace signin {
@@ -164,8 +165,9 @@ class ProxyingURLLoaderFactory::InProgressRequest
   net::HttpRequestHeaders headers_;
   net::HttpRequestHeaders cors_exempt_headers_;
   net::RedirectInfo redirect_info_;
-  const blink::mojom::ResourceType resource_type_;
+  const network::mojom::RequestDestination request_destination_;
   const bool is_main_frame_;
+  const bool is_fetch_like_api_;
 
   base::OnceClosure destruction_callback_;
 
@@ -189,13 +191,12 @@ class ProxyingURLLoaderFactory::InProgressRequest::ProxyRequestAdapter
                       const net::HttpRequestHeaders& original_headers,
                       net::HttpRequestHeaders* modified_headers,
                       std::vector<std::string>* removed_headers)
-      : in_progress_request_(in_progress_request),
-        original_headers_(original_headers),
-        modified_headers_(modified_headers),
-        removed_headers_(removed_headers) {
+      : ChromeRequestAdapter(in_progress_request->request_url_,
+                             original_headers,
+                             modified_headers,
+                             removed_headers),
+        in_progress_request_(in_progress_request) {
     DCHECK(in_progress_request_);
-    DCHECK(modified_headers_);
-    DCHECK(removed_headers_);
   }
 
   ~ProxyRequestAdapter() override = default;
@@ -204,8 +205,12 @@ class ProxyingURLLoaderFactory::InProgressRequest::ProxyRequestAdapter
     return in_progress_request_->factory_->web_contents_getter_;
   }
 
-  blink::mojom::ResourceType GetResourceType() const override {
-    return in_progress_request_->resource_type_;
+  network::mojom::RequestDestination GetRequestDestination() const override {
+    return in_progress_request_->request_destination_;
+  }
+
+  bool IsFetchLikeAPI() const override {
+    return in_progress_request_->is_fetch_like_api_;
   }
 
   GURL GetReferrerOrigin() const override {
@@ -217,35 +222,8 @@ class ProxyingURLLoaderFactory::InProgressRequest::ProxyRequestAdapter
       in_progress_request_->destruction_callback_ = std::move(closure);
   }
 
-  // signin::RequestAdapter
-  const GURL& GetUrl() override { return in_progress_request_->request_url_; }
-
-  bool HasHeader(const std::string& name) override {
-    return (original_headers_.HasHeader(name) ||
-            modified_headers_->HasHeader(name)) &&
-           !base::Contains(*removed_headers_, name);
-  }
-
-  void RemoveRequestHeaderByName(const std::string& name) override {
-    if (!base::Contains(*removed_headers_, name))
-      removed_headers_->push_back(name);
-  }
-
-  void SetExtraHeaderByName(const std::string& name,
-                            const std::string& value) override {
-    modified_headers_->SetHeader(name, value);
-
-    auto it =
-        std::find(removed_headers_->begin(), removed_headers_->end(), name);
-    if (it != removed_headers_->end())
-      removed_headers_->erase(it);
-  }
-
  private:
   InProgressRequest* const in_progress_request_;
-  const net::HttpRequestHeaders& original_headers_;
-  net::HttpRequestHeaders* modified_headers_;
-  std::vector<std::string>* removed_headers_;
 
   DISALLOW_COPY_AND_ASSIGN(ProxyRequestAdapter);
 };
@@ -313,9 +291,9 @@ ProxyingURLLoaderFactory::InProgressRequest::InProgressRequest(
       request_url_(request.url),
       response_url_(request.url),
       referrer_origin_(request.referrer.GetOrigin()),
-      resource_type_(
-          static_cast<blink::mojom::ResourceType>(request.resource_type)),
+      request_destination_(request.destination),
       is_main_frame_(request.is_main_frame),
+      is_fetch_like_api_(request.is_fetch_like_api),
       target_client_(std::move(client)),
       loader_receiver_(this, std::move(loader_receiver)) {
   mojo::PendingRemote<network::mojom::URLLoaderClient> proxy_client =

@@ -7,14 +7,21 @@ const BROWSER_SETTINGS_PATH = '../';
 
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
 
-// Only run in release builds because we frequently see test timeouts in debug.
-// We suspect this is because the settings page loads slowly in debug.
-// https://crbug.com/1003483
-GEN('#if defined(NDEBUG)');
+GEN('#include "chromeos/constants/chromeos_features.h"');
+GEN('#include "content/public/test/browser_test.h"');
+
+/**
+ * Checks whether a given element is visible to the user.
+ * @param {!Element} element
+ * @returns {boolean}
+ */
+function isVisible(element) {
+  return !!(element && element.getBoundingClientRect().width > 0);
+}
 
 // Test fixture for the top-level OS settings UI.
 // eslint-disable-next-line no-var
-var OSSettingsUIBrowserTest = class extends PolymerTest {
+var OSSettingsUIBrowserTest = class extends Polymer2DeprecatedTest {
   /** @override */
   get browsePreload() {
     return 'chrome://os-settings/';
@@ -29,26 +36,34 @@ var OSSettingsUIBrowserTest = class extends PolymerTest {
   }
 };
 
-TEST_F('OSSettingsUIBrowserTest', 'AllJsTests', () => {
+// Only run in release builds because we frequently see test timeouts in debug.
+// We suspect this is because the settings page loads slowly in debug.
+// https://crbug.com/1003483
+GEN('#if !defined(NDEBUG)');
+GEN('#define MAYBE_AllJsTests DISABLED_AllJsTests');
+GEN('#else');
+GEN('#define MAYBE_AllJsTests AllJsTests');
+GEN('#endif');
+TEST_F('OSSettingsUIBrowserTest', 'MAYBE_AllJsTests', () => {
   suite('os-settings-ui', () => {
     let ui;
     let userActionRecorder;
 
-    suiteSetup(() => {
-      testing.Test.disableAnimationsAndTransitions();
-      ui = assert(document.querySelector('os-settings-ui'));
-      ui.$.drawerTemplate.restamp = true;
-    });
-
-    setup(() => {
+    setup(async () => {
+      PolymerTest.clearBody();
+      ui = document.createElement('os-settings-ui');
+      document.body.appendChild(ui);
+      await CrSettingsPrefs.initialized;
       userActionRecorder = new settings.FakeUserActionRecorder();
       settings.setUserActionRecorderForTesting(userActionRecorder);
-      ui.$.drawerTemplate.if = false;
+      ui.$$('#drawerTemplate').if = false;
       Polymer.dom.flush();
     });
 
     teardown(() => {
+      ui.remove();
       settings.setUserActionRecorderForTesting(null);
+      settings.Router.getInstance().resetRouteForTesting();
     });
 
     test('top container shadow always shows for sub-pages', () => {
@@ -68,16 +83,16 @@ TEST_F('OSSettingsUIBrowserTest', 'AllJsTests', () => {
 
     test('showing menu in toolbar is dependent on narrow mode', () => {
       const toolbar = assert(ui.$$('os-toolbar'));
-      toolbar.narrow = true;
+      ui.isNarrow = true;
       assertTrue(toolbar.showMenu);
 
-      toolbar.narrow = false;
+      ui.isNarrow = false;
       assertFalse(toolbar.showMenu);
     });
 
     test('app drawer', async () => {
       assertEquals(null, ui.$$('cr-drawer os-settings-menu'));
-      const drawer = ui.$.drawer;
+      const drawer = ui.$$('#drawer');
       assertFalse(drawer.open);
 
       drawer.openDrawer();
@@ -89,23 +104,22 @@ TEST_F('OSSettingsUIBrowserTest', 'AllJsTests', () => {
       assertTrue(!!ui.$$('cr-drawer os-settings-menu'));
 
       drawer.cancel();
-      await test_util.eventToPromise('close', drawer);
       // Drawer is closed, but menu is still stamped so its contents remain
       // visible as the drawer slides out.
       assertTrue(!!ui.$$('cr-drawer os-settings-menu'));
     });
 
     test('app drawer closes when exiting narrow mode', async () => {
-      const drawer = ui.$.drawer;
+      const drawer = ui.$$('#drawer');
       const toolbar = ui.$$('os-toolbar');
 
       // Mimic narrow mode and open the drawer.
-      toolbar.narrow = true;
+      ui.isNarrow = true;
       drawer.openDrawer();
       Polymer.dom.flush();
       await test_util.eventToPromise('cr-drawer-opened', drawer);
 
-      toolbar.narrow = false;
+      ui.isNarrow = false;
       Polymer.dom.flush();
       await test_util.eventToPromise('close', drawer);
       assertFalse(drawer.open);
@@ -132,7 +146,7 @@ TEST_F('OSSettingsUIBrowserTest', 'AllJsTests', () => {
       assertTrue(floatingMenu.advancedOpened);
       assertTrue(main.advancedToggleExpanded);
 
-      ui.$.drawerTemplate.if = true;
+      ui.$$('#drawerTemplate').if = true;
       Polymer.dom.flush();
 
       const drawerMenu = ui.$$('cr-drawer os-settings-menu');
@@ -165,65 +179,6 @@ TEST_F('OSSettingsUIBrowserTest', 'AllJsTests', () => {
       assertTrue(ui.advancedOpenedInMenu_);
     });
 
-    test('URL initiated search propagates to search box', () => {
-      toolbar = /** @type {!OsToolbarElement} */ (ui.$$('os-toolbar'));
-      const searchField =
-          /** @type {CrToolbarSearchFieldElement} */ (toolbar.getSearchField());
-      assertEquals('', searchField.getSearchInput().value);
-
-      const query = 'foo';
-      settings.Router.getInstance().navigateTo(
-          settings.routes.BASIC, new URLSearchParams(`search=${query}`));
-      assertEquals(query, searchField.getSearchInput().value);
-    });
-
-    test('search box initiated search propagates to URL', () => {
-      toolbar = /** @type {!OsToolbarElement} */ (ui.$$('os-toolbar'));
-      const searchField =
-          /** @type {CrToolbarSearchFieldElement} */ (toolbar.getSearchField());
-
-      settings.Router.getInstance().navigateTo(
-          settings.routes.BASIC, /* dynamicParams */ null,
-          /* removeSearch */ true);
-      assertEquals('', searchField.getSearchInput().value);
-      assertFalse(
-          settings.Router.getInstance().getQueryParameters().has('search'));
-
-      let value = 'GOOG';
-      searchField.setValue(value);
-      assertEquals(
-          value,
-          settings.Router.getInstance().getQueryParameters().get('search'));
-
-      // Test that search queries are properly URL encoded.
-      value = '+++';
-      searchField.setValue(value);
-      assertEquals(
-          value,
-          settings.Router.getInstance().getQueryParameters().get('search'));
-    });
-
-    test('whitespace only search query is ignored', () => {
-      toolbar = /** @type {!OsToolbarElement} */ (ui.$$('os-toolbar'));
-      const searchField =
-          /** @type {CrToolbarSearchFieldElement} */ (toolbar.getSearchField());
-      searchField.setValue('    ');
-      let urlParams = settings.Router.getInstance().getQueryParameters();
-      assertFalse(urlParams.has('search'));
-
-      searchField.setValue('   foo');
-      urlParams = settings.Router.getInstance().getQueryParameters();
-      assertEquals('foo', urlParams.get('search'));
-
-      searchField.setValue('   foo ');
-      urlParams = settings.Router.getInstance().getQueryParameters();
-      assertEquals('foo ', urlParams.get('search'));
-
-      searchField.setValue('   ');
-      urlParams = settings.Router.getInstance().getQueryParameters();
-      assertFalse(urlParams.has('search'));
-    });
-
     // Test that navigating via the paper menu always clears the current
     // search URL parameter.
     test('clearsUrlSearchParam', function() {
@@ -247,9 +202,11 @@ TEST_F('OSSettingsUIBrowserTest', 'AllJsTests', () => {
 
     test('userActionRouteChange', function() {
       assertEquals(userActionRecorder.navigationCount, 0);
-      settings.Router.getInstance().navigateTo(settings.routes.POWER);
+      settings.Router.getInstance().navigateTo(settings.routes.BASIC);
+      Polymer.dom.flush();
       assertEquals(userActionRecorder.navigationCount, 1);
-      settings.Router.getInstance().navigateTo(settings.routes.POWER);
+      settings.Router.getInstance().navigateTo(settings.routes.BASIC);
+      Polymer.dom.flush();
       assertEquals(userActionRecorder.navigationCount, 1);
     });
 
@@ -257,6 +214,12 @@ TEST_F('OSSettingsUIBrowserTest', 'AllJsTests', () => {
       assertEquals(userActionRecorder.pageBlurCount, 0);
       ui.fire('blur');
       assertEquals(userActionRecorder.pageBlurCount, 1);
+    });
+
+    test('userActionClickEvent', () => {
+      assertEquals(userActionRecorder.clickCount, 0);
+      ui.fire('click');
+      assertEquals(userActionRecorder.clickCount, 1);
     });
 
     test('userActionFocusEvent', function() {
@@ -271,18 +234,22 @@ TEST_F('OSSettingsUIBrowserTest', 'AllJsTests', () => {
       assertEquals(userActionRecorder.settingChangeCount, 1);
     });
 
-    test('userActionSearchEvent', function() {
-      const searchField =
-          /** @type {CrToolbarSearchFieldElement} */ (
-              ui.$$('os-toolbar').getSearchField());
+    test('toolbar and nav menu are hidden in kiosk mode', function() {
+      loadTimeData.overrideValues({
+        isKioskModeActive: true,
+      });
 
-      assertEquals(userActionRecorder.searchCount, 0);
-      searchField.setValue('GOOGLE');
-      assertEquals(userActionRecorder.searchCount, 1);
+      settings.Router.getInstance().resetRouteForTesting();
+      ui = document.createElement('os-settings-ui');
+      document.body.appendChild(ui);
+      Polymer.dom.flush();
+
+      // Toolbar should be hidden.
+      assertFalse(isVisible(ui.$$('os-toolbar')));
+      // All navigation settings menus should be hidden.
+      assertFalse(isVisible(ui.$$('os-settings-menu')));
     });
   });
 
   mocha.run();
 });
-
-GEN('#endif  // defined(NDEBUG)');

@@ -73,6 +73,8 @@ class AvatarMenu :
 
     // Whether or not the current profile is a legacy supervised user profile
     // (see SupervisedUserService).
+    // TODO(crbug/1155729): Remove this as legacy supervised users are
+    // deprecated.
     bool legacy_supervised;
 
     // Whether or not the profile is associated with a child account
@@ -87,8 +89,7 @@ class AvatarMenu :
     base::FilePath profile_path;
   };
 
-  // The load status of an avatar image. This is used to back an UMA histogram,
-  // and should therefore be treated as append-only.
+  // The load status of an avatar image.
   enum class ImageLoadStatus {
     // If there is a Gaia image used by the user, it is loaded. Otherwise, a
     // default avatar image is loaded.
@@ -100,8 +101,8 @@ class AvatarMenu :
     MISSING,
     // Nothing is loaded as the profile has been deleted.
     PROFILE_DELETED,
-    // This is always the last one.
-    MAX = PROFILE_DELETED
+    // The image could not be loaded because the browser is shutting down.
+    BROWSER_SHUTTING_DOWN,
   };
 
   // Constructor. |observer| can be NULL. |browser| can be NULL and a new one
@@ -112,11 +113,11 @@ class AvatarMenu :
   ~AvatarMenu() override;
 
   // Sets |image| to the avatar corresponding to the profile at |profile_path|.
-  // For built-in profile avatars, returns the non-high res version. Returns the
-  // image load status.
+  // Returns the image load status.
   static ImageLoadStatus GetImageForMenuButton(
       const base::FilePath& profile_path,
-      gfx::Image* image);
+      gfx::Image* image,
+      int preferred_size);
 
   // Opens a Browser with the specified profile in response to the user
   // selecting an item. If |always_create| is true then a new window is created

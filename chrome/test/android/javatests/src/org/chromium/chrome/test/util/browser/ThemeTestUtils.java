@@ -7,12 +7,14 @@ package org.chromium.chrome.test.util.browser;
 import android.annotation.TargetApi;
 import android.os.Build;
 
+import org.hamcrest.Matchers;
 import org.junit.Assert;
 
-import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.tab.TabThemeColorHelper;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.chrome.browser.app.ChromeActivity;
+import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.components.browser_ui.styles.ChromeColors;
 import org.chromium.ui.util.ColorUtils;
 
 import java.util.concurrent.ExecutionException;
@@ -22,6 +24,11 @@ import java.util.concurrent.TimeoutException;
  * Utility methods for tests which customize the tab's theme color.
  */
 public class ThemeTestUtils {
+    public static int getDefaultThemeColor(Tab tab) {
+        return ChromeColors.getDefaultThemeColor(
+                tab.getContext().getResources(), tab.isIncognito());
+    }
+
     /**
      * Waits for the activity active tab's theme-color to change to the passed-in color.
      */
@@ -32,10 +39,12 @@ public class ThemeTestUtils {
 
     public static void waitForThemeColor(ChromeActivity activity, int expectedColor, long timeoutMs)
             throws ExecutionException, TimeoutException {
-        CriteriaHelper.pollUiThread(
-                Criteria.equals(expectedColor,
-                        () -> TabThemeColorHelper.getColor(activity.getActivityTab())),
-                timeoutMs, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
+        CriteriaHelper.pollUiThread(() -> {
+            Criteria.checkThat(activity.getRootUiCoordinatorForTesting()
+                                       .getTopUiThemeColorProvider()
+                                       .getThemeColor(),
+                    Matchers.is(expectedColor));
+        }, timeoutMs, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
     }
 
     /**

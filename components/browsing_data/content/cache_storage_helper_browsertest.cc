@@ -5,7 +5,7 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/utf_string_conversions.h"
@@ -14,6 +14,7 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/storage_usage_info.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/shell/browser/shell.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,10 +26,13 @@ using TestCompletionCallback =
 
 class CacheStorageHelperTest : public content::ContentBrowserTest {
  public:
-  content::CacheStorageContext* CacheStorageContext() {
+  content::StoragePartition* storage_partition() const {
     return content::BrowserContext::GetDefaultStoragePartition(
-               shell()->web_contents()->GetBrowserContext())
-        ->GetCacheStorageContext();
+        shell()->web_contents()->GetBrowserContext());
+  }
+
+  scoped_refptr<CannedCacheStorageHelper> MakeHelper() {
+    return base::MakeRefCounted<CannedCacheStorageHelper>(storage_partition());
   }
 };
 
@@ -36,8 +40,7 @@ IN_PROC_BROWSER_TEST_F(CacheStorageHelperTest, CannedAddCacheStorage) {
   const GURL origin1("http://host1:1/");
   const GURL origin2("http://host2:1/");
 
-  scoped_refptr<CannedCacheStorageHelper> helper(
-      new CannedCacheStorageHelper(CacheStorageContext()));
+  auto helper = MakeHelper();
   helper->Add(url::Origin::Create(origin1));
   helper->Add(url::Origin::Create(origin2));
 
@@ -57,8 +60,7 @@ IN_PROC_BROWSER_TEST_F(CacheStorageHelperTest, CannedAddCacheStorage) {
 IN_PROC_BROWSER_TEST_F(CacheStorageHelperTest, CannedUnique) {
   const GURL origin("http://host1:1/");
 
-  scoped_refptr<CannedCacheStorageHelper> helper(
-      new CannedCacheStorageHelper(CacheStorageContext()));
+  auto helper = MakeHelper();
   helper->Add(url::Origin::Create(origin));
   helper->Add(url::Origin::Create(origin));
 

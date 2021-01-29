@@ -10,6 +10,7 @@
 #include <set>
 #include <vector>
 
+#include "base/containers/flat_map.h"
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
@@ -45,6 +46,10 @@ class FieldDataManager;
 
 namespace form_util {
 
+// Mapping from a form element's render id to results of button titles
+// heuristics for a given form element.
+using ButtonTitlesCache = base::flat_map<FormRendererId, ButtonTitleList>;
+
 // A bit field mask to extract data from WebFormControlElement.
 // Copied to components/autofill/ios/browser/resources/autofill_controller.js.
 enum ExtractMask {
@@ -59,11 +64,17 @@ enum ExtractMask {
                                  // WebFormControlElement.
   EXTRACT_BOUNDS = 1 << 3,       // Extract bounds from WebFormControlElement,
                                  // could trigger layout if needed.
+  EXTRACT_DATALIST = 1 << 4,     // Extract datalist from WebFormControlElement,
+                                 // the total number of options is up to
+                                 // kMaxListSize and each option has as far as
+                                 // kMaxDataLength.
 };
 
-// Helper function that strips any authentication data, as well as query and
-// ref portions of URL
-GURL StripAuthAndParams(const GURL& gurl);
+// Gets up to kMaxListSize data list values (with corresponding label) for the
+// given element, each value and label have as far as kMaxDataLength.
+void GetDataListSuggestions(const blink::WebInputElement& element,
+                            std::vector<base::string16>* values,
+                            std::vector<base::string16>* labels);
 
 // Extract FormData from the form element and return whether the operation was
 // successful.
@@ -85,6 +96,11 @@ bool IsFormControlVisible(blink::WebLocalFrame* frame,
 bool IsSomeControlElementVisible(
     const blink::WebVector<blink::WebFormControlElement>& control_elements);
 
+// Returns true if at least one element from |control_elements| is visible.
+bool IsSomeControlElementVisible(
+    blink::WebLocalFrame* frame,
+    const std::set<FieldRendererId>& control_elements);
+
 // Returns true if some control elements of |form| are visible.
 bool AreFormContentsVisible(const blink::WebFormElement& form);
 
@@ -93,6 +109,7 @@ bool AreFormContentsVisible(const blink::WebFormElement& form);
 // strip unnecessary data (e.g. query params and HTTP credentials).
 GURL GetCanonicalActionForForm(const blink::WebFormElement& form);
 GURL GetCanonicalOriginForDocument(const blink::WebDocument& document);
+GURL GetDocumentUrlWithoutAuth(const blink::WebDocument& document);
 
 // Returns true if |element| is a month input element.
 bool IsMonthInput(const blink::WebInputElement* element);
@@ -125,6 +142,10 @@ bool IsWebElementVisible(const blink::WebElement& element);
 // Returns the form's |name| attribute if non-empty; otherwise the form's |id|
 // attribute.
 base::string16 GetFormIdentifier(const blink::WebFormElement& form);
+
+// Returns the |unique_renderer_id| of a given |WebFormElement|. If
+// |WebFormElement::IsNull()|, returns a null renderer ID.
+FormRendererId GetFormRendererId(const blink::WebFormElement& form);
 
 // Returns text alignment for |element|.
 base::i18n::TextDirection GetTextDirectionForElement(
@@ -276,6 +297,15 @@ void PreviewSuggestion(const base::string16& suggestion,
 // Whitespace is trimmed from text accumulated at descendant nodes.
 base::string16 FindChildText(const blink::WebNode& node);
 
+// Returns the button titles for |web_form| (or unowned buttons in |document| if
+// |web_form| is null). |button_titles_cache| can be used to spare recomputation
+// if called multiple times for the same form. Button titles computation for
+// unowned buttons is enabled only in Dev and Canary (crbug.com/1086446),
+// otherwise the method returns an empty list.
+ButtonTitleList GetButtonTitles(const blink::WebFormElement& web_form,
+                                const blink::WebDocument& document,
+                                ButtonTitlesCache* button_titles_cache);
+
 // Exposed for testing purpose
 base::string16 FindChildTextWithIgnoreListForTesting(
     const blink::WebNode& node,
@@ -284,8 +314,6 @@ bool InferLabelForElementForTesting(const blink::WebFormControlElement& element,
                                     const std::vector<base::char16>& stop_words,
                                     base::string16* label,
                                     FormFieldData::LabelSource* label_source);
-ButtonTitleList InferButtonTitlesForTesting(
-    const blink::WebElement& form_element);
 
 // Returns form by unique renderer id. Return null element if there is no form
 // with given form renderer id.

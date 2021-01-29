@@ -10,8 +10,7 @@
 
 #include "ash/public/cpp/ash_pref_names.h"
 #include "base/bind.h"
-#include "base/stl_util.h"
-#include "base/task/post_task.h"
+#include "base/containers/contains.h"
 #include "chrome/browser/chromeos/login/quick_unlock/auth_token.h"
 #include "chrome/browser/chromeos/login/quick_unlock/fingerprint_storage.h"
 #include "chrome/browser/chromeos/login/quick_unlock/pin_backend.h"
@@ -19,9 +18,7 @@
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_factory.h"
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_storage.h"
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_utils.h"
-#include "chrome/browser/chromeos/login/supervised/supervised_user_authentication.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
-#include "chrome/browser/chromeos/login/users/supervised_user_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -80,9 +77,6 @@ constexpr size_t kMinLengthForNonWeakPin = 2U;
 // www.datagenetics.com/blog/september32012/.
 constexpr const char* kMostCommonPins[] = {"1212", "1004", "2000", "6969",
                                            "1122", "1313", "2001", "1010"};
-
-// QuickUnlockPrivateGetAuthTokenFunction test observer.
-QuickUnlockPrivateGetAuthTokenFunction::TestObserver* test_observer;
 
 // Returns the active set of quick unlock modes.
 void ComputeActiveModes(Profile* profile, ActiveModeCallback result) {
@@ -232,12 +226,6 @@ void QuickUnlockPrivateGetAuthTokenFunction::
   authenticator_allocator_ = allocator;
 }
 
-// static
-void QuickUnlockPrivateGetAuthTokenFunction::SetTestObserver(
-    QuickUnlockPrivateGetAuthTokenFunction::TestObserver* observer) {
-  test_observer = observer;
-}
-
 ExtensionFunction::ResponseAction
 QuickUnlockPrivateGetAuthTokenFunction::Run() {
   std::unique_ptr<quick_unlock_private::GetAuthToken::Params> params =
@@ -249,17 +237,6 @@ QuickUnlockPrivateGetAuthTokenFunction::Run() {
           GetActiveProfile(browser_context()));
   chromeos::UserContext user_context(*user);
   user_context.SetKey(chromeos::Key(params->account_password));
-
-  if (test_observer)
-    test_observer->OnGetAuthTokenCalled(params->account_password);
-
-  // Alter |user_context| if the user is supervised.
-  if (user->GetType() == user_manager::USER_TYPE_SUPERVISED) {
-    user_context = chromeos::ChromeUserManager::Get()
-                       ->GetSupervisedUserManager()
-                       ->GetAuthentication()
-                       ->TransformKey(user_context);
-  }
 
   // Lazily allocate the authenticator. We do this here, instead of in the ctor,
   // so that tests can install a fake.
@@ -277,11 +254,11 @@ QuickUnlockPrivateGetAuthTokenFunction::Run() {
   // is needed.
   AddRef();
 
-  base::PostTask(
-      FROM_HERE, {content::BrowserThread::UI},
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&chromeos::ExtendedAuthenticator::AuthenticateToCheck,
                      extended_authenticator_.get(), user_context,
-                     base::Closure()));
+                     base::OnceClosure()));
 
   return RespondLater();
 }
@@ -338,6 +315,78 @@ QuickUnlockPrivateSetLockScreenEnabledFunction::Run() {
 
   return RespondNow(ArgumentList(
       quick_unlock_private::SetLockScreenEnabled::Results::Create()));
+}
+
+// quickUnlockPrivate.setPinAutosubmitEnabled
+
+QuickUnlockPrivateSetPinAutosubmitEnabledFunction::
+    QuickUnlockPrivateSetPinAutosubmitEnabledFunction()
+    : chrome_details_(this) {}
+
+QuickUnlockPrivateSetPinAutosubmitEnabledFunction::
+    ~QuickUnlockPrivateSetPinAutosubmitEnabledFunction() = default;
+
+ExtensionFunction::ResponseAction
+QuickUnlockPrivateSetPinAutosubmitEnabledFunction::Run() {
+  auto params =
+      quick_unlock_private::SetPinAutosubmitEnabled::Params::Create(*args_);
+
+  AuthToken* auth_token = GetActiveProfileAuthToken(browser_context());
+  if (!auth_token)
+    return RespondNow(Error(kAuthTokenExpired));
+  if (params->token != auth_token->Identifier())
+    return RespondNow(Error(kAuthTokenInvalid));
+
+  Profile* profile = GetActiveProfile(browser_context());
+  user_manager::User* user =
+      chromeos::ProfileHelper::Get()->GetUserByProfile(profile);
+
+  chromeos::quick_unlock::PinBackend::GetInstance()->SetPinAutoSubmitEnabled(
+      user->GetAccountId(), params->pin, params->enabled,
+      base::BindOnce(&QuickUnlockPrivateSetPinAutosubmitEnabledFunction::
+                         HandleSetPinAutoSubmitResult,
+                     this));
+
+  return RespondLater();
+}
+
+void QuickUnlockPrivateSetPinAutosubmitEnabledFunction::
+    HandleSetPinAutoSubmitResult(bool result) {
+  Respond(ArgumentList(
+      quick_unlock_private::SetPinAutosubmitEnabled::Results::Create(result)));
+}
+
+// quickUnlockPrivate.canAuthenticatePin
+
+QuickUnlockPrivateCanAuthenticatePinFunction::
+    QuickUnlockPrivateCanAuthenticatePinFunction()
+    : chrome_details_(this) {}
+
+QuickUnlockPrivateCanAuthenticatePinFunction::
+    ~QuickUnlockPrivateCanAuthenticatePinFunction() = default;
+
+ExtensionFunction::ResponseAction
+QuickUnlockPrivateCanAuthenticatePinFunction::Run() {
+  AuthToken* auth_token = GetActiveProfileAuthToken(browser_context());
+  if (!auth_token)
+    return RespondNow(Error(kAuthTokenExpired));
+
+  Profile* profile = GetActiveProfile(browser_context());
+  user_manager::User* user =
+      chromeos::ProfileHelper::Get()->GetUserByProfile(profile);
+
+  chromeos::quick_unlock::PinBackend::GetInstance()->CanAuthenticate(
+      user->GetAccountId(),
+      base::BindOnce(&QuickUnlockPrivateCanAuthenticatePinFunction::
+                         HandleCanAuthenticateResult,
+                     this));
+  return RespondLater();
+}
+
+void QuickUnlockPrivateCanAuthenticatePinFunction::HandleCanAuthenticateResult(
+    bool result) {
+  Respond(ArgumentList(
+      quick_unlock_private::CanAuthenticatePin::Results::Create(result)));
 }
 
 // quickUnlockPrivate.getAvailableModes
@@ -408,6 +457,8 @@ QuickUnlockPrivateCheckCredentialFunction::Run() {
   Profile* profile = GetActiveProfile(browser_context());
   PrefService* pref_service = profile->GetPrefs();
   bool allow_weak = pref_service->GetBoolean(prefs::kPinUnlockWeakPinsAllowed);
+  bool is_allow_weak_pin_pref_set =
+      pref_service->HasPrefPath(prefs::kPinUnlockWeakPinsAllowed);
 
   // Check and return the problems.
   std::vector<CredentialProblem>& warnings = result->warnings;
@@ -420,7 +471,8 @@ QuickUnlockPrivateCheckCredentialFunction::Run() {
   if (length_problem != CredentialProblem::CREDENTIAL_PROBLEM_NONE)
     errors.push_back(length_problem);
 
-  if (!IsPinDifficultEnough(credential)) {
+  if ((!allow_weak || !is_allow_weak_pin_pref_set) &&
+      !IsPinDifficultEnough(credential)) {
     auto& log = allow_weak ? warnings : errors;
     log.push_back(CredentialProblem::CREDENTIAL_PROBLEM_TOO_WEAK);
   }

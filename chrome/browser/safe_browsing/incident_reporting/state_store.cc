@@ -64,7 +64,7 @@ void StateStore::Transaction::Clear(IncidentType type, const std::string& key) {
       const_type_dict->GetWithoutPathExpansion(key, nullptr)) {
     base::DictionaryValue* type_dict = nullptr;
     GetPrefDict()->GetDictionaryWithoutPathExpansion(type_string, &type_dict);
-    type_dict->RemoveWithoutPathExpansion(key, nullptr);
+    type_dict->RemoveKey(key);
   }
 }
 
@@ -81,7 +81,7 @@ void StateStore::Transaction::ClearForType(IncidentType type) {
   const base::DictionaryValue* type_dict = nullptr;
   if (store_->incidents_sent_->GetDictionaryWithoutPathExpansion(type_string,
                                                                  &type_dict)) {
-    GetPrefDict()->RemoveWithoutPathExpansion(type_string, nullptr);
+    GetPrefDict()->RemoveKey(type_string);
   }
 }
 
@@ -160,7 +160,7 @@ bool StateStore::HasBeenReported(IncidentType type,
 
 void StateStore::CleanLegacyValues(Transaction* transaction) {
   static const IncidentType kLegacyTypes[] = {
-      IncidentType::OBSOLETE_BLACKLIST_LOAD,
+      IncidentType::OBSOLETE_BLOCKLIST_LOAD,
       IncidentType::OBSOLETE_SUSPICIOUS_MODULE};
 
   for (IncidentType type : kLegacyTypes)

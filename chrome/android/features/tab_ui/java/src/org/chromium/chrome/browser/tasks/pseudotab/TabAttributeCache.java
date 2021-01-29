@@ -14,8 +14,7 @@ import androidx.annotation.VisibleForTesting;
 import org.chromium.base.ContextUtils;
 import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.TabImpl;
-import org.chromium.chrome.browser.tabmodel.EmptyTabModelObserver;
+import org.chromium.chrome.browser.tab.state.CriticalPersistedTabData;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelFilter;
 import org.chromium.chrome.browser.tabmodel.TabModelObserver;
@@ -26,6 +25,7 @@ import org.chromium.components.search_engines.TemplateUrlService;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.content_public.browser.NavigationHistory;
+import org.chromium.url.GURL;
 
 /**
  * Cache for attributes of {@link PseudoTab} to be available before native is ready.
@@ -59,6 +59,8 @@ public class TabAttributeCache {
      * @param tabModelSelector The {@link TabModelSelector} to observe.
      */
     public TabAttributeCache(TabModelSelector tabModelSelector) {
+        // TODO(hanxi): makes TabAttributeCache a singleton. The TabAttributeCache should be
+        //  instantiated and exactly once before it is used.
         mTabModelSelector = tabModelSelector;
         mTabModelSelectorTabObserver = new TabModelSelectorTabObserver(mTabModelSelector) {
             @Override
@@ -78,7 +80,7 @@ public class TabAttributeCache {
             @Override
             public void onRootIdChanged(Tab tab, int newRootId) {
                 if (tab.isIncognito()) return;
-                assert newRootId == ((TabImpl) tab).getRootId();
+                assert newRootId == CriticalPersistedTabData.from(tab).getRootId();
                 cacheRootId(tab.getId(), newRootId);
             }
 
@@ -93,7 +95,7 @@ public class TabAttributeCache {
             }
         };
 
-        mTabModelObserver = new EmptyTabModelObserver() {
+        mTabModelObserver = new TabModelObserver() {
             @Override
             public void tabClosureCommitted(Tab tab) {
                 int id = tab.getId();
@@ -118,7 +120,7 @@ public class TabAttributeCache {
                     Tab tab = filter.getTabAt(i);
                     cacheUrl(tab.getId(), tab.getUrlString());
                     cacheTitle(tab.getId(), tab.getTitle());
-                    cacheRootId(tab.getId(), ((TabImpl) tab).getRootId());
+                    cacheRootId(tab.getId(), CriticalPersistedTabData.from(tab).getRootId());
                 }
                 Tab currentTab = mTabModelSelector.getCurrentTab();
                 if (currentTab != null) cacheLastSearchTerm(currentTab);
@@ -247,13 +249,13 @@ public class TabAttributeCache {
         NavigationHistory history = controller.getNavigationHistory();
 
         if (!TextUtils.isEmpty(
-                    TemplateUrlServiceFactory.get().getSearchQueryForUrl(tab.getUrlString()))) {
+                    TemplateUrlServiceFactory.get().getSearchQueryForUrl(tab.getUrl()))) {
             // If we are already at a search result page, do not show the last search term.
             return null;
         }
 
         for (int i = history.getCurrentEntryIndex() - 1; i >= 0; i--) {
-            String url = history.getEntryAtIndex(i).getOriginalUrl();
+            GURL url = history.getEntryAtIndex(i).getOriginalUrl();
             String query = TemplateUrlServiceFactory.get().getSearchQueryForUrl(url);
             if (!TextUtils.isEmpty(query)) {
                 return removeEscapedCodePoints(query);

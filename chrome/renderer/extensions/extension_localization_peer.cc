@@ -27,7 +27,7 @@ ExtensionLocalizationPeer::DataPipeState::DataPipeState()
 ExtensionLocalizationPeer::DataPipeState::~DataPipeState() = default;
 
 ExtensionLocalizationPeer::ExtensionLocalizationPeer(
-    std::unique_ptr<content::RequestPeer> peer,
+    std::unique_ptr<blink::WebRequestPeer> peer,
     IPC::Sender* message_sender,
     const GURL& request_url)
     : original_peer_(std::move(peer)),
@@ -38,9 +38,9 @@ ExtensionLocalizationPeer::~ExtensionLocalizationPeer() {
 }
 
 // static
-std::unique_ptr<content::RequestPeer>
+std::unique_ptr<blink::WebRequestPeer>
 ExtensionLocalizationPeer::CreateExtensionLocalizationPeer(
-    std::unique_ptr<content::RequestPeer> peer,
+    std::unique_ptr<blink::WebRequestPeer> peer,
     IPC::Sender* message_sender,
     const std::string& mime_type,
     const GURL& request_url) {
@@ -61,7 +61,8 @@ void ExtensionLocalizationPeer::OnUploadProgress(uint64_t position,
 
 bool ExtensionLocalizationPeer::OnReceivedRedirect(
     const net::RedirectInfo& redirect_info,
-    network::mojom::URLResponseHeadPtr head) {
+    network::mojom::URLResponseHeadPtr head,
+    std::vector<std::string>*) {
   NOTREACHED();
   return false;
 }
@@ -69,6 +70,16 @@ bool ExtensionLocalizationPeer::OnReceivedRedirect(
 void ExtensionLocalizationPeer::OnReceivedResponse(
     network::mojom::URLResponseHeadPtr head) {
   response_head_ = std::move(head);
+}
+
+void ExtensionLocalizationPeer::EvictFromBackForwardCache(
+    blink::mojom::RendererEvictionReason) {}
+
+void ExtensionLocalizationPeer::DidBufferLoadWhileInBackForwardCache(
+    size_t num_bytes) {}
+
+bool ExtensionLocalizationPeer::CanContinueBufferingWhileInBackForwardCache() {
+  return true;
 }
 
 void ExtensionLocalizationPeer::OnStartLoadingResponseBody(
@@ -113,10 +124,6 @@ void ExtensionLocalizationPeer::OnCompletedRequest(
 
   // We've sent all the body to the peer. Complete the request.
   CompleteRequest();
-}
-
-scoped_refptr<base::TaskRunner> ExtensionLocalizationPeer::GetTaskRunner() {
-  return original_peer_->GetTaskRunner();
 }
 
 void ExtensionLocalizationPeer::OnReadableBody(

@@ -42,7 +42,7 @@
 
 namespace blink {
 
-void BaseCheckableInputType::Trace(Visitor* visitor) {
+void BaseCheckableInputType::Trace(Visitor* visitor) const {
   InputTypeView::Trace(visitor);
   InputType::Trace(visitor);
 }
@@ -119,6 +119,10 @@ void BaseCheckableInputType::ReadingChecked() const {
 
 bool BaseCheckableInputType::IsCheckable() {
   return true;
+}
+
+void BaseCheckableInputType::HandleBlurEvent() {
+  GetElement().SetActive(false);
 }
 
 }  // namespace blink

@@ -8,7 +8,7 @@
 #include "ash/public/cpp/ash_pref_names.h"
 #include "ash/public/cpp/tablet_mode.h"
 #include "base/metrics/histogram_functions.h"
-#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
+#include "chrome/browser/ash/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chromeos/constants/chromeos_switches.h"
@@ -60,7 +60,7 @@ void GestureNavigationScreen::GesturePageChange(const std::string& new_page) {
   current_page_ = new_page;
 }
 
-bool GestureNavigationScreen::MaybeSkip() {
+bool GestureNavigationScreen::MaybeSkip(WizardContext* context) {
   AccessibilityManager* accessibility_manager = AccessibilityManager::Get();
   if (chrome_user_manager_util::IsPublicSessionOrEphemeralLogin() ||
       !ash::features::IsHideShelfControlsInTabletModeEnabled() ||

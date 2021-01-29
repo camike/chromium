@@ -5,6 +5,7 @@
 #ifndef ASH_AMBIENT_MODEL_AMBIENT_BACKEND_MODEL_OBSERVER_H_
 #define ASH_AMBIENT_MODEL_AMBIENT_BACKEND_MODEL_OBSERVER_H_
 
+#include "ash/ambient/model/ambient_backend_model.h"
 #include "ash/public/cpp/ash_public_export.h"
 #include "base/observer_list_types.h"
 
@@ -15,12 +16,25 @@ namespace ash {
 class ASH_PUBLIC_EXPORT AmbientBackendModelObserver
     : public base::CheckedObserver {
  public:
-  // Invoked when prev/current/next images changed.
-  virtual void OnImagesChanged() = 0;
+  // Invoked when |topics| has been changed.
+  virtual void OnTopicsChanged() {}
+
+  // Invoked when a new image is added.
+  virtual void OnImageAdded() {}
+
+  // Invoked when two images have been added. Two images are necessary to
+  // prevent screen burn in so that images can still change if further downloads
+  // fail. When the second image is added, this method is invoked after
+  // |OnImageAdded|.
+  virtual void OnImagesReady() {}
+
+  // Invoked when fetching images has failed and not enough images are present
+  // to start ambient mode.
+  virtual void OnImagesFailed() {}
 
   // Invoked when the weather info (condition icon or temperature) stored in the
   // model has been updated.
-  virtual void OnWeatherInfoUpdated() = 0;
+  virtual void OnWeatherInfoUpdated() {}
 
  protected:
   ~AmbientBackendModelObserver() override = default;

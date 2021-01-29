@@ -19,6 +19,7 @@ class AppSpecifics;
 class ArcPackageSpecifics;
 class AutofillProfileSpecifics;
 class AutofillSpecifics;
+class AutofillOfferSpecifics;
 class AutofillWalletSpecifics;
 class BookmarkSpecifics;
 class ClientConfigParams;
@@ -35,8 +36,6 @@ class EntitySpecifics;
 class ExperimentsSpecifics;
 class ExtensionSettingSpecifics;
 class ExtensionSpecifics;
-class FaviconImageSpecifics;
-class FaviconTrackingSpecifics;
 class HistoryDeleteDirectiveSpecifics;
 class LinkedAppIconInfo;
 class ManagedUserSettingSpecifics;
@@ -102,6 +101,9 @@ std::unique_ptr<base::DictionaryValue> AppSpecificsToValue(
 std::unique_ptr<base::DictionaryValue> ArcPackageSpecificsToValue(
     const sync_pb::ArcPackageSpecifics& proto);
 
+std::unique_ptr<base::DictionaryValue> AutofillOfferSpecificsToValue(
+    const sync_pb::AutofillOfferSpecifics& autofill_offer_specifics);
+
 std::unique_ptr<base::DictionaryValue> AutofillProfileSpecificsToValue(
     const sync_pb::AutofillProfileSpecifics& autofill_profile_specifics);
 
@@ -149,12 +151,6 @@ std::unique_ptr<base::DictionaryValue> ExtensionSettingSpecificsToValue(
 
 std::unique_ptr<base::DictionaryValue> ExtensionSpecificsToValue(
     const sync_pb::ExtensionSpecifics& extension_specifics);
-
-std::unique_ptr<base::DictionaryValue> FaviconImageSpecificsToValue(
-    const sync_pb::FaviconImageSpecifics& favicon_image_specifics);
-
-std::unique_ptr<base::DictionaryValue> FaviconTrackingSpecificsToValue(
-    const sync_pb::FaviconTrackingSpecifics& favicon_tracking_specifics);
 
 std::unique_ptr<base::DictionaryValue> HistoryDeleteDirectiveSpecificsToValue(
     const sync_pb::HistoryDeleteDirectiveSpecifics&

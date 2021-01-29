@@ -37,6 +37,7 @@
 #include "components/policy/core/common/cloud/dm_auth.h"
 #include "components/policy/proto/chrome_device_policy.pb.h"
 #include "google_apis/gaia/gaia_auth_util.h"
+#include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/http/http_status_code.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -173,11 +174,11 @@ EnrollmentHandlerChromeOS::EnrollmentHandlerChromeOS(
     scoped_refptr<base::SequencedTaskRunner> background_task_runner,
     chromeos::ActiveDirectoryJoinDelegate* ad_join_delegate,
     const EnrollmentConfig& enrollment_config,
-    std::unique_ptr<DMAuth> dm_auth,
+    DMAuth dm_auth,
     const std::string& client_id,
     const std::string& requisition,
     const std::string& sub_organization,
-    const EnrollmentCallback& completion_callback)
+    EnrollmentCallback completion_callback)
     : store_(store),
       install_attributes_(install_attributes),
       state_keys_broker_(state_keys_broker),
@@ -188,17 +189,17 @@ EnrollmentHandlerChromeOS::EnrollmentHandlerChromeOS(
       enrollment_config_(enrollment_config),
       client_id_(client_id),
       sub_organization_(sub_organization),
-      completion_callback_(completion_callback),
+      completion_callback_(std::move(completion_callback)),
       enrollment_step_(STEP_PENDING) {
   dm_auth_ = std::move(dm_auth);
   CHECK(!client_->is_registered());
   CHECK_EQ(DM_STATUS_SUCCESS, client_->status());
   if (enrollment_config_.is_mode_attestation()) {
-    CHECK(dm_auth_->empty() || dm_auth_->has_enrollment_token());
+    CHECK(dm_auth_.empty() || dm_auth_.has_enrollment_token());
   } else if (enrollment_config.mode == EnrollmentConfig::MODE_OFFLINE_DEMO) {
-    CHECK(dm_auth_->empty());
+    CHECK(dm_auth_.empty());
   } else {
-    CHECK(!dm_auth_->empty());
+    CHECK(!dm_auth_.empty());
   }
   CHECK_NE(enrollment_config.mode == EnrollmentConfig::MODE_OFFLINE_DEMO,
            enrollment_config.offline_policy_path.empty());
@@ -409,7 +410,7 @@ void EnrollmentHandlerChromeOS::StartRegistration() {
   } else if (enrollment_config_.mode == EnrollmentConfig::MODE_OFFLINE_DEMO) {
     StartOfflineDemoEnrollmentFlow();
   } else {
-    client_->Register(*register_params_, client_id_, dm_auth_->oauth_token());
+    client_->Register(*register_params_, client_id_, dm_auth_.oauth_token());
   }
 }
 
@@ -430,7 +431,7 @@ void EnrollmentHandlerChromeOS::HandleRegistrationCertificateResult(
     const std::string& pem_certificate_chain) {
   if (status == chromeos::attestation::ATTESTATION_SUCCESS) {
     client_->RegisterWithCertificate(*register_params_, client_id_,
-                                     dm_auth_->Clone(), pem_certificate_chain,
+                                     dm_auth_.Clone(), pem_certificate_chain,
                                      sub_organization_);
   } else {
     ReportResult(EnrollmentStatus::ForStatus(
@@ -566,6 +567,20 @@ void EnrollmentHandlerChromeOS::OnDeviceAccountTokenError(
 void EnrollmentHandlerChromeOS::OnDeviceAccountClientError(
     DeviceManagementStatus status) {
   // Do nothing, it would be handled in OnClientError.
+}
+
+enterprise_management::DeviceServiceApiAccessRequest::DeviceType
+EnrollmentHandlerChromeOS::GetRobotAuthCodeDeviceType() {
+  return em::DeviceServiceApiAccessRequest::CHROME_OS;
+}
+
+std::set<std::string> EnrollmentHandlerChromeOS::GetRobotOAuthScopes() {
+  return {GaiaConstants::kAnyApiOAuth2Scope};
+}
+
+scoped_refptr<network::SharedURLLoaderFactory>
+EnrollmentHandlerChromeOS::GetURLLoaderFactory() {
+  return g_browser_process->shared_url_loader_factory();
 }
 
 void EnrollmentHandlerChromeOS::SetFirmwareManagementParametersData() {
@@ -750,7 +765,7 @@ void EnrollmentHandlerChromeOS::Stop() {
 }
 
 void EnrollmentHandlerChromeOS::ReportResult(EnrollmentStatus status) {
-  EnrollmentCallback callback = completion_callback_;
+  EnrollmentCallback callback = std::move(completion_callback_);
   Stop();
 
   if (status.status() != EnrollmentStatus::SUCCESS) {
@@ -762,7 +777,7 @@ void EnrollmentHandlerChromeOS::ReportResult(EnrollmentStatus status) {
   }
 
   if (!callback.is_null())
-    callback.Run(status);
+    std::move(callback).Run(status);
 }
 
 void EnrollmentHandlerChromeOS::SetStep(EnrollmentStep step) {

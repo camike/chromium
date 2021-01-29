@@ -8,9 +8,9 @@
 #include <memory>
 #include <vector>
 
+#include "base/containers/contains.h"
 #include "base/memory/singleton.h"
-#include "base/scoped_observer.h"
-#include "base/stl_util.h"
+#include "base/scoped_multi_source_observation.h"
 #include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
@@ -51,7 +51,7 @@ Widget* GetWidgetOfParentWindowIncludingTransient(Widget* widget) {
 // Return the toplevel widget ancestor of |widget|, including widgets of
 // parents of transient windows.
 Widget* GetToplevelWidgetIncludingTransientWindows(Widget* widget) {
-  widget = widget = widget->GetTopLevelWidget();
+  widget = widget->GetTopLevelWidget();
   if (Widget* parent_widget = GetWidgetOfParentWindowIncludingTransient(widget))
     return GetToplevelWidgetIncludingTransientWindows(parent_widget);
   return widget;
@@ -87,12 +87,11 @@ class AuraLinuxApplication : public ui::AXPlatformNodeDelegateBase,
       return;
 
     widgets_.push_back(widget);
-    observer_.Add(widget);
+    widget_observations_.AddObservation(widget);
 
     aura::Window* window = widget->GetNativeWindow();
-    if (!window)
-      return;
-    window->AddObserver(this);
+    if (window)
+      window_observations_.AddObservation(window);
   }
 
   gfx::NativeViewAccessible GetNativeViewAccessible() override {
@@ -104,7 +103,12 @@ class AuraLinuxApplication : public ui::AXPlatformNodeDelegateBase,
   // WidgetObserver:
 
   void OnWidgetDestroying(Widget* widget) override {
-    observer_.Remove(widget);
+    widget_observations_.RemoveObservation(widget);
+
+    aura::Window* window = widget->GetNativeWindow();
+    if (window && window_observations_.IsObservingSource(window))
+      window_observations_.RemoveObservation(window);
+
     auto iter = std::find(widgets_.begin(), widgets_.end(), widget);
     if (iter != widgets_.end())
       widgets_.erase(iter);
@@ -163,7 +167,10 @@ class AuraLinuxApplication : public ui::AXPlatformNodeDelegateBase,
   ui::AXNodeData data_;
   ui::AXUniqueId unique_id_;
   std::vector<Widget*> widgets_;
-  ScopedObserver<views::Widget, views::WidgetObserver> observer_{this};
+  base::ScopedMultiSourceObservation<views::Widget, views::WidgetObserver>
+      widget_observations_{this};
+  base::ScopedMultiSourceObservation<aura::Window, aura::WindowObserver>
+      window_observations_{this};
 };
 
 }  // namespace
@@ -182,8 +189,9 @@ ViewAXPlatformNodeDelegateAuraLinux::ViewAXPlatformNodeDelegateAuraLinux(
 
 gfx::NativeViewAccessible ViewAXPlatformNodeDelegateAuraLinux::GetParent() {
   if (gfx::NativeViewAccessible parent =
-          ViewAXPlatformNodeDelegate::GetParent())
+          ViewAXPlatformNodeDelegate::GetParent()) {
     return parent;
+  }
 
   Widget* parent_widget =
       GetWidgetOfParentWindowIncludingTransient(view()->GetWidget());

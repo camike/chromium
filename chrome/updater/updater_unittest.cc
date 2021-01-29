@@ -9,7 +9,7 @@
 #include "base/process/process.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "chrome/updater/updater_version.h"
+#include "chrome/updater/updater_branding.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_WIN)
@@ -27,7 +27,7 @@ TEST(UpdaterTest, UpdaterExitCode) {
 #if defined(OS_WIN)
       this_executable_path.DirName().Append(
           FILE_PATH_LITERAL("updater" EXECUTABLE_EXTENSION));
-#elif defined(OS_MACOSX)
+#elif defined(OS_MAC)
       this_executable_path.DirName()
           .Append(
               FILE_PATH_LITERAL(PRODUCT_FULLNAME_STRING EXECUTABLE_EXTENSION))

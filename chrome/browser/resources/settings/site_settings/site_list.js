@@ -26,7 +26,7 @@ import {ListPropertyUpdateBehavior} from 'chrome://resources/js/list_property_up
 import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {loadTimeData} from '../i18n_setup.m.js';
+import {loadTimeData} from '../i18n_setup.js';
 
 // <if expr="chromeos">
 import {AndroidInfoBrowserProxyImpl, AndroidSmsInfo} from './android_info_browser_proxy.js';
@@ -51,7 +51,6 @@ Polymer({
     /**
      * Some content types (like Location) do not allow the user to manually
      * edit the exception list from within Settings.
-     * @private
      */
     readOnlyList: {
       type: Boolean,
@@ -59,6 +58,14 @@ Polymer({
     },
 
     categoryHeader: String,
+
+    /** @private */
+    enableContentSettingsRedesign_: {
+      type: Boolean,
+      value() {
+        return loadTimeData.getBoolean('enableContentSettingsRedesign');
+      }
+    },
 
     /**
      * The site serving as the model for the currently open action menu.
@@ -195,7 +202,7 @@ Polymer({
    * @private
    */
   siteWithinCategoryChanged_(category, site) {
-    if (category == this.category) {
+    if (category === this.category) {
       this.configureWidget_();
     }
   },
@@ -211,7 +218,7 @@ Polymer({
 
     // The SESSION_ONLY list won't have any incognito exceptions. (Minor
     // optimization, not required).
-    if (this.categorySubtype == ContentSetting.SESSION_ONLY) {
+    if (this.categorySubtype === ContentSetting.SESSION_ONLY) {
       return;
     }
 
@@ -225,7 +232,7 @@ Polymer({
    * @private
    */
   configureWidget_() {
-    if (this.category == undefined) {
+    if (this.category === undefined) {
       return;
     }
 
@@ -246,8 +253,8 @@ Polymer({
     // </if>
 
     // The Session permissions are only for cookies.
-    if (this.categorySubtype == ContentSetting.SESSION_ONLY) {
-      this.$.category.hidden = this.category != ContentSettingsTypes.COOKIES;
+    if (this.categorySubtype === ContentSetting.SESSION_ONLY) {
+      this.$.category.hidden = this.category !== ContentSettingsTypes.COOKIES;
     }
   },
 
@@ -269,8 +276,8 @@ Polymer({
   computeShowAddSiteButton_() {
     return !(
         this.readOnlyList ||
-        (this.category == ContentSettingsTypes.NATIVE_FILE_SYSTEM_WRITE &&
-         this.categorySubtype == ContentSetting.ALLOW));
+        (this.category === ContentSettingsTypes.FILE_SYSTEM_WRITE &&
+         this.categorySubtype === ContentSetting.ALLOW));
   },
 
   /**
@@ -278,7 +285,7 @@ Polymer({
    * @private
    */
   showNoSearchResults_() {
-    return this.sites.length > 0 && this.getFilteredSites_().length == 0;
+    return this.sites.length > 0 && this.getFilteredSites_().length === 0;
   },
 
   /**
@@ -315,12 +322,12 @@ Polymer({
       this.$.tooltip.hide();
       target.removeEventListener('mouseleave', hide);
       target.removeEventListener('blur', hide);
-      target.removeEventListener('tap', hide);
+      target.removeEventListener('click', hide);
       this.$.tooltip.removeEventListener('mouseenter', hide);
     };
     target.addEventListener('mouseleave', hide);
     target.addEventListener('blur', hide);
-    target.addEventListener('tap', hide);
+    target.addEventListener('click', hide);
     this.$.tooltip.addEventListener('mouseenter', hide);
     this.$.tooltip.show();
   },
@@ -385,8 +392,8 @@ Polymer({
   processExceptions_(exceptionList) {
     let sites = exceptionList
                     .filter(
-                        site => site.setting != ContentSetting.DEFAULT &&
-                            site.setting == this.categorySubtype)
+                        site => site.setting !== ContentSetting.DEFAULT &&
+                            site.setting === this.categorySubtype)
                     .map(site => this.expandSiteException(site));
 
     // <if expr="chromeos">
@@ -400,11 +407,11 @@ Polymer({
    * @private
    */
   setUpActionMenu_() {
-    this.showAllowAction_ = this.categorySubtype != ContentSetting.ALLOW;
-    this.showBlockAction_ = this.categorySubtype != ContentSetting.BLOCK;
+    this.showAllowAction_ = this.categorySubtype !== ContentSetting.ALLOW;
+    this.showBlockAction_ = this.categorySubtype !== ContentSetting.BLOCK;
     this.showSessionOnlyAction_ =
-        this.categorySubtype != ContentSetting.SESSION_ONLY &&
-        this.category == ContentSettingsTypes.COOKIES;
+        this.categorySubtype !== ContentSetting.SESSION_ONLY &&
+        this.category === ContentSettingsTypes.COOKIES;
   },
 
   /**
@@ -519,4 +526,12 @@ Polymer({
         site => propNames.some(
             propName => site[propName].toLowerCase().includes(searchFilter)));
   },
+
+  /**
+   * @return {string}
+   * @private
+   */
+  getCssClass_() {
+    return this.enableContentSettingsRedesign_ ? 'secondary' : '';
+  }
 });

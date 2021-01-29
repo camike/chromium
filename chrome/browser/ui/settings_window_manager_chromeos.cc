@@ -5,10 +5,9 @@
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
 
 #include "ash/public/cpp/app_types.h"
-#include "ash/public/cpp/multi_user_window_manager.h"
 #include "ash/public/cpp/resources/grit/ash_public_unscaled_resources.h"
+#include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_helper.h"
 #include "chrome/browser/ui/ash/window_properties.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -19,6 +18,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/browser/ui/web_applications/system_web_app_ui_utils.h"
+#include "chrome/browser/web_applications/components/web_app_utils.h"
 #include "chrome/browser/web_applications/system_web_app_manager.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chromeos/constants/chromeos_features.h"
@@ -30,22 +30,35 @@ namespace chrome {
 
 namespace {
 
-// This method handles the case of resurfacing the user's OS Settings
-// standalone window that may be at the time located on another user's desktop.
-void ShowSettingsOnCurrentDesktop(Browser* browser) {
-  auto* window_manager = MultiUserWindowManagerHelper::GetWindowManager();
-  if (window_manager && browser) {
-    window_manager->ShowWindowForUser(browser->window()->GetNativeWindow(),
-                                      window_manager->CurrentAccountId());
-    browser->window()->Show();
-  }
-}
+bool g_force_deprecated_settings_window_for_testing = false;
+SettingsWindowManager* g_settings_window_manager_for_testing = nullptr;
 
 }  // namespace
 
 // static
 SettingsWindowManager* SettingsWindowManager::GetInstance() {
-  return base::Singleton<SettingsWindowManager>::get();
+  return g_settings_window_manager_for_testing
+             ? g_settings_window_manager_for_testing
+             : base::Singleton<SettingsWindowManager>::get();
+}
+
+// static
+void SettingsWindowManager::SetInstanceForTesting(
+    SettingsWindowManager* manager) {
+  g_settings_window_manager_for_testing = manager;
+}
+
+// static
+void SettingsWindowManager::ForceDeprecatedSettingsWindowForTesting() {
+  g_force_deprecated_settings_window_for_testing = true;
+}
+
+// static
+bool SettingsWindowManager::UseDeprecatedSettingsWindow(
+    const Profile* profile) {
+  return !web_app::AreWebAppsEnabled(profile) ||
+         chrome::IsRunningInForcedAppMode() ||
+         g_force_deprecated_settings_window_for_testing;
 }
 
 void SettingsWindowManager::AddObserver(
@@ -65,20 +78,12 @@ void SettingsWindowManager::ShowChromePageForProfile(Profile* profile,
   if (!profile->IsGuestSession() && profile->IsOffTheRecord())
     profile = profile->GetOriginalProfile();
 
-  // TODO(calamity): Auto-launch the settings app on install if not found, and
-  // figure out how to invoke OnNewSettingsWindow() in that case.
-  if (web_app::SystemWebAppManager::IsEnabled()) {
-    bool did_create;
-    Browser* browser = web_app::LaunchSystemWebApp(
-        profile, web_app::SystemAppType::SETTINGS, gurl, &did_create);
-    ShowSettingsOnCurrentDesktop(browser);
-    // Only notify if we created a new browser.
-    if (!did_create || !browser)
-      return;
-
-    for (SettingsWindowManagerObserver& observer : observers_)
-      observer.OnNewSettingsWindow(browser);
-
+  // TODO(crbug.com/1067073): Remove legacy Settings Window.
+  if (!UseDeprecatedSettingsWindow(profile)) {
+    web_app::LaunchSystemWebAppAsync(profile, web_app::SystemAppType::SETTINGS,
+                                     {.url = gurl});
+    // SWA OS Settings don't use SettingsWindowManager to manage windows, don't
+    // notify SettingsWindowObservers.
     return;
   }
 
@@ -92,8 +97,7 @@ void SettingsWindowManager::ShowChromePageForProfile(Profile* profile,
       browser->window()->Show();
       return;
     }
-  }
-  if (browser) {
+
     NavigateParams params(browser, gurl, ui::PAGE_TRANSITION_AUTO_BOOKMARK);
     params.window_action = NavigateParams::SHOW_WINDOW;
     params.user_gesture = true;
@@ -117,9 +121,9 @@ void SettingsWindowManager::ShowChromePageForProfile(Profile* profile,
   DCHECK(browser->is_trusted_source());
 
   auto* window = browser->window()->GetNativeWindow();
-  window->SetProperty(kOverrideWindowIconResourceIdKey, IDR_SETTINGS_LOGO_192);
   window->SetProperty(aura::client::kAppType,
                       static_cast<int>(ash::AppType::CHROME_APP));
+  window->SetProperty(kOverrideWindowIconResourceIdKey, IDR_SETTINGS_LOGO_192);
 
   for (SettingsWindowManagerObserver& observer : observers_)
     observer.OnNewSettingsWindow(browser);
@@ -135,7 +139,7 @@ void SettingsWindowManager::ShowOSSettings(Profile* profile,
 }
 
 Browser* SettingsWindowManager::FindBrowserForProfile(Profile* profile) {
-  if (web_app::SystemWebAppManager::IsEnabled()) {
+  if (!UseDeprecatedSettingsWindow(profile)) {
     return web_app::FindSystemWebAppBrowser(profile,
                                             web_app::SystemAppType::SETTINGS);
   }
@@ -151,7 +155,7 @@ bool SettingsWindowManager::IsSettingsBrowser(Browser* browser) const {
   DCHECK(browser);
 
   Profile* profile = browser->profile();
-  if (web_app::SystemWebAppManager::IsEnabled()) {
+  if (!UseDeprecatedSettingsWindow(profile)) {
     if (!browser->app_controller() || !browser->app_controller()->HasAppId())
       return false;
 

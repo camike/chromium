@@ -2,10 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// clang-format off
+// #import {FileManagerUI} from './ui/file_manager_ui.m.js';
+// #import {DriveSyncHandler} from '../../../externs/background/drive_sync_handler.m.js';
+// #import {FolderShortcutsDataModel} from './folder_shortcuts_data_model.m.js';
+// #import {DirectoryModel} from './directory_model.m.js';
+// #import {MetadataModel} from './metadata/metadata_model.m.js';
+// #import {VolumeManager} from '../../../externs/volume_manager.m.js';
+// #import {Action, ActionsModel} from './actions_model.m.js';
+// #import {contextMenuHandler} from 'chrome://resources/js/cr/ui/context_menu_handler.m.js';
+// clang-format on
+
+// #import {FileSelectionHandler} from './file_selection.m.js';
+
 /**
  * Manages actions for the current selection.
  */
-class ActionsController {
+/* #export */ class ActionsController {
   /**
    * @param {!VolumeManager} volumeManager
    * @param {!MetadataModel} metadataModel
@@ -81,6 +94,9 @@ class ActionsController {
         'menushow', this.onMenuShow_.bind(this));
     this.ui_.gearButton.addEventListener(
         'menushow', this.onMenuShow_.bind(this));
+
+    this.metadataModel_.addEventListener(
+        'update', this.onMetadataUpdated_.bind(this));
   }
 
   /**
@@ -214,6 +230,27 @@ class ActionsController {
   }
 
   /**
+   * @param {?Event} event
+   * @private
+   */
+  onMetadataUpdated_(event) {
+    if (!event || !event.names.has('pinned')) {
+      return;
+    }
+
+    for (const key of this.readyModels_.keys()) {
+      if (key.split(';').some(url => event.entriesMap.has(url))) {
+        this.readyModels_.delete(key);
+      }
+    }
+    for (const key of this.initializingdModels_.keys()) {
+      if (key.split(';').some(url => event.entriesMap.has(url))) {
+        this.initializingdModels_.delete(key);
+      }
+    }
+  }
+
+  /**
    * @param {!Array<Entry|FileEntry>} entries
    * @return {?ActionsModel}
    */
@@ -248,8 +285,10 @@ class ActionsController {
         this.volumeManager_, this.metadataModel_, this.shortcutsModel_,
         this.driveSyncHandler_, this.ui_, entries);
 
-    actionsModel.addEventListener(
-        'invalidated', this.clearLocalCache_.bind(this, key), {once: true});
+    actionsModel.addEventListener('invalidated', () => {
+      this.clearLocalCache_(key);
+      this.selectionHandler_.onFileSelectionChanged();
+    }, {once: true});
 
     // Once it's initialized, move to readyModels_ so we don't have to construct
     // and initialized again.

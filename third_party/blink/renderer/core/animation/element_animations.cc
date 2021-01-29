@@ -51,6 +51,8 @@ void UpdateAnimationFlagsForEffect(const KeyframeEffect& effect,
     style.SetHasCurrentFilterAnimation(true);
   if (effect.Affects(PropertyHandle(GetCSSPropertyBackdropFilter())))
     style.SetHasCurrentBackdropFilterAnimation(true);
+  if (effect.Affects(PropertyHandle(GetCSSPropertyBackgroundColor())))
+    style.SetHasCurrentBackgroundColorAnimation(true);
 }
 
 }  // namespace
@@ -106,7 +108,7 @@ void ElementAnimations::RestartAnimationOnCompositor() {
     entry.key->RestartAnimationOnCompositor();
 }
 
-void ElementAnimations::Trace(Visitor* visitor) {
+void ElementAnimations::Trace(Visitor* visitor) const {
   visitor->Trace(css_animations_);
   visitor->Trace(effect_stack_);
   visitor->Trace(animations_);
@@ -114,9 +116,7 @@ void ElementAnimations::Trace(Visitor* visitor) {
 }
 
 const ComputedStyle* ElementAnimations::BaseComputedStyle() const {
-  if (IsAnimationStyleChange())
-    return base_computed_style_.get();
-  return nullptr;
+  return base_computed_style_.get();
 }
 
 const CSSBitset* ElementAnimations::BaseImportantSet() const {
@@ -129,7 +129,6 @@ void ElementAnimations::UpdateBaseComputedStyle(
     const ComputedStyle* computed_style,
     std::unique_ptr<CSSBitset> base_important_set) {
   DCHECK(computed_style);
-  DCHECK(IsAnimationStyleChange());
   base_computed_style_ = ComputedStyle::Clone(*computed_style);
   base_important_set_ = std::move(base_important_set);
 }
@@ -139,14 +138,29 @@ void ElementAnimations::ClearBaseComputedStyle() {
   base_important_set_ = nullptr;
 }
 
-bool ElementAnimations::AnimationsPreserveAxisAlignment() const {
-  for (const auto& entry : animations_) {
-    const Animation& animation = *entry.key;
-    DCHECK(animation.effect());
-    DCHECK(IsA<KeyframeEffect>(animation.effect()));
-    const auto& effect = *To<KeyframeEffect>(animation.effect());
-    if (!effect.AnimationsPreserveAxisAlignment())
-      return false;
+bool ElementAnimations::UpdateBoxSizeAndCheckTransformAxisAlignment(
+    const FloatSize& box_size) {
+  bool preserves_axis_alignment = true;
+  for (auto& entry : animations_) {
+    Animation& animation = *entry.key;
+    if (auto* effect = DynamicTo<KeyframeEffect>(animation.effect())) {
+      if (!effect->IsCurrent() && !effect->IsInEffect())
+        continue;
+      if (!effect->UpdateBoxSizeAndCheckTransformAxisAlignment(box_size))
+        preserves_axis_alignment = false;
+    }
+  }
+  return preserves_axis_alignment;
+}
+
+bool ElementAnimations::IsIdentityOrTranslation() const {
+  for (auto& entry : animations_) {
+    if (auto* effect = DynamicTo<KeyframeEffect>(entry.key->effect())) {
+      if (!effect->IsCurrent() && !effect->IsInEffect())
+        continue;
+      if (!effect->IsIdentityOrTranslation())
+        return false;
+    }
   }
   return true;
 }

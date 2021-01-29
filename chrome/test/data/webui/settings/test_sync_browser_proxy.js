@@ -2,9 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// #import {PageStatus} from 'chrome://settings/settings.js';
-// #import {TestBrowserProxy} from 'chrome://test/test_browser_proxy.m.js';
+// clang-format off
+// #import {PageStatus, StoredAccount, SyncBrowserProxy, SyncStatus} from 'chrome://settings/settings.js';
+// #import {TestBrowserProxy} from '../test_browser_proxy.m.js';
 // #import {isChromeOS} from 'chrome://resources/js/cr.m.js';
+// clang-format on
 
 /** @implements {settings.SyncBrowserProxy} */
 /* #export */ class TestSyncBrowserProxy extends TestBrowserProxy {
@@ -17,7 +19,8 @@
       'getSyncStatus',
       'incrementPromoImpressionCount',
       'setSyncDatatypes',
-      'setSyncEncryption',
+      'setEncryptionPassphrase',
+      'setDecryptionPassphrase',
       'signOut',
       'pauseSync',
       'sendSyncPrefsChanged',
@@ -34,20 +37,29 @@
     /** @private {number} */
     this.impressionCount_ = 0;
 
-    /** @type {!settings.PageStatus} */
-    this.encryptionResponse = settings.PageStatus.CONFIGURE;
+    // Settable fake data.
+    /** @type {boolean} */
+    this.encryptionPassphraseSuccess = false;
+    /** @type {boolean} */
+    this.decryptionPassphraseSuccess = false;
+    /** @type {!Array<!settings.StoredAccount>} */
+    this.storedAccounts = [];
+    /** @type {!settings.SyncStatus} */
+    this.syncStatus = /** @type {!settings.SyncStatus} */ (
+        {signedIn: true, signedInUsername: 'fakeUsername'});
   }
+
 
   /** @override */
   getSyncStatus() {
     this.methodCalled('getSyncStatus');
-    return Promise.resolve({signedIn: true, signedInUsername: 'fakeUsername'});
+    return Promise.resolve(this.syncStatus);
   }
 
   /** @override */
   getStoredAccounts() {
     this.methodCalled('getStoredAccounts');
-    return Promise.resolve([]);
+    return Promise.resolve(this.storedAccounts);
   }
 
   /** @override */
@@ -102,15 +114,30 @@
   }
 
   /** @override */
-  setSyncEncryption(syncPrefs) {
-    this.methodCalled('setSyncEncryption', syncPrefs);
-    return Promise.resolve(this.encryptionResponse);
+  setEncryptionPassphrase(passphrase) {
+    this.methodCalled('setEncryptionPassphrase', passphrase);
+    return Promise.resolve(this.encryptionPassphraseSuccess);
+  }
+
+  /** @override */
+  setDecryptionPassphrase(passphrase) {
+    this.methodCalled('setDecryptionPassphrase', passphrase);
+    return Promise.resolve(this.decryptionPassphraseSuccess);
   }
 
   /** @override */
   sendSyncPrefsChanged() {
     this.methodCalled('sendSyncPrefsChanged');
   }
+
+  /** @override */
+  attemptUserExit() {}
+
+  /** @override */
+  openActivityControlsUrl() {}
+
+  /** @override */
+  startKeyRetrieval() {}
 }
 
 if (cr.isChromeOS) {

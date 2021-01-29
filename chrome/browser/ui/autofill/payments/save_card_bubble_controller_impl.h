@@ -16,7 +16,6 @@
 #include "components/autofill/core/browser/payments/legal_message_line.h"
 #include "components/autofill/core/browser/sync_utils.h"
 #include "components/security_state/core/security_state.h"
-#include "components/signin/public/identity_manager/account_info.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
@@ -39,7 +38,7 @@ class SaveCardBubbleControllerImpl
   class ObserverForTest {
    public:
     virtual void OnBubbleShown() = 0;
-    virtual void OnBubbleClosed() = 0;
+    virtual void OnIconShown() = 0;
   };
 
   ~SaveCardBubbleControllerImpl() override;
@@ -78,11 +77,6 @@ class SaveCardBubbleControllerImpl
       AutofillClient::SaveCreditCardOptions options,
       AutofillClient::UploadSaveCardPromptCallback save_card_prompt_callback);
 
-  // Sets up the controller for the sign in promo and shows the bubble.
-  // This bubble is only shown after a local save is accepted and if
-  // |ShouldShowSignInPromo()| returns true.
-  void MaybeShowBubbleForSignInPromo();
-
   // Exists for testing purposes only. (Otherwise shown through ReshowBubble())
   // Sets up the controller for the Manage Cards view. This displays the card
   // just saved and links the user to manage their other cards.
@@ -102,9 +96,6 @@ class SaveCardBubbleControllerImpl
   void ShowBubbleForSaveCardFailureForTesting();
 
   void HideBubble();
-  // TODO(crbug.com/932818): Maybe move sign in promo completely out of this
-  // class, and merge with password sign in promo.
-  void HideBubbleForSignInPromo();
 
   void ReshowBubble();
 
@@ -120,24 +111,12 @@ class SaveCardBubbleControllerImpl
   bool ShouldRequestNameFromUser() const override;
   bool ShouldRequestExpirationDateFromUser() const override;
 
-  // Returns true only if at least one of the following cases is true:
-  // 1) The user is signed out.
-  // 2) The user is signed in through DICe, but did not turn on syncing.
-  // Consequently returns false in the following cases:
-  // 1) The user has paused syncing (Auth Error).
-  // 2) The user is not required to be syncing in order to upload cards
-  //    to the server -- this should change.
-  // TODO(crbug.com/864702): Don't show promo if user is a butter user.
-  bool ShouldShowSignInPromo() const override;
-  void OnSyncPromoAccepted(const AccountInfo& account,
-                           signin_metrics::AccessPoint access_point,
-                           bool is_default_promo_account) override;
   void OnSaveButton(const AutofillClient::UserProvidedCardDetails&
                         user_provided_card_details) override;
   void OnCancelButton() override;
   void OnLegalMessageLinkClicked(const GURL& url) override;
   void OnManageCardsClicked() override;
-  void OnBubbleClosed() override;
+  void OnBubbleClosed(PaymentsBubbleClosedReason closed_reason) override;
   const LegalMessageLines& GetLegalMessageLines() const override;
   bool IsUploadSave() const override;
   BubbleType GetBubbleType() const override;

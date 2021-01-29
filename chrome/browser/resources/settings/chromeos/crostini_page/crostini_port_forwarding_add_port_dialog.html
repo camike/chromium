@@ -4,6 +4,7 @@
 <link rel="import" href="chrome://resources/cr_elements/cr_dialog/cr_dialog.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_input/cr_input.html">
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
+<link rel="import" href="chrome://resources/html/load_time_data.html">
 <link rel="import" href="chrome://resources/cr_elements/md_select_css.html">
 <link rel="import" href="crostini_browser_proxy.html">
 <link rel="import" href="../../settings_shared_css.html">
@@ -23,11 +24,6 @@
 
       #selectProtocol {
         max-width: 96px;
-      }
-
-      #errorText {
-        color: var(--settings-error-color);
-        float: left;
       }
 
       .custom-body {
@@ -53,8 +49,13 @@
       <div slot="body">
         <div class="input-container">
           <cr-input id="portNumberInput"
-              label="$i18n{crostiniPortForwardingListPortNumber}"
-              aria-disabled="false">
+              label="$i18n{crostiniPortForwardingAddPortDialogPortNumberLabel}"
+              aria-disabled="false"
+              error-message="[[portState_]]"
+              type="number"
+              min="1024"
+              max="65535"
+              on-blur="onBlur_">
           </cr-input>
           <div>
             <div id="label" class="cr-form-field-label placeholder-label"
@@ -76,18 +77,13 @@
         </div>
         <div slot="body">
           <cr-input id="portLabelInput"
-              label="$i18n{crostiniPortForwardingAddPortDialogLabel}"
+              label="$i18n{crostiniPortForwardingAddPortDialogLabelLabel}"
               aria-disabled="false"
               maxlength="50">
           </cr-input>
         </div>
       </div>
       <div slot="body" class="custom-body">
-        <template is="dom-if" if="[[invalidPort_]]">
-          <span id="errorText">
-            $i18n{crostiniPortForwardingAddError}
-          </span>
-        </template>
         <div slot="button-container" class="custom-button-container">
           <cr-button id="cancel" class="cancel-button"
               on-click="onCancelTap_">$i18n{cancel}</cr-button>

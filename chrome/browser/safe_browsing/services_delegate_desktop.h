@@ -8,10 +8,8 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "chrome/browser/safe_browsing/client_side_detection_service.h"
 #include "chrome/browser/safe_browsing/download_protection/download_protection_service.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident_reporting_service.h"
-#include "chrome/browser/safe_browsing/incident_reporting/resource_request_detector.h"
 #include "chrome/browser/safe_browsing/services_delegate.h"
 
 namespace safe_browsing {
@@ -32,23 +30,20 @@ class ServicesDelegateDesktop : public ServicesDelegate {
   const scoped_refptr<SafeBrowsingDatabaseManager>& database_manager()
       const override;
   void Initialize() override;
-  void InitializeCsdService(scoped_refptr<network::SharedURLLoaderFactory>
-                                url_loader_factory) override;
   void SetDatabaseManagerForTest(
       SafeBrowsingDatabaseManager* database_manager) override;
   void ShutdownServices() override;
   void RefreshState(bool enable) override;
-  void ProcessResourceRequest(const ResourceRequestInfo* request) override;
   std::unique_ptr<prefs::mojom::TrackedPreferenceValidationDelegate>
   CreatePreferenceValidationDelegate(Profile* profile) override;
   void RegisterDelayedAnalysisCallback(
-      const DelayedAnalysisCallback& callback) override;
+      DelayedAnalysisCallback callback) override;
   void AddDownloadManager(content::DownloadManager* download_manager) override;
-  ClientSideDetectionService* GetCsdService() override;
   DownloadProtectionService* GetDownloadService() override;
 
   void StartOnIOThread(
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+      scoped_refptr<network::SharedURLLoaderFactory> sb_url_loader_factory,
+      scoped_refptr<network::SharedURLLoaderFactory> browser_url_loader_factory,
       const V4ProtocolConfig& v4_config) override;
   void StopOnIOThread(bool shutdown) override;
 
@@ -63,12 +58,9 @@ class ServicesDelegateDesktop : public ServicesDelegate {
   scoped_refptr<SafeBrowsingDatabaseManager> CreateDatabaseManager();
   DownloadProtectionService* CreateDownloadProtectionService();
   IncidentReportingService* CreateIncidentReportingService();
-  ResourceRequestDetector* CreateResourceRequestDetector();
 
-  std::unique_ptr<ClientSideDetectionService> csd_service_;
   std::unique_ptr<DownloadProtectionService> download_service_;
   std::unique_ptr<IncidentReportingService> incident_service_;
-  std::unique_ptr<ResourceRequestDetector> resource_request_detector_;
 
   // The database manager that handles the database checking and update logic
   // Accessed on both UI and IO thread.

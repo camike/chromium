@@ -9,8 +9,8 @@
 
 #include "ash/accessibility/accessibility_observer.h"
 #include "ash/ash_export.h"
+#include "ash/public/cpp/session/session_observer.h"
 #include "ash/public/cpp/shelf_types.h"
-#include "ash/session/session_observer.h"
 #include "ash/shelf/contextual_tooltip.h"
 #include "ash/shelf/hotseat_transition_animator.h"
 #include "ash/shelf/hotseat_widget.h"
@@ -39,8 +39,7 @@ class StatusAreaWidget;
 // The ShelfWidget manages the shelf view (which contains the shelf icons) and
 // the status area widget. There is one ShelfWidget per display. It is created
 // early during RootWindowController initialization.
-class ASH_EXPORT ShelfWidget : public AccessibilityObserver,
-                               public SessionObserver,
+class ASH_EXPORT ShelfWidget : public SessionObserver,
                                public ShelfComponent,
                                public ShelfLayoutManagerObserver,
                                public ShelfObserver,
@@ -115,6 +114,9 @@ class ASH_EXPORT ShelfWidget : public AccessibilityObserver,
   void UpdateLayout(bool animate) override;
   void UpdateTargetBoundsForGesture(int shelf_position) override;
 
+  // Called when shelf layout manager detects a locale change.
+  void HandleLocaleChange();
+
   // TODO(manucornet): Remove this method when all this widget's layout
   // logic is part of this class.
   void set_target_bounds(gfx::Rect target_bounds) {
@@ -139,8 +141,12 @@ class ASH_EXPORT ShelfWidget : public AccessibilityObserver,
                        gfx::Rect* hit_test_rect_mouse,
                        gfx::Rect* hit_test_rect_touch);
 
-  void ForceToShowHotseat();
-  void ForceToHideHotseat();
+  // Force to show hotseat in tablet mode. When the returned closure runner is
+  // called or goes out of scope, it removes the caller as an instance to force
+  // show hotseat. The hotseat will be shown as long as there is one
+  // caller/instance force it to show.
+  base::ScopedClosureRunner ForceShowHotseatInTabletMode();
+  bool IsHotseatForcedShowInTabletMode() const;
 
   // Creates a login shelf gesture controller (which enabled login shelf gesture
   // detection). See ash/public/cpp/login_screen.h for more info.
@@ -150,8 +156,6 @@ class ASH_EXPORT ShelfWidget : public AccessibilityObserver,
 
   // Resets a previously create login shelf gesture controller, if any.
   void ClearLoginShelfSwipeHandler();
-
-  bool is_hotseat_forced_to_show() const { return is_hotseat_forced_to_show_; }
 
   // Gets the layer used to draw the shelf background.
   ui::Layer* GetOpaqueBackground();
@@ -202,9 +206,6 @@ class ASH_EXPORT ShelfWidget : public AccessibilityObserver,
   class DelegateView;
   friend class DelegateView;
 
-  // AccessibilityObserver:
-  void OnAccessibilityStatusChanged() override;
-
   // Hides shelf widget if IsVisible() returns true.
   void HideIfShown();
 
@@ -213,6 +214,9 @@ class ASH_EXPORT ShelfWidget : public AccessibilityObserver,
 
   ShelfView* GetShelfView();
   const ShelfView* GetShelfView() const;
+
+  // Callback returned by ForceShowHotseatInTabletMode().
+  void ResetForceShowHotseat();
 
   Shelf* shelf_;
   gfx::Rect target_bounds_;
@@ -242,7 +246,9 @@ class ASH_EXPORT ShelfWidget : public AccessibilityObserver,
 
   ScopedSessionObserver scoped_session_observer_;
 
-  bool is_hotseat_forced_to_show_ = false;
+  size_t force_show_hotseat_count_ = 0;
+
+  base::WeakPtrFactory<ShelfWidget> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ShelfWidget);
 };

@@ -8,7 +8,7 @@
  */
 
 Polymer({
-  is: 'marketing-opt-in',
+  is: 'marketing-opt-in-element',
 
   properties: {
     isAccessibilitySettingsShown_: {
@@ -36,34 +36,58 @@ Polymer({
       type: Boolean,
       value: false,
     },
+
+    /**
+     * Whether a verbose footer will be shown to the user containing some legal
+     *  information such as the Google address. Currently shown for Canada only.
+     */
+    hasLegalFooter_: {
+      type: Boolean,
+      value: false,
+    },
   },
 
   behaviors: [OobeI18nBehavior, OobeDialogHostBehavior, LoginScreenBehavior],
 
   /** Overridden from LoginScreenBehavior. */
+  // clang-format off
   EXTERNAL_API: [
     'updateA11ySettingsButtonVisibility',
-    'updateA11yNavigationButtonToggle',
-    'setOptInVisibility',
-    'setEmailToggleState'
+    'updateA11yNavigationButtonToggle'
   ],
+  // clang-format on
 
   /** @override */
   ready() {
     this.initializeLoginScreen('MarketingOptInScreen', {resetAllowed: true});
+  },
+
+  /** Shortcut method to control animation */
+  setAnimationPlay_(played) {
     this.$['marketingOptInOverviewDialog']
         .querySelector('.marketing-animation')
-        .setPlay(true);
+        .setPlay(played);
   },
 
   /** Called when dialog is shown */
-  onBeforeShow() {
-    this.isAccessibilitySettingsShown_ = false;
+  onBeforeShow(data) {
+    this.marketingOptInVisible_ =
+        'optInVisibility' in data && data.optInVisibility;
+    this.$.chromebookUpdatesOption.checked =
+        'optInDefaultState' in data && data.optInDefaultState;
+    this.hasLegalFooter_ =
+        'legalFooterVisibility' in data && data.legalFooterVisibility;
 
-    this.behaviors.forEach((behavior) => {
-      if (behavior.onBeforeShow)
-        behavior.onBeforeShow.call(this);
-    });
+    this.isAccessibilitySettingsShown_ = false;
+    this.setAnimationPlay_(true);
+    this.$.marketingOptInOverviewDialog.show();
+  },
+
+  /**
+   * Returns the control which should receive initial focus.
+   */
+  get defaultControl() {
+    return this.$.marketingOptInOverviewDialog;
   },
 
   /**
@@ -71,9 +95,7 @@ Polymer({
    * @private
    */
   onGetStarted_() {
-    this.$['marketingOptInOverviewDialog']
-        .querySelector('.marketing-animation')
-        .setPlay(false);
+    this.setAnimationPlay_(false);
     chrome.send(
         'login.MarketingOptInScreen.onGetStarted',
         [this.$.chromebookUpdatesOption.checked]);
@@ -95,30 +117,13 @@ Polymer({
   },
 
   /**
-   * @param {boolean} visible Whether the email opt-in toggle should be visible
-   */
-  setOptInVisibility(visible) {
-    this.marketingOptInVisible_ = visible;
-  },
-
-  /**
-   * @param {boolean} checked Whether the email opt-in toggle should be checked
-   * or unchecked.
-   */
-  setEmailToggleState(checked) {
-    this.$.chromebookUpdatesOption.checked = checked;
-  },
-
-  /**
    * This is the 'on-tap' event handler for the accessibility settings link and
    * for the back button on the accessibility page.
    * @private
    */
   onToggleAccessibilityPage_() {
     this.isAccessibilitySettingsShown_ = !this.isAccessibilitySettingsShown_;
-    this.$['marketingOptInOverviewDialog']
-        .querySelector('.marketing-animation')
-        .setPlay(!this.isAccessibilitySettingsShown_);
+    this.setAnimationPlay_(!this.isAccessibilitySettingsShown_);
   },
 
   /**

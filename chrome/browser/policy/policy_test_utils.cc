@@ -4,11 +4,12 @@
 
 #include "chrome/browser/policy/policy_test_utils.h"
 
-#include "base/bind_helpers.h"
-#include "base/message_loop/message_loop_current.h"
+#include "base/callback_helpers.h"
+#include "base/optional.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
+#include "base/task/current_thread.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/chrome_screenshot_grabber.h"
@@ -28,7 +29,6 @@
 #include "components/variations/variations_params_manager.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -40,7 +40,7 @@
 #include "net/http/transport_security_state.h"
 #include "services/network/public/mojom/network_service_test.mojom.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "ui/snapshot/screenshot_grabber.h"
 #endif
 
@@ -66,9 +66,44 @@ void PolicyTest::SetUp() {
   InProcessBrowserTest::SetUp();
 }
 
+void PolicyTest::CheckURLIsBlockedInWebContents(
+    content::WebContents* web_contents,
+    const GURL& url) {
+  EXPECT_EQ(url, web_contents->GetURL());
+
+  base::string16 blocked_page_title;
+  if (url.has_host()) {
+    blocked_page_title = base::UTF8ToUTF16(url.host());
+  } else {
+    // Local file paths show the full URL.
+    blocked_page_title = base::UTF8ToUTF16(url.spec());
+  }
+  EXPECT_EQ(blocked_page_title, web_contents->GetTitle());
+
+  // Verify that the expected error page is being displayed.
+  bool result = false;
+  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
+      web_contents,
+      "var textContent = document.body.textContent;"
+      "var hasError = textContent.indexOf('ERR_BLOCKED_BY_ADMINISTRATOR') >= 0;"
+      "domAutomationController.send(hasError);",
+      &result));
+  EXPECT_TRUE(result);
+}
+
+void PolicyTest::CheckURLIsBlocked(Browser* browser, const std::string& spec) {
+  GURL url(spec);
+  ui_test_utils::NavigateToURL(browser, url);
+  content::WebContents* contents =
+      browser->tab_strip_model()->GetActiveWebContents();
+  PolicyTest::CheckURLIsBlockedInWebContents(contents, url);
+}
+
 void PolicyTest::SetUpInProcessBrowserTestFixture() {
   base::CommandLine::ForCurrentProcess()->AppendSwitch("noerrdialogs");
   EXPECT_CALL(provider_, IsInitializationComplete(_))
+      .WillRepeatedly(Return(true));
+  EXPECT_CALL(provider_, IsFirstPolicyLoadComplete(_))
       .WillRepeatedly(Return(true));
   BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
 }
@@ -86,8 +121,8 @@ void PolicyTest::SetUpCommandLine(base::CommandLine* command_line) {
 void PolicyTest::SetScreenshotPolicy(bool enabled) {
   PolicyMap policies;
   policies.Set(key::kDisableScreenshots, POLICY_LEVEL_MANDATORY,
-               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-               std::make_unique<base::Value>(!enabled), nullptr);
+               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, base::Value(!enabled),
+               nullptr);
   UpdateProviderPolicy(policies);
 }
 
@@ -105,13 +140,13 @@ void PolicyTest::SetRequireCTForTesting(bool required) {
     return;
   }
 
-  base::PostTask(
-      FROM_HERE, {BrowserThread::IO},
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&net::TransportSecurityState::SetRequireCTForTesting,
                      required));
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 class QuitMessageLoopAfterScreenshot
     : public ChromeScreenshotGrabberTestObserver {
  public:
@@ -119,8 +154,8 @@ class QuitMessageLoopAfterScreenshot
       : done_(std::move(done)) {}
   void OnScreenshotCompleted(ui::ScreenshotResult screenshot_result,
                              const base::FilePath& screenshot_path) override {
-    base::PostTaskAndReply(FROM_HERE, {BrowserThread::IO}, base::DoNothing(),
-                           std::move(done_));
+    content::GetIOThreadTaskRunner({})->PostTaskAndReply(
+        FROM_HERE, base::DoNothing(), std::move(done_));
   }
 
   ~QuitMessageLoopAfterScreenshot() override {}
@@ -141,7 +176,7 @@ void PolicyTest::TestScreenshotFile(bool enabled) {
 
   grabber->test_observer_ = nullptr;
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 scoped_refptr<const extensions::Extension> PolicyTest::LoadUnpackedExtension(
     const base::FilePath::StringType& name) {
@@ -154,11 +189,11 @@ scoped_refptr<const extensions::Extension> PolicyTest::LoadUnpackedExtension(
 void PolicyTest::UpdateProviderPolicy(const PolicyMap& policy) {
   PolicyMap policy_with_defaults;
   policy_with_defaults.CopyFrom(policy);
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   SetEnterpriseUsersDefaults(&policy_with_defaults);
 #endif
   provider_.UpdateChromePolicy(policy_with_defaults);
-  DCHECK(base::MessageLoopCurrent::Get());
+  DCHECK(base::CurrentThread::Get());
   base::RunLoop loop;
   loop.RunUntilIdle();
 }
@@ -180,20 +215,16 @@ void PolicyTest::PerformClick(int x, int y) {
 
 void PolicyTest::SetPolicy(PolicyMap* policies,
                            const char* key,
-                           std::unique_ptr<base::Value> value) {
-  if (value) {
-    policies->Set(key, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-                  POLICY_SOURCE_CLOUD, std::move(value), nullptr);
-  } else {
-    policies->Erase(key);
-  }
+                           base::Optional<base::Value> value) {
+  policies->Set(key, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
+                POLICY_SOURCE_CLOUD, std::move(value), nullptr);
 }
 
 void PolicyTest::ApplySafeSearchPolicy(
-    std::unique_ptr<base::Value> legacy_safe_search,
-    std::unique_ptr<base::Value> google_safe_search,
-    std::unique_ptr<base::Value> legacy_youtube,
-    std::unique_ptr<base::Value> youtube_restrict) {
+    base::Optional<base::Value> legacy_safe_search,
+    base::Optional<base::Value> google_safe_search,
+    base::Optional<base::Value> legacy_youtube,
+    base::Optional<base::Value> youtube_restrict) {
   PolicyMap policies;
   SetPolicy(&policies, key::kForceSafeSearch, std::move(legacy_safe_search));
   SetPolicy(&policies, key::kForceGoogleSafeSearch,
@@ -203,7 +234,7 @@ void PolicyTest::ApplySafeSearchPolicy(
   UpdateProviderPolicy(policies);
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 void PolicyTest::SetEnableFlag(const keyboard::KeyboardEnableFlag& flag) {
   auto* keyboard_client = ChromeKeyboardControllerClient::Get();
   keyboard_client->SetEnableFlag(flag);
@@ -213,7 +244,7 @@ void PolicyTest::ClearEnableFlag(const keyboard::KeyboardEnableFlag& flag) {
   auto* keyboard_client = ChromeKeyboardControllerClient::Get();
   keyboard_client->ClearEnableFlag(flag);
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 // static
 GURL PolicyTest::GetExpectedSearchURL(bool expect_safe_search) {
@@ -244,12 +275,9 @@ void PolicyTest::CheckSafeSearch(Browser* browser,
 // static
 void PolicyTest::CheckYouTubeRestricted(
     int youtube_restrict_mode,
-    const std::map<GURL, net::HttpRequestHeaders>& urls_requested,
-    const GURL& url) {
-  auto iter = urls_requested.find(url);
-  ASSERT_TRUE(iter != urls_requested.end());
+    const net::HttpRequestHeaders& headers) {
   std::string header;
-  iter->second.GetHeader(safe_search_util::kYouTubeRestrictHeaderName, &header);
+  headers.GetHeader(safe_search_util::kYouTubeRestrictHeaderName, &header);
   if (youtube_restrict_mode == safe_search_util::YOUTUBE_RESTRICT_OFF) {
     EXPECT_TRUE(header.empty());
   } else if (youtube_restrict_mode ==
@@ -264,18 +292,15 @@ void PolicyTest::CheckYouTubeRestricted(
 // static
 void PolicyTest::CheckAllowedDomainsHeader(
     const std::string& allowed_domain,
-    const std::map<GURL, net::HttpRequestHeaders>& urls_requested,
-    const GURL& url) {
-  auto iter = urls_requested.find(url);
-  ASSERT_TRUE(iter != urls_requested.end());
+    const net::HttpRequestHeaders& headers) {
   if (allowed_domain.empty()) {
     EXPECT_TRUE(
-        !iter->second.HasHeader(safe_search_util::kGoogleAppsAllowedDomains));
+        !headers.HasHeader(safe_search_util::kGoogleAppsAllowedDomains));
     return;
   }
 
   std::string header;
-  iter->second.GetHeader(safe_search_util::kGoogleAppsAllowedDomains, &header);
+  headers.GetHeader(safe_search_util::kGoogleAppsAllowedDomains, &header);
   EXPECT_EQ(header, allowed_domain);
 }
 
@@ -318,30 +343,6 @@ void PolicyTest::WaitForInterstitial(content::WebContents* tab) {
   ASSERT_TRUE(WaitForRenderFrameReady(tab->GetMainFrame()));
 }
 
-int PolicyTest::IsExtendedReportingCheckboxVisibleOnInterstitial() {
-  const std::string command = base::StringPrintf(
-      "var node = document.getElementById('extended-reporting-opt-in');"
-      "if (node) {"
-      "  window.domAutomationController.send(node.offsetWidth > 0 || "
-      "      node.offsetHeight > 0 ? %d : %d);"
-      "} else {"
-      // The node should be present but not visible, so trigger an error
-      // by sending false if it's not present.
-      "  window.domAutomationController.send(%d);"
-      "}",
-      security_interstitials::CMD_TEXT_FOUND,
-      security_interstitials::CMD_TEXT_NOT_FOUND,
-      security_interstitials::CMD_ERROR);
-
-  content::WebContents* tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  WaitForInterstitial(tab);
-  int result = 0;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractInt(tab->GetMainFrame(), command,
-                                                  &result));
-  return result;
-}
-
 void PolicyTest::SendInterstitialCommand(
     content::WebContents* tab,
     security_interstitials::SecurityInterstitialCommand command) {
@@ -351,6 +352,14 @@ void PolicyTest::SendInterstitialCommand(
   helper->GetBlockingPageForCurrentlyCommittedNavigationForTesting()
       ->CommandReceived(base::NumberToString(command));
   return;
+}
+
+void PolicyTest::FlushBlacklistPolicy() {
+  // Updates of the URLBlacklist are done on IO, after building the blacklist
+  // on the blocking pool, which is initiated from IO.
+  content::RunAllPendingInMessageLoop(BrowserThread::IO);
+  content::RunAllTasksUntilIdle();
+  content::RunAllPendingInMessageLoop(BrowserThread::IO);
 }
 
 }  // namespace policy

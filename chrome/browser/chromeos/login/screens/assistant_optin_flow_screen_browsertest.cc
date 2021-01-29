@@ -14,6 +14,7 @@
 #include "base/strings/string_piece.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
 #include "chrome/browser/chromeos/login/oobe_screen.h"
+#include "chrome/browser/chromeos/login/screens/sync_consent_screen.h"
 #include "chrome/browser/chromeos/login/test/js_checker.h"
 #include "chrome/browser/chromeos/login/test/login_manager_mixin.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
@@ -27,15 +28,14 @@
 #include "chrome/browser/ui/webui/chromeos/login/gaia_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_paths.h"
-#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/constants/chromeos_switches.h"
-#include "chromeos/services/assistant/assistant_settings_manager.h"
 #include "chromeos/services/assistant/public/cpp/assistant_prefs.h"
+#include "chromeos/services/assistant/public/cpp/assistant_settings.h"
 #include "chromeos/services/assistant/public/cpp/features.h"
-#include "chromeos/services/assistant/public/mojom/settings.mojom.h"
 #include "chromeos/services/assistant/public/proto/settings_ui.pb.h"
 #include "chromeos/services/assistant/service.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/test/browser_test.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
@@ -59,8 +59,67 @@ constexpr char kTestUser[] = "test-user1@gmail.com";
 constexpr char kAssistantConsentToken[] = "consent_token";
 constexpr char kAssistantUiAuditKey[] = "ui_audit_key";
 
-class FakeAssistantSettings
-    : public chromeos::assistant::AssistantSettingsManager {
+constexpr char kAssistantOptInId[] = "assistant-optin-flow";
+constexpr char kAssistantOptInFlowCard[] = "card";
+constexpr char kLoading[] = "loading";
+constexpr char kValueProp[] = "valueProp";
+constexpr char kRelatedInfo[] = "relatedInfo";
+constexpr char kVoiceMatch[] = "voiceMatch";
+constexpr char kThirdParty[] = "thirdParty";
+constexpr char kGetMore[] = "getMore";
+
+const test::UIPath kAssistantLoading = {kAssistantOptInId,
+                                        kAssistantOptInFlowCard, kLoading};
+const test::UIPath kLoadingRetryButton = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kLoading, "retry-button"};
+
+const test::UIPath kAssistantValueProp = {kAssistantOptInId,
+                                          kAssistantOptInFlowCard, kValueProp};
+const test::UIPath kValuePropNextButton = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kValueProp, "next-button"};
+const test::UIPath kValuePropSkipButton = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kValueProp, "skip-button"};
+
+const test::UIPath kAssistantRelatedInfo = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kRelatedInfo};
+const test::UIPath kRelatedInfoNextButton = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kRelatedInfo, "next-button"};
+const test::UIPath kRelatedInfoSkipButton = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kRelatedInfo, "skip-button"};
+
+const test::UIPath kAssistantVoiceMatch = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kVoiceMatch};
+const test::UIPath kVoiceMatchAgreeButton = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kVoiceMatch, "agree-button"};
+const test::UIPath kVoiceMatchLaterButton = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kVoiceMatch, "later-button"};
+const test::UIPath kVoiceMatchEntry0 = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kVoiceMatch, "voice-entry-0"};
+const test::UIPath kVoiceMatchEntry1 = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kVoiceMatch, "voice-entry-1"};
+const test::UIPath kVoiceMatchEntry2 = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kVoiceMatch, "voice-entry-2"};
+const test::UIPath kVoiceMatchEntry3 = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kVoiceMatch, "voice-entry-3"};
+
+const test::UIPath kAssistantThirdParty = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kThirdParty};
+const test::UIPath kThirdPartyNextButton = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kThirdParty, "next-button"};
+
+const test::UIPath kAssistantGetMore = {kAssistantOptInId,
+                                        kAssistantOptInFlowCard, kGetMore};
+const test::UIPath kGetMoreNextButton = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kGetMore, "next-button"};
+const test::UIPath kGetMoreToggleEmail = {
+    kAssistantOptInId, kAssistantOptInFlowCard, kGetMore, "toggle-email"};
+
+constexpr char kAssistantOptInScreenExitReason[] =
+    "OOBE.StepCompletionTimeByExitReason.Assistant-optin-flow.Next";
+constexpr char kAssistantOptInScreenStepCompletionTime[] =
+    "OOBE.StepCompletionTime.Assistant-optin-flow";
+
+class ScopedAssistantSettings : public chromeos::assistant::AssistantSettings {
  public:
   // Flags to configure GetSettings response.
   static constexpr int CONSENT_UI_FLAGS_NONE = 0;
@@ -85,13 +144,9 @@ class FakeAssistantSettings
     EMAIL,
   };
 
-  FakeAssistantSettings() {
-    chromeos::assistant::Service::OverrideSettingsManagerForTesting(this);
-  }
+  ScopedAssistantSettings() = default;
 
-  ~FakeAssistantSettings() override {
-    chromeos::assistant::Service::OverrideSettingsManagerForTesting(nullptr);
-  }
+  ~ScopedAssistantSettings() override = default;
 
   void set_consent_ui_flags(int flags) { consent_ui_flags_ = flags; }
 
@@ -136,21 +191,12 @@ class FakeAssistantSettings
 
   void FailSpeakerIdEnrollment() {
     ASSERT_NE(speaker_id_enrollment_state_, SpeakerIdEnrollmentState::IDLE);
-    std::move(speaker_id_enrollment_client_)->OnSpeakerIdEnrollmentFailure();
+    speaker_id_enrollment_client_->OnSpeakerIdEnrollmentFailure();
     processed_hotwords_ = 0;
     speaker_id_enrollment_state_ = SpeakerIdEnrollmentState::IDLE;
   }
 
-  void Flush() { receivers_.FlushForTesting(); }
-
-  // chromeos::assistant::AssistantSettingsManager:
-  void BindReceiver(mojo::PendingReceiver<
-                    chromeos::assistant::mojom::AssistantSettingsManager>
-                        receiver) override {
-    receivers_.Add(this, std::move(receiver));
-  }
-
-  // chromeos::assistant::mojom::AssistantSettingsManager:
+  // chromeos::assistant::AssistantSettings:
   void GetSettings(const std::string& selector,
                    GetSettingsCallback callback) override {
     chromeos::assistant::SettingsUiSelector selector_proto;
@@ -263,26 +309,22 @@ class FakeAssistantSettings
 
   void StartSpeakerIdEnrollment(
       bool skip_cloud_enrollment,
-      mojo::PendingRemote<chromeos::assistant::mojom::SpeakerIdEnrollmentClient>
-          client) override {
+      base::WeakPtr<chromeos::assistant::SpeakerIdEnrollmentClient> client)
+      override {
     if (speaker_id_enrollment_mode_ == SpeakerIdEnrollmentMode::IMMEDIATE) {
-      mojo::Remote<chromeos::assistant::mojom::SpeakerIdEnrollmentClient>(
-          std::move(client))
-          ->OnSpeakerIdEnrollmentDone();
+      client->OnSpeakerIdEnrollmentDone();
       return;
     }
     ASSERT_FALSE(speaker_id_enrollment_client_);
     processed_hotwords_ = 0;
-    speaker_id_enrollment_client_.Bind(std::move(client));
+    speaker_id_enrollment_client_ = std::move(client);
     speaker_id_enrollment_state_ = SpeakerIdEnrollmentState::REQUESTED;
   }
 
-  void StopSpeakerIdEnrollment(
-      StopSpeakerIdEnrollmentCallback callback) override {
+  void StopSpeakerIdEnrollment() override {
     processed_hotwords_ = 0;
     speaker_id_enrollment_state_ = SpeakerIdEnrollmentState::IDLE;
     speaker_id_enrollment_client_.reset();
-    std::move(callback).Run();
   }
 
   void SyncSpeakerIdEnrollmentStatus() override {}
@@ -295,9 +337,6 @@ class FakeAssistantSettings
     PROCESSING
   };
 
-  mojo::ReceiverSet<chromeos::assistant::mojom::AssistantSettingsManager>
-      receivers_;
-
   // The service test config:
   int consent_ui_flags_ = CONSENT_UI_FLAGS_NONE;
   SpeakerIdEnrollmentMode speaker_id_enrollment_mode_ =
@@ -306,14 +345,14 @@ class FakeAssistantSettings
   // Speaker ID enrollment state:
   SpeakerIdEnrollmentState speaker_id_enrollment_state_ =
       SpeakerIdEnrollmentState::IDLE;
-  mojo::Remote<assistant::mojom::SpeakerIdEnrollmentClient>
+  base::WeakPtr<assistant::SpeakerIdEnrollmentClient>
       speaker_id_enrollment_client_;
   int processed_hotwords_ = 0;
 
   // Set of opt ins given by the user.
   std::set<OptIn> collected_optins_;
 
-  DISALLOW_COPY_AND_ASSIGN(FakeAssistantSettings);
+  DISALLOW_COPY_AND_ASSIGN(ScopedAssistantSettings);
 };
 
 }  // namespace
@@ -321,9 +360,8 @@ class FakeAssistantSettings
 class AssistantOptInFlowTest : public OobeBaseTest {
  public:
   AssistantOptInFlowTest() {
-    // To reuse existing wizard controller in the flow.
-    feature_list_.InitAndEnableFeature(
-        chromeos::features::kOobeScreensPriority);
+    scoped_feature_list_.InitAndEnableFeature(
+        assistant::features::kEnableBetterAssistant);
   }
   ~AssistantOptInFlowTest() override = default;
 
@@ -334,13 +372,14 @@ class AssistantOptInFlowTest : public OobeBaseTest {
 
   void SetUpOnMainThread() override {
     OobeBaseTest::SetUpOnMainThread();
-    force_lib_assistant_enabled_ =
-        AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting();
+    assistant_settings_ = std::make_unique<ScopedAssistantSettings>();
 
-    assistant_settings_ = std::make_unique<FakeAssistantSettings>();
-    assistant_optin_flow_screen_ = AssistantOptInFlowScreen::Get(
-        WizardController::default_controller()->screen_manager());
-    assistant_optin_flow_screen_->set_exit_callback_for_testing(
+    AssistantOptInFlowScreen* assistant_optin_flow_screen =
+        WizardController::default_controller()
+            ->GetScreen<AssistantOptInFlowScreen>();
+    original_callback_ =
+        assistant_optin_flow_screen->get_exit_callback_for_testing();
+    assistant_optin_flow_screen->set_exit_callback_for_testing(
         base::BindRepeating(&AssistantOptInFlowTest::HandleScreenExit,
                             base::Unretained(this)));
   }
@@ -351,13 +390,15 @@ class AssistantOptInFlowTest : public OobeBaseTest {
   }
 
   void ShowAssistantOptInFlowScreen() {
-    login_manager_.LoginAsNewReguarUser();
-    OobeScreenExitWaiter(GaiaView::kScreenId).Wait();
-    LoginDisplayHost::default_host()->StartWizard(
-        AssistantOptInFlowScreenView::kScreenId);
+    login_manager_.LoginAsNewRegularUser();
+    OobeScreenExitWaiter(GetFirstSigninScreen()).Wait();
+    if (!screen_exited_) {
+      LoginDisplayHost::default_host()->StartWizard(
+          AssistantOptInFlowScreenView::kScreenId);
+    }
   }
 
-  // Overrides:
+  // Waits for the OOBE UI to complete initialization, and overrides:
   // *   the assistant value prop webview URL with the one provided by embedded
   //     https proxy.
   // *   the timeout delay for sending done user action from voice match screen.
@@ -365,25 +406,18 @@ class AssistantOptInFlowTest : public OobeBaseTest {
     std::string url_template = embedded_test_server()
                                    ->GetURL("/test_assistant/$/value_prop.html")
                                    .spec();
-    test::OobeJS().Evaluate(
-        test::GetOobeElementPath({"assistant-optin-flow-card", "value-prop"}) +
-        ".setUrlTemplateForTesting('" + url_template + "')");
-    test::OobeJS().Evaluate(
-        test::GetOobeElementPath({"assistant-optin-flow-card", "voice-match"}) +
-        ".setDoneActionDelayForTesting(0)");
+    test::OobeJS().Evaluate(test::GetOobeElementPath(kAssistantValueProp) +
+                            ".setUrlTemplateForTesting('" + url_template +
+                            "')");
+    test::OobeJS().Evaluate(test::GetOobeElementPath(kAssistantVoiceMatch) +
+                            ".setDoneActionDelayForTesting(0)");
   }
 
-  // Waits for the button specified by IDs in |button_path| to become enabled,
+  // Waits for the button specified by IDs in `button_path` to become enabled,
   // and then taps it.
   void TapWhenEnabled(std::initializer_list<base::StringPiece> button_path) {
     test::OobeJS().CreateEnabledWaiter(true, button_path)->Wait();
     test::OobeJS().TapOnPath(button_path);
-  }
-
-  void WaitForAssistantScreen(const std::string& screen) {
-    test::OobeJS()
-        .CreateVisibilityWaiter(true, {"assistant-optin-flow-card", screen})
-        ->Wait();
   }
 
   bool ElementHasAttribute(std::initializer_list<base::StringPiece> element,
@@ -401,8 +435,7 @@ class AssistantOptInFlowTest : public OobeBaseTest {
   }
 
   void ExpectCollectedOptIns(
-      const std::set<FakeAssistantSettings::OptIn>& opt_ins) {
-    assistant_settings_->Flush();
+      const std::set<ScopedAssistantSettings::OptIn>& opt_ins) {
     EXPECT_EQ(opt_ins, assistant_settings_->collected_optins());
   }
 
@@ -415,13 +448,17 @@ class AssistantOptInFlowTest : public OobeBaseTest {
     run_loop.Run();
   }
 
-  AssistantOptInFlowScreen* assistant_optin_flow_screen_;
+  std::unique_ptr<ScopedAssistantSettings> assistant_settings_;
 
-  std::unique_ptr<FakeAssistantSettings> assistant_settings_;
+  base::Optional<AssistantOptInFlowScreen::Result> screen_result_;
+  base::HistogramTester histogram_tester_;
 
   // If set, HandleRequest will return an error for the next value prop URL
   // request..
   bool fail_next_value_prop_url_request_ = false;
+
+ protected:
+  base::test::ScopedFeatureList scoped_feature_list_;
 
  private:
   std::unique_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
@@ -438,26 +475,36 @@ class AssistantOptInFlowTest : public OobeBaseTest {
     return std::move(response);
   }
 
-  void HandleScreenExit() {
+  void HandleScreenExit(AssistantOptInFlowScreen::Result result) {
     ASSERT_FALSE(screen_exited_);
     screen_exited_ = true;
+    screen_result_ = result;
+    original_callback_.Run(result);
     if (screen_exit_callback_)
       std::move(screen_exit_callback_).Run();
   }
 
   bool screen_exited_ = false;
   base::OnceClosure screen_exit_callback_;
-
-  base::test::ScopedFeatureList feature_list_;
-
-  std::unique_ptr<base::AutoReset<bool>> force_lib_assistant_enabled_;
+  AssistantOptInFlowScreen::ScreenExitCallback original_callback_;
 
   LoginManagerMixin login_manager_{&mixin_host_};
 };
 
+class AssistantOptInFlowNewLayoutDisabledTest : public AssistantOptInFlowTest {
+ public:
+  AssistantOptInFlowNewLayoutDisabledTest() {
+    scoped_feature_list_.Reset();
+    scoped_feature_list_.InitAndDisableFeature(
+        assistant::features::kEnableBetterAssistant);
+  }
+};
+
 IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, Basic) {
+  auto force_lib_assistant_enabled =
+      AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting(true);
   ash::AssistantState::Get()->NotifyStatusChanged(
-      ash::mojom::AssistantState::READY);
+      chromeos::assistant::AssistantStatus::READY);
 
   SetUpAssistantScreensForTest();
   ShowAssistantOptInFlowScreen();
@@ -466,34 +513,34 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, Basic) {
   screen_waiter.set_assert_next_screen();
   screen_waiter.Wait();
 
-  WaitForAssistantScreen("value-prop");
-  TapWhenEnabled({"assistant-optin-flow-card", "value-prop", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantValueProp)->Wait();
+  TapWhenEnabled(kValuePropNextButton);
 
-  WaitForAssistantScreen("third-party");
-  TapWhenEnabled({"assistant-optin-flow-card", "third-party", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantRelatedInfo)->Wait();
+  TapWhenEnabled(kRelatedInfoNextButton);
 
-  WaitForAssistantScreen("voice-match");
-  TapWhenEnabled({"assistant-optin-flow-card", "voice-match", "agree-button"});
-
-  WaitForAssistantScreen("get-more");
-  test::OobeJS().ExpectVisiblePath(
-      {"assistant-optin-flow-card", "get-more", "toggle-context"});
-
-  TapWhenEnabled({"assistant-optin-flow-card", "get-more", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantVoiceMatch)->Wait();
+  TapWhenEnabled(kVoiceMatchAgreeButton);
 
   WaitForScreenExit();
 
-  ExpectCollectedOptIns({FakeAssistantSettings::OptIn::ACTIVITY_CONTROL});
+  ExpectCollectedOptIns({ScopedAssistantSettings::OptIn::ACTIVITY_CONTROL});
   PrefService* const prefs = ProfileManager::GetActiveUserProfile()->GetPrefs();
   EXPECT_EQ(assistant::prefs::ConsentStatus::kActivityControlAccepted,
             prefs->GetInteger(assistant::prefs::kAssistantConsentStatus));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantHotwordEnabled));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantContextEnabled));
+  EXPECT_EQ(screen_result_.value(), AssistantOptInFlowScreen::Result::NEXT);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenExitReason, 1);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenStepCompletionTime,
+                                     1);
 }
 
 IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, DisableScreenContext) {
+  auto force_lib_assistant_enabled =
+      AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting(true);
   ash::AssistantState::Get()->NotifyStatusChanged(
-      ash::mojom::AssistantState::READY);
+      chromeos::assistant::AssistantStatus::READY);
 
   SetUpAssistantScreensForTest();
   ShowAssistantOptInFlowScreen();
@@ -502,36 +549,32 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, DisableScreenContext) {
   screen_waiter.set_assert_next_screen();
   screen_waiter.Wait();
 
-  WaitForAssistantScreen("value-prop");
-  TapWhenEnabled({"assistant-optin-flow-card", "value-prop", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantValueProp)->Wait();
+  TapWhenEnabled(kValuePropNextButton);
 
-  WaitForAssistantScreen("third-party");
-  TapWhenEnabled({"assistant-optin-flow-card", "third-party", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantRelatedInfo)->Wait();
+  TapWhenEnabled(kRelatedInfoSkipButton);
 
-  WaitForAssistantScreen("voice-match");
-  TapWhenEnabled({"assistant-optin-flow-card", "voice-match", "agree-button"});
-
-  WaitForAssistantScreen("get-more");
-
-  std::initializer_list<base::StringPiece> context_toggle = {
-      "assistant-optin-flow-card", "get-more", "toggle-context"};
-  test::OobeJS().ExpectVisiblePath(context_toggle);
-  test::OobeJS().Evaluate(test::GetOobeElementPath(context_toggle) +
-                          ".click()");
-
-  TapWhenEnabled({"assistant-optin-flow-card", "get-more", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantVoiceMatch)->Wait();
+  TapWhenEnabled(kVoiceMatchAgreeButton);
 
   WaitForScreenExit();
 
-  ExpectCollectedOptIns({FakeAssistantSettings::OptIn::ACTIVITY_CONTROL});
+  ExpectCollectedOptIns({ScopedAssistantSettings::OptIn::ACTIVITY_CONTROL});
   PrefService* const prefs = ProfileManager::GetActiveUserProfile()->GetPrefs();
   EXPECT_EQ(assistant::prefs::ConsentStatus::kActivityControlAccepted,
             prefs->GetInteger(assistant::prefs::kAssistantConsentStatus));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantHotwordEnabled));
   EXPECT_FALSE(prefs->GetBoolean(assistant::prefs::kAssistantContextEnabled));
+  EXPECT_EQ(screen_result_.value(), AssistantOptInFlowScreen::Result::NEXT);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenExitReason, 1);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenStepCompletionTime,
+                                     1);
 }
 
 IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, AssistantStateUpdateAfterShow) {
+  auto force_lib_assistant_enabled =
+      AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting(true);
   SetUpAssistantScreensForTest();
   ShowAssistantOptInFlowScreen();
 
@@ -539,44 +582,42 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, AssistantStateUpdateAfterShow) {
   screen_waiter.set_assert_next_screen();
   screen_waiter.Wait();
 
-  // Value prop screen will not be sohwn until it receives assistant settings
-  // config, which is blocked on the Assistant state becomes READY state.
-  test::OobeJS().ExpectHiddenPath({"assistant-optin-flow-card", "value-prop"});
-  test::OobeJS().ExpectVisiblePath({"assistant-optin-flow-card", "loading"});
-
   ash::AssistantState::Get()->NotifyStatusChanged(
-      ash::mojom::AssistantState::READY);
+      chromeos::assistant::AssistantStatus::READY);
 
-  WaitForAssistantScreen("value-prop");
-  TapWhenEnabled({"assistant-optin-flow-card", "value-prop", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantValueProp)->Wait();
+  TapWhenEnabled(kValuePropNextButton);
 
-  WaitForAssistantScreen("third-party");
-  TapWhenEnabled({"assistant-optin-flow-card", "third-party", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantRelatedInfo)->Wait();
+  TapWhenEnabled(kRelatedInfoNextButton);
 
-  WaitForAssistantScreen("voice-match");
-  TapWhenEnabled({"assistant-optin-flow-card", "voice-match", "agree-button"});
-
-  WaitForAssistantScreen("get-more");
-  TapWhenEnabled({"assistant-optin-flow-card", "get-more", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantVoiceMatch)->Wait();
+  TapWhenEnabled(kVoiceMatchAgreeButton);
 
   WaitForScreenExit();
 
-  ExpectCollectedOptIns({FakeAssistantSettings::OptIn::ACTIVITY_CONTROL});
+  ExpectCollectedOptIns({ScopedAssistantSettings::OptIn::ACTIVITY_CONTROL});
   PrefService* const prefs = ProfileManager::GetActiveUserProfile()->GetPrefs();
   EXPECT_EQ(assistant::prefs::ConsentStatus::kActivityControlAccepted,
             prefs->GetInteger(assistant::prefs::kAssistantConsentStatus));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantHotwordEnabled));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantContextEnabled));
+  EXPECT_EQ(screen_result_.value(), AssistantOptInFlowScreen::Result::NEXT);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenExitReason, 1);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenStepCompletionTime,
+                                     1);
 }
 
 IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, RetryOnWebviewLoadFail) {
+  auto force_lib_assistant_enabled =
+      AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting(true);
   SetUpAssistantScreensForTest();
   fail_next_value_prop_url_request_ = true;
 
   ShowAssistantOptInFlowScreen();
 
   ash::AssistantState::Get()->NotifyStatusChanged(
-      ash::mojom::AssistantState::READY);
+      chromeos::assistant::AssistantStatus::READY);
 
   OobeScreenWaiter screen_waiter(AssistantOptInFlowScreenView::kScreenId);
   screen_waiter.set_assert_next_screen();
@@ -584,35 +625,38 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, RetryOnWebviewLoadFail) {
 
   // Value prop webview requests are set to fail - loading screen should display
   // an error and an option to retry the request.
-  WaitForAssistantScreen("loading");
-  TapWhenEnabled({"assistant-optin-flow-card", "loading", "retry-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantLoading)->Wait();
+  TapWhenEnabled(kLoadingRetryButton);
 
-  WaitForAssistantScreen("value-prop");
-  TapWhenEnabled({"assistant-optin-flow-card", "value-prop", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantValueProp)->Wait();
+  TapWhenEnabled(kValuePropNextButton);
 
-  WaitForAssistantScreen("third-party");
-  TapWhenEnabled({"assistant-optin-flow-card", "third-party", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantRelatedInfo)->Wait();
+  TapWhenEnabled(kRelatedInfoNextButton);
 
-  WaitForAssistantScreen("voice-match");
-  TapWhenEnabled({"assistant-optin-flow-card", "voice-match", "agree-button"});
-
-  WaitForAssistantScreen("get-more");
-  TapWhenEnabled({"assistant-optin-flow-card", "get-more", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantVoiceMatch)->Wait();
+  TapWhenEnabled(kVoiceMatchAgreeButton);
 
   WaitForScreenExit();
 
-  ExpectCollectedOptIns({FakeAssistantSettings::OptIn::ACTIVITY_CONTROL});
+  ExpectCollectedOptIns({ScopedAssistantSettings::OptIn::ACTIVITY_CONTROL});
   PrefService* const prefs = ProfileManager::GetActiveUserProfile()->GetPrefs();
   EXPECT_EQ(assistant::prefs::ConsentStatus::kActivityControlAccepted,
             prefs->GetInteger(assistant::prefs::kAssistantConsentStatus));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantHotwordEnabled));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantContextEnabled));
+  EXPECT_EQ(screen_result_.value(), AssistantOptInFlowScreen::Result::NEXT);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenExitReason, 1);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenStepCompletionTime,
+                                     1);
 }
 
 IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, RejectValueProp) {
+  auto force_lib_assistant_enabled =
+      AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting(true);
   SetUpAssistantScreensForTest();
   ash::AssistantState::Get()->NotifyStatusChanged(
-      ash::mojom::AssistantState::READY);
+      chromeos::assistant::AssistantStatus::READY);
 
   ShowAssistantOptInFlowScreen();
 
@@ -620,8 +664,8 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, RejectValueProp) {
   screen_waiter.set_assert_next_screen();
   screen_waiter.Wait();
 
-  WaitForAssistantScreen("value-prop");
-  TapWhenEnabled({"assistant-optin-flow-card", "value-prop", "skip-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantValueProp)->Wait();
+  TapWhenEnabled(kValuePropSkipButton);
 
   WaitForScreenExit();
 
@@ -631,13 +675,20 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, RejectValueProp) {
             prefs->GetInteger(assistant::prefs::kAssistantConsentStatus));
   EXPECT_FALSE(prefs->GetBoolean(assistant::prefs::kAssistantHotwordEnabled));
   EXPECT_FALSE(prefs->GetBoolean(assistant::prefs::kAssistantContextEnabled));
+  EXPECT_EQ(screen_result_.value(), AssistantOptInFlowScreen::Result::NEXT);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenExitReason, 1);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenStepCompletionTime,
+                                     1);
 }
 
-IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, AskEmailOptIn_NotChecked) {
+IN_PROC_BROWSER_TEST_F(AssistantOptInFlowNewLayoutDisabledTest,
+                       AskEmailOptIn_NotChecked) {
+  auto force_lib_assistant_enabled =
+      AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting(true);
   assistant_settings_->set_consent_ui_flags(
-      FakeAssistantSettings::CONSENT_UI_FLAG_ASK_EMAIL_OPT_IN);
+      ScopedAssistantSettings::CONSENT_UI_FLAG_ASK_EMAIL_OPT_IN);
   ash::AssistantState::Get()->NotifyStatusChanged(
-      ash::mojom::AssistantState::READY);
+      chromeos::assistant::AssistantStatus::READY);
 
   SetUpAssistantScreensForTest();
   ShowAssistantOptInFlowScreen();
@@ -646,39 +697,44 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, AskEmailOptIn_NotChecked) {
   screen_waiter.set_assert_next_screen();
   screen_waiter.Wait();
 
-  WaitForAssistantScreen("value-prop");
-  TapWhenEnabled({"assistant-optin-flow-card", "value-prop", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantValueProp)->Wait();
+  TapWhenEnabled(kValuePropNextButton);
 
-  WaitForAssistantScreen("third-party");
-  TapWhenEnabled({"assistant-optin-flow-card", "third-party", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantThirdParty)->Wait();
+  TapWhenEnabled(kThirdPartyNextButton);
 
-  WaitForAssistantScreen("voice-match");
-  TapWhenEnabled({"assistant-optin-flow-card", "voice-match", "agree-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantVoiceMatch)->Wait();
+  TapWhenEnabled(kVoiceMatchAgreeButton);
 
-  WaitForAssistantScreen("get-more");
-  test::OobeJS().ExpectVisiblePath(
-      {"assistant-optin-flow-card", "get-more", "toggle-email"});
-  test::OobeJS().ExpectEnabledPath(
-      {"assistant-optin-flow-card", "get-more", "toggle-email"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantGetMore)->Wait();
+  test::OobeJS().ExpectVisiblePath(kGetMoreToggleEmail);
+  test::OobeJS().ExpectEnabledPath(kGetMoreToggleEmail);
 
   // Complete flow without checking the email opt-in toggle.
-  TapWhenEnabled({"assistant-optin-flow-card", "get-more", "next-button"});
+  TapWhenEnabled(kGetMoreNextButton);
 
   WaitForScreenExit();
 
-  ExpectCollectedOptIns({FakeAssistantSettings::OptIn::ACTIVITY_CONTROL});
+  ExpectCollectedOptIns({ScopedAssistantSettings::OptIn::ACTIVITY_CONTROL});
   PrefService* const prefs = ProfileManager::GetActiveUserProfile()->GetPrefs();
   EXPECT_EQ(assistant::prefs::ConsentStatus::kActivityControlAccepted,
             prefs->GetInteger(assistant::prefs::kAssistantConsentStatus));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantHotwordEnabled));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantContextEnabled));
+  EXPECT_EQ(screen_result_.value(), AssistantOptInFlowScreen::Result::NEXT);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenExitReason, 1);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenStepCompletionTime,
+                                     1);
 }
 
-IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, AskEmailOptIn_Accepted) {
+IN_PROC_BROWSER_TEST_F(AssistantOptInFlowNewLayoutDisabledTest,
+                       AskEmailOptIn_Accepted) {
+  auto force_lib_assistant_enabled =
+      AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting(true);
   assistant_settings_->set_consent_ui_flags(
-      FakeAssistantSettings::CONSENT_UI_FLAG_ASK_EMAIL_OPT_IN);
+      ScopedAssistantSettings::CONSENT_UI_FLAG_ASK_EMAIL_OPT_IN);
   ash::AssistantState::Get()->NotifyStatusChanged(
-      ash::mojom::AssistantState::READY);
+      chromeos::assistant::AssistantStatus::READY);
 
   SetUpAssistantScreensForTest();
   ShowAssistantOptInFlowScreen();
@@ -687,44 +743,45 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, AskEmailOptIn_Accepted) {
   screen_waiter.set_assert_next_screen();
   screen_waiter.Wait();
 
-  WaitForAssistantScreen("value-prop");
-  TapWhenEnabled({"assistant-optin-flow-card", "value-prop", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantValueProp)->Wait();
+  TapWhenEnabled(kValuePropNextButton);
 
-  WaitForAssistantScreen("third-party");
-  TapWhenEnabled({"assistant-optin-flow-card", "third-party", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantThirdParty)->Wait();
+  TapWhenEnabled(kThirdPartyNextButton);
 
-  WaitForAssistantScreen("voice-match");
-  TapWhenEnabled({"assistant-optin-flow-card", "voice-match", "agree-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantVoiceMatch)->Wait();
+  TapWhenEnabled(kVoiceMatchAgreeButton);
 
-  WaitForAssistantScreen("get-more");
-  test::OobeJS().ExpectVisiblePath(
-      {"assistant-optin-flow-card", "get-more", "toggle-email"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantGetMore)->Wait();
+  test::OobeJS().ExpectVisiblePath(kGetMoreToggleEmail);
+  test::OobeJS().ClickOnPath(kGetMoreToggleEmail);
 
-  std::initializer_list<base::StringPiece> email_toggle = {
-      "assistant-optin-flow-card", "get-more", "toggle-email"};
-  test::OobeJS().ExpectVisiblePath(email_toggle);
-  test::OobeJS().Evaluate(test::GetOobeElementPath(email_toggle) + ".click()");
-
-  TapWhenEnabled({"assistant-optin-flow-card", "get-more", "next-button"});
+  TapWhenEnabled(kGetMoreNextButton);
 
   WaitForScreenExit();
 
-  ExpectCollectedOptIns({FakeAssistantSettings::OptIn::ACTIVITY_CONTROL,
-                         FakeAssistantSettings::OptIn::EMAIL});
+  ExpectCollectedOptIns({ScopedAssistantSettings::OptIn::ACTIVITY_CONTROL,
+                         ScopedAssistantSettings::OptIn::EMAIL});
   PrefService* const prefs = ProfileManager::GetActiveUserProfile()->GetPrefs();
   EXPECT_EQ(assistant::prefs::ConsentStatus::kActivityControlAccepted,
             prefs->GetInteger(assistant::prefs::kAssistantConsentStatus));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantHotwordEnabled));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantContextEnabled));
+  EXPECT_EQ(screen_result_.value(), AssistantOptInFlowScreen::Result::NEXT);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenExitReason, 1);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenStepCompletionTime,
+                                     1);
 }
 
 IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, SkipShowingValueProp) {
+  auto force_lib_assistant_enabled =
+      AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting(true);
   assistant_settings_->set_consent_ui_flags(
-      FakeAssistantSettings::CONSENT_UI_FLAG_SKIP_ACTIVITY_CONTROL);
+      ScopedAssistantSettings::CONSENT_UI_FLAG_SKIP_ACTIVITY_CONTROL);
 
   SetUpAssistantScreensForTest();
   ash::AssistantState::Get()->NotifyStatusChanged(
-      ash::mojom::AssistantState::READY);
+      chromeos::assistant::AssistantStatus::READY);
 
   ShowAssistantOptInFlowScreen();
 
@@ -732,14 +789,11 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, SkipShowingValueProp) {
   screen_waiter.set_assert_next_screen();
   screen_waiter.Wait();
 
-  WaitForAssistantScreen("third-party");
-  TapWhenEnabled({"assistant-optin-flow-card", "third-party", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantRelatedInfo)->Wait();
+  TapWhenEnabled(kRelatedInfoNextButton);
 
-  WaitForAssistantScreen("voice-match");
-  TapWhenEnabled({"assistant-optin-flow-card", "voice-match", "agree-button"});
-
-  WaitForAssistantScreen("get-more");
-  TapWhenEnabled({"assistant-optin-flow-card", "get-more", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantVoiceMatch)->Wait();
+  TapWhenEnabled(kVoiceMatchAgreeButton);
 
   WaitForScreenExit();
 
@@ -749,17 +803,23 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, SkipShowingValueProp) {
             prefs->GetInteger(assistant::prefs::kAssistantConsentStatus));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantHotwordEnabled));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantContextEnabled));
+  EXPECT_EQ(screen_result_.value(), AssistantOptInFlowScreen::Result::NEXT);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenExitReason, 1);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenStepCompletionTime,
+                                     1);
 }
 
-IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest,
+IN_PROC_BROWSER_TEST_F(AssistantOptInFlowNewLayoutDisabledTest,
                        SkipShowingValuePropAndThirdPartyDisclosure) {
+  auto force_lib_assistant_enabled =
+      AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting(true);
   assistant_settings_->set_consent_ui_flags(
-      FakeAssistantSettings::CONSENT_UI_FLAG_SKIP_ACTIVITY_CONTROL |
-      FakeAssistantSettings::CONSENT_UI_FLAG_SKIP_THIRD_PARTY_DISCLOSURE);
+      ScopedAssistantSettings::CONSENT_UI_FLAG_SKIP_ACTIVITY_CONTROL |
+      ScopedAssistantSettings::CONSENT_UI_FLAG_SKIP_THIRD_PARTY_DISCLOSURE);
 
   SetUpAssistantScreensForTest();
   ash::AssistantState::Get()->NotifyStatusChanged(
-      ash::mojom::AssistantState::READY);
+      chromeos::assistant::AssistantStatus::READY);
 
   ShowAssistantOptInFlowScreen();
 
@@ -767,11 +827,11 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest,
   screen_waiter.set_assert_next_screen();
   screen_waiter.Wait();
 
-  WaitForAssistantScreen("voice-match");
-  TapWhenEnabled({"assistant-optin-flow-card", "voice-match", "agree-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantVoiceMatch)->Wait();
+  TapWhenEnabled(kVoiceMatchAgreeButton);
 
-  WaitForAssistantScreen("get-more");
-  TapWhenEnabled({"assistant-optin-flow-card", "get-more", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantGetMore)->Wait();
+  TapWhenEnabled(kGetMoreNextButton);
 
   WaitForScreenExit();
 
@@ -781,18 +841,23 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest,
             prefs->GetInteger(assistant::prefs::kAssistantConsentStatus));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantHotwordEnabled));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantContextEnabled));
+  EXPECT_EQ(screen_result_.value(), AssistantOptInFlowScreen::Result::NEXT);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenExitReason, 1);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenStepCompletionTime,
+                                     1);
 }
 
 IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, SpeakerIdEnrollment) {
+  auto force_lib_assistant_enabled =
+      AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting(true);
   assistant_settings_->set_consent_ui_flags(
-      FakeAssistantSettings::CONSENT_UI_FLAG_SKIP_ACTIVITY_CONTROL |
-      FakeAssistantSettings::CONSENT_UI_FLAG_SKIP_THIRD_PARTY_DISCLOSURE);
+      ScopedAssistantSettings::CONSENT_UI_FLAG_SKIP_ACTIVITY_CONTROL);
   assistant_settings_->set_speaker_id_enrollment_mode(
-      FakeAssistantSettings::SpeakerIdEnrollmentMode::STEP_BY_STEP);
+      ScopedAssistantSettings::SpeakerIdEnrollmentMode::STEP_BY_STEP);
 
   SetUpAssistantScreensForTest();
   ash::AssistantState::Get()->NotifyStatusChanged(
-      ash::mojom::AssistantState::READY);
+      chromeos::assistant::AssistantStatus::READY);
 
   ShowAssistantOptInFlowScreen();
 
@@ -800,67 +865,43 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, SpeakerIdEnrollment) {
   screen_waiter.set_assert_next_screen();
   screen_waiter.Wait();
 
-  WaitForAssistantScreen("voice-match");
-  TapWhenEnabled({"assistant-optin-flow-card", "voice-match", "agree-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantRelatedInfo)->Wait();
+  TapWhenEnabled(kRelatedInfoNextButton);
 
-  assistant_settings_->Flush();
-  ASSERT_TRUE(assistant_settings_->AdvanceSpeakerIdEnrollmentState());
-  WaitForElementAttribute(
-      {"assistant-optin-flow-card", "voice-match", "voice-entry-0"}, "active");
-  test::OobeJS().ExpectVisiblePath(
-      {"assistant-optin-flow-card", "voice-match", "later-button"});
-
-  assistant_settings_->Flush();
-  ASSERT_TRUE(assistant_settings_->AdvanceSpeakerIdEnrollmentState());
-  WaitForElementAttribute(
-      {"assistant-optin-flow-card", "voice-match", "voice-entry-0"},
-      "completed");
-  test::OobeJS().ExpectVisiblePath(
-      {"assistant-optin-flow-card", "voice-match", "later-button"});
-
-  assistant_settings_->Flush();
-  ASSERT_TRUE(assistant_settings_->AdvanceSpeakerIdEnrollmentState());
-  WaitForElementAttribute(
-      {"assistant-optin-flow-card", "voice-match", "voice-entry-1"}, "active");
-  test::OobeJS().ExpectVisiblePath(
-      {"assistant-optin-flow-card", "voice-match", "later-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantVoiceMatch)->Wait();
+  TapWhenEnabled(kVoiceMatchAgreeButton);
 
   ASSERT_TRUE(assistant_settings_->AdvanceSpeakerIdEnrollmentState());
-  WaitForElementAttribute(
-      {"assistant-optin-flow-card", "voice-match", "voice-entry-1"},
-      "completed");
+  WaitForElementAttribute(kVoiceMatchEntry0, "active");
+  test::OobeJS().ExpectVisiblePath(kVoiceMatchLaterButton);
 
-  assistant_settings_->Flush();
   ASSERT_TRUE(assistant_settings_->AdvanceSpeakerIdEnrollmentState());
-  WaitForElementAttribute(
-      {"assistant-optin-flow-card", "voice-match", "voice-entry-2"}, "active");
+  WaitForElementAttribute(kVoiceMatchEntry0, "completed");
+  test::OobeJS().ExpectVisiblePath(kVoiceMatchLaterButton);
 
-  assistant_settings_->Flush();
   ASSERT_TRUE(assistant_settings_->AdvanceSpeakerIdEnrollmentState());
-  WaitForElementAttribute(
-      {"assistant-optin-flow-card", "voice-match", "voice-entry-2"},
-      "completed");
+  WaitForElementAttribute(kVoiceMatchEntry1, "active");
+  test::OobeJS().ExpectVisiblePath(kVoiceMatchLaterButton);
 
-  assistant_settings_->Flush();
   ASSERT_TRUE(assistant_settings_->AdvanceSpeakerIdEnrollmentState());
-  WaitForElementAttribute(
-      {"assistant-optin-flow-card", "voice-match", "voice-entry-3"}, "active");
+  WaitForElementAttribute(kVoiceMatchEntry1, "completed");
 
-  assistant_settings_->Flush();
   ASSERT_TRUE(assistant_settings_->AdvanceSpeakerIdEnrollmentState());
-  WaitForElementAttribute(
-      {"assistant-optin-flow-card", "voice-match", "voice-entry-3"},
-      "completed");
-  test::OobeJS().ExpectHiddenPath(
-      {"assistant-optin-flow-card", "voice-match", "later-button"});
+  WaitForElementAttribute(kVoiceMatchEntry2, "active");
+
+  ASSERT_TRUE(assistant_settings_->AdvanceSpeakerIdEnrollmentState());
+  WaitForElementAttribute(kVoiceMatchEntry2, "completed");
+
+  ASSERT_TRUE(assistant_settings_->AdvanceSpeakerIdEnrollmentState());
+  WaitForElementAttribute(kVoiceMatchEntry3, "active");
+
+  ASSERT_TRUE(assistant_settings_->AdvanceSpeakerIdEnrollmentState());
+  WaitForElementAttribute(kVoiceMatchEntry3, "completed");
+  test::OobeJS().ExpectHiddenPath(kVoiceMatchLaterButton);
 
   // This should finish the enrollment, and move the UI to get-more screen.
-  assistant_settings_->Flush();
   ASSERT_TRUE(assistant_settings_->AdvanceSpeakerIdEnrollmentState());
   EXPECT_FALSE(assistant_settings_->IsSpeakerIdEnrollmentActive());
-
-  WaitForAssistantScreen("get-more");
-  TapWhenEnabled({"assistant-optin-flow-card", "get-more", "next-button"});
 
   WaitForScreenExit();
 
@@ -870,19 +911,24 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, SpeakerIdEnrollment) {
             prefs->GetInteger(assistant::prefs::kAssistantConsentStatus));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantHotwordEnabled));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantContextEnabled));
+  EXPECT_EQ(screen_result_.value(), AssistantOptInFlowScreen::Result::NEXT);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenExitReason, 1);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenStepCompletionTime,
+                                     1);
 }
 
 IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest,
                        BailOutDuringSpeakerIdEnrollment) {
+  auto force_lib_assistant_enabled =
+      AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting(true);
   assistant_settings_->set_consent_ui_flags(
-      FakeAssistantSettings::CONSENT_UI_FLAG_SKIP_ACTIVITY_CONTROL |
-      FakeAssistantSettings::CONSENT_UI_FLAG_SKIP_THIRD_PARTY_DISCLOSURE);
+      ScopedAssistantSettings::CONSENT_UI_FLAG_SKIP_ACTIVITY_CONTROL);
   assistant_settings_->set_speaker_id_enrollment_mode(
-      FakeAssistantSettings::SpeakerIdEnrollmentMode::STEP_BY_STEP);
+      ScopedAssistantSettings::SpeakerIdEnrollmentMode::STEP_BY_STEP);
 
   SetUpAssistantScreensForTest();
   ash::AssistantState::Get()->NotifyStatusChanged(
-      ash::mojom::AssistantState::READY);
+      chromeos::assistant::AssistantStatus::READY);
 
   ShowAssistantOptInFlowScreen();
 
@@ -890,29 +936,21 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest,
   screen_waiter.set_assert_next_screen();
   screen_waiter.Wait();
 
-  WaitForAssistantScreen("voice-match");
-  TapWhenEnabled({"assistant-optin-flow-card", "voice-match", "agree-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantRelatedInfo)->Wait();
+  TapWhenEnabled(kRelatedInfoNextButton);
 
-  assistant_settings_->Flush();
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantVoiceMatch)->Wait();
+  TapWhenEnabled(kVoiceMatchAgreeButton);
+
   ASSERT_TRUE(assistant_settings_->AdvanceSpeakerIdEnrollmentState());
-  WaitForElementAttribute(
-      {"assistant-optin-flow-card", "voice-match", "voice-entry-0"}, "active");
-  test::OobeJS().ExpectVisiblePath(
-      {"assistant-optin-flow-card", "voice-match", "later-button"});
+  WaitForElementAttribute(kVoiceMatchEntry0, "active");
+  test::OobeJS().ExpectVisiblePath(kVoiceMatchLaterButton);
 
-  assistant_settings_->Flush();
   ASSERT_TRUE(assistant_settings_->AdvanceSpeakerIdEnrollmentState());
-  WaitForElementAttribute(
-      {"assistant-optin-flow-card", "voice-match", "voice-entry-0"},
-      "completed");
+  WaitForElementAttribute(kVoiceMatchEntry0, "completed");
 
-  test::OobeJS().TapOnPath(
-      {"assistant-optin-flow-card", "voice-match", "later-button"});
-  assistant_settings_->Flush();
+  test::OobeJS().TapOnPath(kVoiceMatchLaterButton);
   EXPECT_FALSE(assistant_settings_->IsSpeakerIdEnrollmentActive());
-
-  WaitForAssistantScreen("get-more");
-  TapWhenEnabled({"assistant-optin-flow-card", "get-more", "next-button"});
 
   WaitForScreenExit();
 
@@ -922,19 +960,24 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest,
             prefs->GetInteger(assistant::prefs::kAssistantConsentStatus));
   EXPECT_FALSE(prefs->GetBoolean(assistant::prefs::kAssistantHotwordEnabled));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantContextEnabled));
+  EXPECT_EQ(screen_result_.value(), AssistantOptInFlowScreen::Result::NEXT);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenExitReason, 1);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenStepCompletionTime,
+                                     1);
 }
 
 IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest,
                        SpeakerIdEnrollmentFailureAndRetry) {
+  auto force_lib_assistant_enabled =
+      AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting(true);
   assistant_settings_->set_consent_ui_flags(
-      FakeAssistantSettings::CONSENT_UI_FLAG_SKIP_ACTIVITY_CONTROL |
-      FakeAssistantSettings::CONSENT_UI_FLAG_SKIP_THIRD_PARTY_DISCLOSURE);
+      ScopedAssistantSettings::CONSENT_UI_FLAG_SKIP_ACTIVITY_CONTROL);
   assistant_settings_->set_speaker_id_enrollment_mode(
-      FakeAssistantSettings::SpeakerIdEnrollmentMode::STEP_BY_STEP);
+      ScopedAssistantSettings::SpeakerIdEnrollmentMode::STEP_BY_STEP);
 
   SetUpAssistantScreensForTest();
   ash::AssistantState::Get()->NotifyStatusChanged(
-      ash::mojom::AssistantState::READY);
+      chromeos::assistant::AssistantStatus::READY);
 
   ShowAssistantOptInFlowScreen();
 
@@ -942,33 +985,30 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest,
   screen_waiter.set_assert_next_screen();
   screen_waiter.Wait();
 
-  TapWhenEnabled({"assistant-optin-flow-card", "voice-match", "agree-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantRelatedInfo)->Wait();
+  TapWhenEnabled(kRelatedInfoNextButton);
 
-  assistant_settings_->Flush();
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantVoiceMatch)->Wait();
+  TapWhenEnabled(kVoiceMatchAgreeButton);
+
   ASSERT_TRUE(assistant_settings_->AdvanceSpeakerIdEnrollmentState());
-  WaitForElementAttribute(
-      {"assistant-optin-flow-card", "voice-match", "voice-entry-0"}, "active");
-  test::OobeJS().ExpectVisiblePath(
-      {"assistant-optin-flow-card", "voice-match", "later-button"});
+  WaitForElementAttribute(kVoiceMatchEntry0, "active");
+  test::OobeJS().ExpectVisiblePath(kVoiceMatchLaterButton);
 
-  assistant_settings_->Flush();
   assistant_settings_->FailSpeakerIdEnrollment();
 
   // Failure should cause an error screen to be shown, with retry button
   // available.
-  WaitForAssistantScreen("loading");
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantLoading)->Wait();
 
   // Make enrollment succeed immediately next time.
   assistant_settings_->set_speaker_id_enrollment_mode(
-      FakeAssistantSettings::SpeakerIdEnrollmentMode::IMMEDIATE);
+      ScopedAssistantSettings::SpeakerIdEnrollmentMode::IMMEDIATE);
 
-  TapWhenEnabled({"assistant-optin-flow-card", "loading", "retry-button"});
+  TapWhenEnabled(kLoadingRetryButton);
 
-  WaitForAssistantScreen("voice-match");
-  TapWhenEnabled({"assistant-optin-flow-card", "voice-match", "agree-button"});
-
-  WaitForAssistantScreen("get-more");
-  TapWhenEnabled({"assistant-optin-flow-card", "get-more", "next-button"});
+  test::OobeJS().CreateVisibilityWaiter(true, kAssistantVoiceMatch)->Wait();
+  TapWhenEnabled(kVoiceMatchAgreeButton);
 
   WaitForScreenExit();
 
@@ -978,14 +1018,20 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest,
             prefs->GetInteger(assistant::prefs::kAssistantConsentStatus));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantHotwordEnabled));
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantContextEnabled));
+  EXPECT_EQ(screen_result_.value(), AssistantOptInFlowScreen::Result::NEXT);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenExitReason, 1);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenStepCompletionTime,
+                                     1);
 }
 
 IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, WAADisabledByPolicy) {
+  auto force_lib_assistant_enabled =
+      AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting(true);
   assistant_settings_->set_consent_ui_flags(
-      FakeAssistantSettings::CONSENT_UI_FLAG_WAA_DISABLED_BY_POLICY);
+      ScopedAssistantSettings::CONSENT_UI_FLAG_WAA_DISABLED_BY_POLICY);
 
   ash::AssistantState::Get()->NotifyStatusChanged(
-      ash::mojom::AssistantState::READY);
+      chromeos::assistant::AssistantStatus::READY);
   SetUpAssistantScreensForTest();
   ShowAssistantOptInFlowScreen();
 
@@ -996,14 +1042,20 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, WAADisabledByPolicy) {
   EXPECT_TRUE(prefs->GetBoolean(assistant::prefs::kAssistantEnabled));
   EXPECT_FALSE(prefs->GetBoolean(assistant::prefs::kAssistantHotwordEnabled));
   EXPECT_FALSE(prefs->GetBoolean(assistant::prefs::kAssistantContextEnabled));
+  EXPECT_EQ(screen_result_.value(), AssistantOptInFlowScreen::Result::NEXT);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenExitReason, 1);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenStepCompletionTime,
+                                     1);
 }
 
 IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, AssistantDisabledByPolicy) {
+  auto force_lib_assistant_enabled =
+      AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting(true);
   assistant_settings_->set_consent_ui_flags(
-      FakeAssistantSettings::CONSENT_UI_FLAG_ASSISTANT_DISABLED_BY_POLICY);
+      ScopedAssistantSettings::CONSENT_UI_FLAG_ASSISTANT_DISABLED_BY_POLICY);
 
   ash::AssistantState::Get()->NotifyStatusChanged(
-      ash::mojom::AssistantState::READY);
+      chromeos::assistant::AssistantStatus::READY);
   SetUpAssistantScreensForTest();
   ShowAssistantOptInFlowScreen();
 
@@ -1015,6 +1067,28 @@ IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, AssistantDisabledByPolicy) {
   EXPECT_FALSE(prefs->GetBoolean(assistant::prefs::kAssistantEnabled));
   EXPECT_FALSE(prefs->GetBoolean(assistant::prefs::kAssistantHotwordEnabled));
   EXPECT_FALSE(prefs->GetBoolean(assistant::prefs::kAssistantContextEnabled));
+  EXPECT_EQ(screen_result_.value(), AssistantOptInFlowScreen::Result::NEXT);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenExitReason, 1);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenStepCompletionTime,
+                                     1);
+}
+
+IN_PROC_BROWSER_TEST_F(AssistantOptInFlowTest, AssistantSkippedNoLib) {
+  auto force_lib_assistant_disabled =
+      AssistantOptInFlowScreen::ForceLibAssistantEnabledForTesting(false);
+  ash::AssistantState::Get()->NotifyStatusChanged(
+      chromeos::assistant::AssistantStatus::READY);
+  SetUpAssistantScreensForTest();
+  ShowAssistantOptInFlowScreen();
+
+  WaitForScreenExit();
+
+  ExpectCollectedOptIns({});
+  EXPECT_EQ(screen_result_.value(),
+            AssistantOptInFlowScreen::Result::NOT_APPLICABLE);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenExitReason, 0);
+  histogram_tester_.ExpectTotalCount(kAssistantOptInScreenStepCompletionTime,
+                                     0);
 }
 
 }  // namespace chromeos

@@ -47,6 +47,11 @@ class SubresourceFilterAgent
       std::unique_ptr<AdResourceTracker> ad_resource_tracker);
   ~SubresourceFilterAgent() override;
 
+  // Unit tests don't have a RenderFrame so the construction relies on virtual
+  // methods on this class instead to inject test behaviour. That can't happen
+  // in the constructor, so we need an Initialize() method.
+  void Initialize();
+
  protected:
   // Below methods are protected virtual so they can be mocked out in tests.
 
@@ -54,6 +59,7 @@ class SubresourceFilterAgent
   virtual GURL GetDocumentURL();
 
   virtual bool IsMainFrame();
+  virtual bool IsProvisional();
 
   virtual bool HasDocumentLoader();
 
@@ -78,24 +84,28 @@ class SubresourceFilterAgent
   virtual bool IsAdSubframe();
   virtual void SetIsAdSubframe(blink::mojom::AdFrameType ad_frame_type);
 
-  void SetFirstDocument(bool first_document) {
-    first_document_ = first_document;
-  }
-
   // mojom::SubresourceFilterAgent:
   void ActivateForNextCommittedLoad(
       mojom::ActivationStatePtr activation_state,
       blink::mojom::AdFrameType ad_frame_type) override;
 
  private:
-  // Assumes that the parent will be in a local frame relative to this one, upon
-  // construction.
-  virtual mojom::ActivationState GetParentActivationState(
+  // Returns the activation state for the `render_frame` to inherit. Main frames
+  // inherit from their opener frames, and subframes inherit from their parent
+  // frames. Assumes that the parent/opener is in a local frame relative to this
+  // one, upon construction.
+  static mojom::ActivationState GetInheritedActivationState(
       content::RenderFrame* render_frame);
 
   void RecordHistogramsOnFilterCreation(
       const mojom::ActivationState& activation_state);
   void ResetInfoForNextDocument();
+
+  virtual const mojom::ActivationState
+  GetInheritedActivationStateForNewDocument();
+
+  void ConstructFilter(const mojom::ActivationState activation_state,
+                       const GURL& url);
 
   mojom::SubresourceFilterHost* GetSubresourceFilterHost();
 
@@ -108,6 +118,8 @@ class SubresourceFilterAgent
   void DidFailProvisionalLoad() override;
   void DidFinishLoad() override;
   void WillCreateWorkerFetchContext(blink::WebWorkerFetchContext*) override;
+  void OnOverlayPopupAdDetected() override;
+  void OnLargeStickyAdDetected() override;
 
   // Owned by the ChromeContentRendererClient and outlives us.
   UnverifiedRulesetDealer* ruleset_dealer_;
@@ -122,10 +134,6 @@ class SubresourceFilterAgent
   mojo::AssociatedRemote<mojom::SubresourceFilterHost> subresource_filter_host_;
 
   mojo::AssociatedReceiver<mojom::SubresourceFilterAgent> receiver_{this};
-
-  // If a document hasn't been created for this frame before. The first document
-  // for a new local subframe should be about:blank.
-  bool first_document_ = true;
 
   base::WeakPtr<WebDocumentSubresourceFilterImpl>
       filter_for_last_created_document_;

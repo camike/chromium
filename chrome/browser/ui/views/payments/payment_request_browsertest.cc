@@ -6,6 +6,7 @@
 
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/test/test_browser_dialog.h"
@@ -19,13 +20,14 @@
 #include "components/payments/content/payment_request.h"
 #include "components/payments/content/payment_request_web_contents_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/styled_label.h"
 #include "url/gurl.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/web_applications/system_web_app_manager.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #endif
@@ -165,7 +167,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestNoShippingTest, InvalidSSL) {
   card.set_billing_address_id(billing_address.guid());
   AddCreditCard(card);  // Visa.
 
-  ResetEventWaiter(DialogEvent::NOT_SUPPORTED_ERROR);
+  ResetEventWaiter(DialogEvent::DIALOG_CLOSED);
 
   EXPECT_TRUE(content::ExecuteScript(
       GetActiveWebContents(),
@@ -290,35 +292,6 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentMethodIdentifierTest,
   EXPECT_EQ("visa", supported_card_networks[7]);
 }
 
-// Specifying 'basic-card' with some networks after having explicitely included
-// the same networks does not yield duplicates and has the expected order.
-IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentMethodIdentifierTest,
-                       RepeatedBasicCardWithSameNetworkAreDeduped) {
-  NavigateTo("/payment_request_payment_method_identifier_test.html");
-  InvokePaymentRequestWithJs(
-      "buyHelper([{"
-      "  supportedMethods: 'basic-card',"
-      "  data: {"
-      "    supportedNetworks: ['mastercard'],"
-      "  }"
-      "}, {"
-      "  supportedMethods: 'basic-card',"
-      "  data: {"
-      "    supportedNetworks: ['visa', 'mastercard', 'jcb'],"
-      "  }"
-      "}]);");
-
-  std::vector<PaymentRequest*> requests =
-      GetPaymentRequests(GetActiveWebContents());
-  EXPECT_EQ(1u, requests.size());
-  std::vector<std::string> supported_card_networks =
-      requests[0]->spec()->supported_card_networks();
-  EXPECT_EQ(3u, supported_card_networks.size());
-  EXPECT_EQ("mastercard", supported_card_networks[0]);
-  EXPECT_EQ("visa", supported_card_networks[1]);
-  EXPECT_EQ("jcb", supported_card_networks[2]);
-}
-
 // A url-based payment method identifier is only supported if it has an https
 // scheme.
 IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentMethodIdentifierTest, Url_Valid) {
@@ -337,41 +310,6 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentMethodIdentifierTest, Url_Valid) {
       requests[0]->spec()->url_payment_method_identifiers();
   EXPECT_EQ(1u, url_payment_method_identifiers.size());
   EXPECT_EQ(GURL("https://bobpay.xyz"), url_payment_method_identifiers[0]);
-}
-
-// Specifiying multiple different types of payment method identifiers still
-// yields the correct supported methods in payment request.
-IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentMethodIdentifierTest,
-                       MultiplePaymentMethodIdentifiers) {
-  NavigateTo("/payment_request_payment_method_identifier_test.html");
-  InvokePaymentRequestWithJs(
-      "buyHelper([{"
-      "  supportedMethods: 'https://bobpay.xyz'"
-      "}, {"
-      "  supportedMethods: 'https://bobpay.xyz'"
-      "}, {"
-      "  supportedMethods: 'https://alicepay.com'"
-      "}, {"
-      "  supportedMethods: 'basic-card',"
-      "  data: {"
-      "    supportedNetworks: ['visa', 'mastercard', 'jcb'],"
-      "  }"
-      "}]);");
-
-  std::vector<PaymentRequest*> requests =
-      GetPaymentRequests(GetActiveWebContents());
-  EXPECT_EQ(1u, requests.size());
-
-  std::vector<std::string> supported_card_networks =
-      requests[0]->spec()->supported_card_networks();
-  EXPECT_THAT(supported_card_networks,
-              UnorderedElementsAre("mastercard", "visa", "jcb"));
-
-  std::vector<GURL> url_payment_method_identifiers =
-      requests[0]->spec()->url_payment_method_identifiers();
-  EXPECT_EQ(2u, url_payment_method_identifiers.size());
-  EXPECT_EQ(GURL("https://bobpay.xyz"), url_payment_method_identifiers[0]);
-  EXPECT_EQ(GURL("https://alicepay.com"), url_payment_method_identifiers[1]);
 }
 
 // Test harness integrating with DialogBrowserTest to present the dialog in an
@@ -409,7 +347,7 @@ class PaymentRequestSettingsLinkTest : public PaymentRequestBrowserTestBase {
 
 // Tests that clicking the settings link brings the user to settings.
 IN_PROC_BROWSER_TEST_F(PaymentRequestSettingsLinkTest, ClickSettingsLink) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Install the Settings App.
   web_app::WebAppProvider::Get(browser()->profile())
       ->system_web_app_manager()
@@ -430,9 +368,8 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestSettingsLinkTest, ClickSettingsLink) {
       static_cast<views::StyledLabel*>(dialog_view()->GetViewByID(
           static_cast<int>(DialogViewID::DATA_SOURCE_LABEL)));
   EXPECT_TRUE(styled_label);
-  // The Link is the only child of the StyledLabel.
   content::WebContentsAddedObserver web_contents_added_observer;
-  styled_label->LinkClicked(nullptr, ui::EF_NONE);
+  styled_label->ClickLinkForTesting();
   content::WebContents* new_tab_contents =
       web_contents_added_observer.GetWebContents();
 

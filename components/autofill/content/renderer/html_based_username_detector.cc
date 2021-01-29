@@ -9,6 +9,7 @@
 #include <tuple>
 #include <utility>
 
+#include "base/containers/contains.h"
 #include "base/containers/flat_set.h"
 #include "base/i18n/case_conversion.h"
 #include "base/macros.h"
@@ -103,7 +104,7 @@ void AppendValueAndShortTokens(
   std::vector<base::string16> short_tokens;
   for (const base::StringPiece16& token : tokens) {
     if (token.size() < kMinimumWordLength)
-      short_tokens.push_back(token.as_string());
+      short_tokens.emplace_back(token);
     field_data_value->append(token.data(), token.size());
   }
   // It is better to insert elements to a |base::flat_set| in one operation.
@@ -284,13 +285,6 @@ void FindUsernameFieldInternal(
   }
 }
 
-// Returns the |unique_renderer_id| of a given |WebFormElement|. If
-// |WebFormElement::IsNull()| return a null renderer ID.
-FormRendererId GetFormRendererId(WebFormElement form) {
-  return form.IsNull() ? FormRendererId()
-                       : FormRendererId(form.UniqueRendererFormId());
-}
-
 }  // namespace
 
 const std::vector<FieldRendererId>& GetPredictionsFieldBasedOnHtmlAttributes(
@@ -311,8 +305,8 @@ const std::vector<FieldRendererId>& GetPredictionsFieldBasedOnHtmlAttributes(
   bool cache_miss = true;
   // Iterator pointing to the entry for |form| if the entry for |form| is found.
   UsernameDetectorCache::iterator form_position;
-  std::tie(form_position, cache_miss) = username_detector_cache->insert(
-      std::make_pair(GetFormRendererId(form), std::vector<FieldRendererId>()));
+  std::tie(form_position, cache_miss) = username_detector_cache->emplace(
+      form_util::GetFormRendererId(form), std::vector<FieldRendererId>());
 
   if (cache_miss) {
     std::vector<FieldRendererId> username_predictions;

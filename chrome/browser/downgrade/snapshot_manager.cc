@@ -14,7 +14,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
-#include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
+#include "chrome/browser/browsing_data/chrome_browsing_data_remover_constants.h"
 #include "chrome/browser/downgrade/downgrade_utils.h"
 #include "chrome/browser/downgrade/snapshot_file_collector.h"
 #include "chrome/browser/downgrade/user_data_downgrade.h"
@@ -119,25 +119,14 @@ std::vector<base::FilePath> GetUserProfileDirectories(
 // Moves the |source| directory to |target| to be deleted later. If the move
 // initially fails, move the contents of the directory.
 void MoveFolderForLaterDeletion(const base::FilePath& source,
-                                const base::FilePath& target,
-                                const char* move_result_histogram,
-                                const char* failure_count_histogram) {
-  const bool move_result = MoveWithoutFallback(source, target);
-  base::UmaHistogramBoolean(move_result_histogram, move_result);
-  if (move_result)
+                                const base::FilePath& target) {
+  if (MoveWithoutFallback(source, target))
     return;
   auto failure_count =
       MoveContents(source, base::GetUniquePath(target), ExclusionPredicate());
-  if (failure_count.has_value() &&
-      !base::DeleteFile(source, /*recursive=*/false)) {
-    failure_count = failure_count.value() + 1;
-    // Report precise values rather than an exponentially bucketed
-    // histogram. Bucket 0 means that the target directory could not be
-    // created. All other buckets are a count of files/directories left
-    // behind.
-    base::UmaHistogramExactLinear(failure_count_histogram,
-                                  failure_count.value_or(0), 50);
-  }
+  // If some files failed to be moved, try and delete them immediately.
+  if (failure_count.has_value())
+    base::DeletePathRecursively(source);
 }
 
 }  // namespace
@@ -159,22 +148,24 @@ void SnapshotManager::TakeSnapshot(const base::Version& version) {
     auto move_target_dir = user_data_dir_.Append(kSnapshotsDir)
                                .AddExtension(kDowngradeDeleteSuffix);
     base::CreateDirectory(move_target_dir);
+    // This succeeds more than 80% of the time.
     MoveFolderForLaterDeletion(
-        snapshot_dir, move_target_dir.AppendASCII(version.GetString()),
-        "Downgrade.TakeSnapshot.MoveExistingSnapshot.Result",
-        "Downgrade.TakeSnapshot.MoveExistingSnapshot.FailureCount");
+        snapshot_dir, move_target_dir.AppendASCII(version.GetString()));
   }
 
   size_t success_count = 0;
   size_t error_count = 0;
-  auto record_success_error = [&success_count,
-                               &error_count](base::Optional<bool> success) {
+  auto record_success_error = [&success_count, &error_count](
+                                  base::Optional<bool> success,
+                                  SnapshotItemId id) {
     if (!success.has_value())
       return;
-    if (success.value())
+    if (success.value()) {
       ++success_count;
-    else
+    } else {
       ++error_count;
+      base::UmaHistogramEnumeration("Downgrade.TakeSnapshot.ItemFailure", id);
+    }
   };
 
   // Abort the snapshot if the snapshot directory could not be created.
@@ -189,37 +180,36 @@ void SnapshotManager::TakeSnapshot(const base::Version& version) {
   for (const auto& file : GetUserSnapshotItemDetails()) {
     record_success_error(
         CopyItemToSnapshotDirectory(base::FilePath(file.path), user_data_dir_,
-                                    snapshot_dir, file.is_directory));
+                                    snapshot_dir, file.is_directory),
+        file.id);
   }
 
   const auto profile_snapshot_item_details = GetProfileSnapshotItemDetails();
 
   // Copy items to be preserved in each Profile directory.
   for (const auto& profile_dir : GetUserProfileDirectories(user_data_dir_)) {
-    bool profile_dir_created =
-        base::CreateDirectory(snapshot_dir.Append(profile_dir));
-    base::UmaHistogramBoolean(
-        "Downgrade.TakeSnapshot.ProfileDirectoryCreation.Result",
-        profile_dir_created);
     // Abort the current profile snapshot if the profile directory could not be
-    // created.
-    if (!profile_dir_created) {
+    // created. This succeeds almost all the time.
+    if (!base::CreateDirectory(snapshot_dir.Append(profile_dir))) {
       ++error_count;
       continue;
     }
     for (const auto& file : profile_snapshot_item_details) {
       record_success_error(CopyItemToSnapshotDirectory(
-          profile_dir.Append(file.path), user_data_dir_, snapshot_dir,
-          file.is_directory));
+                               profile_dir.Append(file.path), user_data_dir_,
+                               snapshot_dir, file.is_directory),
+                           file.id);
     }
   }
 
   // Copy the "Last Version" file to the snapshot directory last since it is the
   // file that determines, by its presence in the snapshot directory, if the
   // snapshot is complete.
-  record_success_error(CopyItemToSnapshotDirectory(
-      base::FilePath(kDowngradeLastVersionFile), user_data_dir_, snapshot_dir,
-      /*is_directory=*/false));
+  record_success_error(
+      CopyItemToSnapshotDirectory(base::FilePath(kDowngradeLastVersionFile),
+                                  user_data_dir_, snapshot_dir,
+                                  /*is_directory=*/false),
+      SnapshotItemId::kLastVersion);
 
   auto snapshot_result = SnapshotOperationResult::kFailure;
   if (error_count == 0)
@@ -251,13 +241,11 @@ void SnapshotManager::RestoreSnapshot(const base::Version& version) {
   auto snapshot_dir = user_data_dir_.Append(kSnapshotsDir)
                           .AppendASCII(snapshot_version->GetString());
 
-  size_t success_count = 0;
-  size_t error_count = 0;
-  auto record_success_error = [&success_count, &error_count](bool success) {
-    if (success)
-      ++success_count;
-    else
-      ++error_count;
+  bool has_success = false;
+  bool has_error = false;
+  auto record_success_error = [&has_success, &has_error](bool success) {
+    has_success |= success;
+    has_error |= !success;
   };
   base::FileEnumerator enumerator(
       snapshot_dir, /*recursive=*/false,
@@ -277,18 +265,15 @@ void SnapshotManager::RestoreSnapshot(const base::Version& version) {
     else
       record_success_error(base::CopyFile(path, target_path));
   }
-  auto snapshot_result = SnapshotOperationResult::kFailure;
-  if (error_count == 0)
-    snapshot_result = SnapshotOperationResult::kSuccess;
-  else if (success_count > 0)
-    snapshot_result = SnapshotOperationResult::kPartialSuccess;
 
-  if (error_count > 0) {
-    base::UmaHistogramExactLinear("Downgrade.RestoreSnapshot.FailureCount",
-                                  error_count, 100);
-  }
-  base::UmaHistogramEnumeration("Downgrade.RestoreSnapshot.Result",
-                                snapshot_result);
+  // When there is a partial success, according to
+  // "Downgrade.RestoreSnapshot.FailureCount", the average number of items that
+  // fail to be recovered is between 2 and 3.
+  base::UmaHistogramEnumeration(
+      "Downgrade.RestoreSnapshot.Result",
+      !has_error ? SnapshotOperationResult::kSuccess
+                 : has_success ? SnapshotOperationResult::kPartialSuccess
+                               : SnapshotOperationResult::kFailure);
 
   // Mark the snapshot directory for later deletion if its contents were moved
   // into User Data. If the snapshot directory cannot be renamed, fallback to
@@ -298,20 +283,18 @@ void SnapshotManager::RestoreSnapshot(const base::Version& version) {
         GetTempDirNameForDelete(user_data_dir_, base::FilePath(kSnapshotsDir))
             .Append(snapshot_dir.BaseName());
 
-    // Cleans up the remnants of the moved snapshot directory. If moving the
-    // folder fails, delete the "Last Version File" so that this snapshot is
-    // considered incomplete and deleted later.
-    MoveFolderForLaterDeletion(snapshot_dir, move_target,
-                               "Downgrade.InvalidSnapshotMove.Result",
-                               "Downgrade.InvalidSnapshotMove.FailureCount");
+    // Cleans up the remnants of the moved snapshot directory, this is
+    // successful 99% of the time. If moving the directory fails, delete the
+    // "Last Version" file so that this snapshot is considered incomplete and
+    // deleted later. In case of failure to move the directory, if the Last
+    // Version file is deleted, this snapshot will now be considered invalid,
+    // and will be deleted, otherwise it will be overwritten at the next
+    // upgrade.
+    MoveFolderForLaterDeletion(snapshot_dir, move_target);
 
     auto last_version_file_path =
         snapshot_dir.Append(kDowngradeLastVersionFile);
-    base::DeleteFile(last_version_file_path, /*recursive=*/false);
-
-    base::UmaHistogramBoolean(
-        "Downgrade.RestoreSnapshot.CleanupAfterFailure.Result",
-        !base::PathExists(snapshot_dir));
+    base::DeleteFile(last_version_file_path);
   }
 }
 
@@ -328,9 +311,10 @@ void SnapshotManager::PurgeInvalidAndOldSnapshots(
   // Moves all the invalid snapshots for later deletion.
   auto invalid_snapshots = GetInvalidSnapshots(snapshot_dir);
   for (const auto& path : invalid_snapshots) {
-    MoveFolderForLaterDeletion(path, target.Append(path.BaseName()),
-                               "Downgrade.InvalidSnapshotMove.Result",
-                               "Downgrade.InvalidSnapshotMove.FailureCount");
+    // This succeeds 97% of the time according to
+    // Downgrade.InvalidSnapshotMove.Result, with most of the failures having
+    // under 4 files failing to be copied.
+    MoveFolderForLaterDeletion(path, target.Append(path.BaseName()));
   }
 
   base::flat_set<base::Version> available_snapshots =
@@ -356,10 +340,11 @@ void SnapshotManager::PurgeInvalidAndOldSnapshots(
   // Moves all the older snapshots for later deletion.
   for (const auto& snapshot : available_snapshots) {
     auto snapshot_path = snapshot_dir.AppendASCII(snapshot.GetString());
+    // This succeeds 97% of the time according to
+    // Downgrade.InvalidSnapshotMove.Result, with most of the failures having
+    // under 4 files failing to be copied.
     MoveFolderForLaterDeletion(snapshot_path,
-                               target.Append(snapshot_path.BaseName()),
-                               "Downgrade.InvalidSnapshotMove.Result",
-                               "Downgrade.InvalidSnapshotMove.FailureCount");
+                               target.Append(snapshot_path.BaseName()));
     if (--number_of_snapshots_to_delete == 0)
       break;
   }
@@ -368,14 +353,13 @@ void SnapshotManager::PurgeInvalidAndOldSnapshots(
 void SnapshotManager::DeleteSnapshotDataForProfile(
     base::Time delete_begin,
     const base::FilePath& profile_base_name,
-    int remove_mask) {
-  using DataType = ChromeBrowsingDataRemoverDelegate;
+    uint64_t remove_mask) {
+  using chrome_browsing_data_remover::ALL_DATA_TYPES;
+  using chrome_browsing_data_remover::WIPE_PROFILE;
 
-  bool delete_all =
-      (((remove_mask & DataType::WIPE_PROFILE) == DataType::WIPE_PROFILE) ||
-       ((remove_mask & DataType::ALL_DATA_TYPES) ==
-        DataType::ALL_DATA_TYPES)) &&
-      delete_begin.is_null();
+  bool delete_all = (((remove_mask & WIPE_PROFILE) == WIPE_PROFILE) ||
+                     ((remove_mask & ALL_DATA_TYPES) == ALL_DATA_TYPES)) &&
+                    delete_begin.is_null();
   std::vector<base::FilePath> files_to_delete;
   if (!delete_all) {
     for (const auto& item : CollectProfileItems()) {
@@ -401,16 +385,15 @@ void SnapshotManager::DeleteSnapshotDataForProfile(
     // regardless of |delete_begin|, otherwise deletes the required files from
     // the snapshot if it was created after |delete_begin|.
     if (delete_all) {
-      base::DeleteFile(profile_absolute_path, /*recursive=*/true);
+      base::DeletePathRecursively(profile_absolute_path);
     } else if (delete_begin <= file_info.creation_time &&
                base::PathExists(profile_absolute_path)) {
       for (const auto& filename : files_to_delete) {
-        base::DeleteFile(profile_absolute_path.Append(filename),
-                         /*recursive=*/true);
+        base::DeletePathRecursively(profile_absolute_path.Append(filename));
       }
       // Non recursive deletion will fail if the directory is not empty. In this
       // case we only want to delete the directory if it is empty.
-      base::DeleteFile(profile_absolute_path, /*recursive=*/false);
+      base::DeleteFile(profile_absolute_path);
     }
   }
 }

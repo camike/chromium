@@ -105,15 +105,15 @@ void TranslateBubbleModelImpl::SetNeverTranslateLanguage(bool value) {
 }
 
 bool TranslateBubbleModelImpl::ShouldNeverTranslateSite() {
-  return ui_delegate_->IsSiteBlacklisted();
+  return ui_delegate_->IsSiteOnNeverPromptList();
 }
 
 void TranslateBubbleModelImpl::SetNeverTranslateSite(bool value) {
-  ui_delegate_->SetSiteBlacklist(value);
+  ui_delegate_->SetNeverPrompt(value);
 }
 
-bool TranslateBubbleModelImpl::CanBlacklistSite() {
-  return ui_delegate_->CanBlacklistSite();
+bool TranslateBubbleModelImpl::CanBlocklistSite() {
+  return ui_delegate_->CanAddToNeverPromptList();
 }
 
 bool TranslateBubbleModelImpl::ShouldAlwaysTranslate() const {
@@ -134,6 +134,11 @@ void TranslateBubbleModelImpl::RevertTranslation() {
 }
 
 void TranslateBubbleModelImpl::OnBubbleClosing() {
+  // TODO(curranmax): This will mark the UI as closed when the widget has lost
+  // focus. This means it is basically impossible for the final state to have
+  // the UI shown. https://crbug.com/1114868.
+  ui_delegate_->OnUIClosedByUser();
+
   if (!translate_executed_)
     ui_delegate_->TranslationDeclined(translation_declined_);
 }
@@ -145,4 +150,9 @@ bool TranslateBubbleModelImpl::IsPageTranslatedInCurrentLanguages() const {
              language_state.original_language() &&
          ui_delegate_->GetTargetLanguageCode() ==
              language_state.current_language();
+}
+
+void TranslateBubbleModelImpl::ReportUIInteraction(
+    translate::UIInteraction ui_interaction) {
+  ui_delegate_->ReportUIInteraction(ui_interaction);
 }

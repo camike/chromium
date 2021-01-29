@@ -9,11 +9,18 @@
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "base/callback_list.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
+#include "base/observer_list_types.h"
 #include "base/optional.h"
 #include "base/sequence_checker.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "chromeos/dbus/cryptohome/cryptohome_client.h"
+#include "chromeos/dbus/tpm_manager/tpm_manager.pb.h"
+#include "chromeos/dbus/tpm_manager/tpm_manager_client.h"
 #include "crypto/scoped_nss_types.h"
 
 namespace net {
@@ -21,6 +28,16 @@ class NSSCertDatabase;
 }
 
 namespace chromeos {
+
+// An observer that gets notified when the global NSSCertDatabase is about to be
+// destroyed.
+class SystemTokenCertDBObserver : public base::CheckedObserver {
+ public:
+  // Called when the global NSSCertDatabase is about to be destroyed.
+  // Consumers of that database should drop any reference to it and stop using
+  // it.
+  virtual void OnSystemTokenCertDBDestroyed() = 0;
+};
 
 // Initializes a global NSSCertDatabase for the system token and starts
 // NetworkCertLoader with that database.
@@ -30,8 +47,14 @@ namespace chromeos {
 // ShutDown() has been called, but must be outlived by this object.
 //
 // All of the methods must be called on the UI thread.
-class SystemTokenCertDBInitializer final : public CryptohomeClient::Observer {
+class SystemTokenCertDBInitializer : public TpmManagerClient::Observer {
  public:
+  // It is stated in cryptohome implementation that 5 minutes is enough time to
+  // wait for any TPM operations. For more information, please refer to:
+  // https://chromium.googlesource.com/chromiumos/platform2/+/master/cryptohome/cryptohome.cc
+  static constexpr base::TimeDelta kMaxCertDbRetrievalDelay =
+      base::TimeDelta::FromMinutes(5);
+
   SystemTokenCertDBInitializer();
   ~SystemTokenCertDBInitializer() override;
 
@@ -41,39 +64,64 @@ class SystemTokenCertDBInitializer final : public CryptohomeClient::Observer {
   // Stops making new requests to D-Bus services.
   void ShutDown();
 
-  // CryptohomeClient::Observer:
-  void TpmInitStatusUpdated(bool ready,
-                            bool owned,
-                            bool was_owned_this_boot) override;
+  // TpmManagerClient::Observer overrides.
+  void OnOwnershipTaken() override;
 
   // Retrieves the global NSSCertDatabase for the system token and passes it to
   // |callback|. If the database is already initialized, calls |callback|
   // immediately. Otherwise, |callback| will be called when the database is
   // initialized.
+  // To be notified when the returned NSSCertDatabase becomes invalid, callers
+  // should register as SystemTokenCertDBObserver.
+
   using GetSystemTokenCertDbCallback =
-      base::OnceCallback<void(net::NSSCertDatabase*)>;
+      base::OnceCallback<void(net::NSSCertDatabase* nss_cert_database)>;
   void GetSystemTokenCertDb(GetSystemTokenCertDbCallback callback);
+
+  // Adds |observer| as SystemTokenCertDBObserver.
+  void AddObserver(SystemTokenCertDBObserver* observer);
+  // Removes |observer| as SystemTokenCertDBObserver.
+  void RemoveObserver(SystemTokenCertDBObserver* observer);
+
+  // Sets if the software fallback for system slot is allowed; useful for
+  // testing.
+  void set_is_system_slot_software_fallback_allowed(bool is_allowed) {
+    is_system_slot_software_fallback_allowed_ = is_allowed;
+  }
 
  private:
   // Called once the cryptohome service is available.
   void OnCryptohomeAvailable(bool available);
 
-  // This is a callback for the cryptohome TpmIsReady query. Note that this is
-  // not a listener which would be called once TPM becomes ready if it was not
-  // ready on startup - that event is observed by TpmInitStatusUpdated().
-  void OnGotTpmIsReady(base::Optional<bool> tpm_is_ready);
+  // Verifies the value of the build flag system_slot_software_fallback and
+  // decides the initialization flow based on that.
+  void CheckTpm();
+
+  // If GetTpmNonsensitiveStatus() fails (e.g. if TPM token is not yet ready)
+  // schedules the initialization step retry attempt after a timeout.
+  void RetryCheckTpmLater();
+
+  // This is a callback for the GetTpmNonsensitiveStatus() query. 2 main
+  // operations are performed:
+  // 1. Initializes the database if TPM is owned or software fallback is
+  // enabled.
+  // 2. Triggers TPM ownership process if necessary.
+  void OnGetTpmNonsensitiveStatus(
+      const ::tpm_manager::GetTpmNonsensitiveStatusReply& reply);
 
   // Starts loading the system slot and initializing the corresponding NSS cert
   // database, unless it was already started before.
   void MaybeStartInitializingDatabase();
 
-  // This is called when the system token certificate database is created to run
-  // all entries in |get_system_token_cert_db_callback_list_| and clear it.
-  void RunAndClearGetSystemTokenCertDbCallbackList();
-
   // Initializes the global system token NSSCertDatabase with |system_slot|.
   // Also starts NetworkCertLoader with the system token database.
   void InitializeDatabase(crypto::ScopedPK11Slot system_slot);
+
+  // Called after a delay if the system token certificate database was still not
+  // initialized when |GetSystemTokenCertDb| was called. This function notifies
+  // |get_system_token_cert_db_callback_list_| with nullptrs as a way of
+  // informing callers that the database initialization failed.
+  void OnSystemTokenDbRetrievalTimeout();
 
   // Whether the database initialization was started.
   bool started_initializing_ = false;
@@ -83,8 +131,23 @@ class SystemTokenCertDBInitializer final : public CryptohomeClient::Observer {
 
   // List of callbacks that should be executed when the system token certificate
   // database is created.
-  std::vector<GetSystemTokenCertDbCallback>
+  base::OnceCallbackList<GetSystemTokenCertDbCallback::RunType>
       get_system_token_cert_db_callback_list_;
+
+  // List of observers that will be notified when the global system token
+  // NSSCertDatabase is destroyed.
+  base::ObserverList<SystemTokenCertDBObserver> observers_;
+
+  bool system_token_cert_db_retrieval_failed_ = false;
+
+  base::OneShotTimer system_token_cert_db_retrieval_timer_;
+
+  // The current request delay before the next attempt to retrieve the TPM
+  // state. Will be adapted after each attempt.
+  base::TimeDelta tpm_request_delay_;
+
+  // The flag that determines if the system slot can use software fallback.
+  bool is_system_slot_software_fallback_allowed_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

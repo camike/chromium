@@ -63,9 +63,7 @@ cr.define('cr.login', function() {
    * The script to inject into webview and its sub frames.
    * @type {string}
    */
-  const injectedJs = String.raw`
-      // <include src="webview_saml_injected.js">
-  `;
+  const injectedJs = 'webview_saml_injected.js';
 
   /**
    * @typedef {{
@@ -115,17 +113,6 @@ cr.define('cr.login', function() {
    */
   function stripParams(url) {
     return url.substring(0, url.indexOf('?')) || url;
-  }
-
-  /**
-   * Extract domain name from an URL.
-   * @param {string} url An URL string.
-   * @return {string} The host name of the URL.
-   */
-  function extractDomain(url) {
-    const a = document.createElement('a');
-    a.href = url;
-    return a.hostname;
   }
 
   /**
@@ -193,12 +180,6 @@ cr.define('cr.login', function() {
        * @private {?string}
        */
       this.abortedTopLevelUrl_ = null;
-
-      /**
-       * The domain of the Saml IdP.
-       * @type {string}
-       */
-      this.authDomain = '';
 
       /**
        * Scraped password stored in an id to password field value map.
@@ -330,7 +311,7 @@ cr.define('cr.login', function() {
       this.webview_.addContentScripts([{
         name: injectedScriptName,
         matches: ['http://*/*', 'https://*/*'],
-        js: {code: injectedJs},
+        js: {files: [injectedJs]},
         all_frames: true,
         run_at: 'document_start'
       }]);
@@ -550,6 +531,11 @@ cr.define('cr.login', function() {
       const parser = new DOMParser();
       const xmlDoc = parser.parseFromString(samlResponse, 'text/xml');
       let certificate = xmlDoc.getElementsByTagName('ds:X509Certificate');
+      if (!certificate || certificate.length == 0) {
+        // tag 'ds:X509Certificate' doesn't exist
+        certificate = xmlDoc.getElementsByTagName('X509Certificate');
+      }
+
       if (certificate && certificate.length > 0 && certificate[0].childNodes &&
           certificate[0].childNodes[0] &&
           certificate[0].childNodes[0].nodeValue) {
@@ -843,14 +829,8 @@ cr.define('cr.login', function() {
     }
 
     onPageLoaded_(channel, msg) {
-      this.authDomain = extractDomain(msg.url);
-      this.dispatchEvent(new CustomEvent('authPageLoaded', {
-        detail: {
-          url: msg.url,
-          isSAMLPage: this.isSamlPage_,
-          domain: this.authDomain
-        }
-      }));
+      this.dispatchEvent(new CustomEvent(
+          'authPageLoaded', {detail: {isSAMLPage: this.isSamlPage_}}));
     }
 
     onScrollInfo_(channel, msg) {

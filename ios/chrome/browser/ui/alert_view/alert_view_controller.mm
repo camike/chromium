@@ -4,7 +4,9 @@
 
 #import "ios/chrome/browser/ui/alert_view/alert_view_controller.h"
 
-#include "base/logging.h"
+#include <ostream>
+
+#include "base/notreached.h"
 #import "ios/chrome/browser/ui/alert_view/alert_action.h"
 #import "ios/chrome/browser/ui/elements/gray_highlight_button.h"
 #import "ios/chrome/browser/ui/elements/text_field_configuration.h"
@@ -142,7 +144,8 @@ constexpr NSUInteger kUIViewAnimationCurveToOptionsShift = 16;
   self.contentView = [[UIView alloc] init];
   self.contentView.accessibilityIdentifier = self.alertAccessibilityIdentifier;
   self.contentView.clipsToBounds = YES;
-  self.contentView.backgroundColor = UIColor.cr_systemBackgroundColor;
+  self.contentView.backgroundColor =
+      [UIColor colorNamed:kPrimaryBackgroundColor];
   self.contentView.layer.cornerRadius = kCornerRadius;
   self.contentView.layer.shadowOffset =
       CGSizeMake(kShadowOffsetX, kShadowOffsetY);
@@ -292,7 +295,8 @@ constexpr NSUInteger kUIViewAnimationCurveToOptionsShift = 16;
     }
     stackHolder.layer.borderWidth = 1.0 / [UIScreen mainScreen].scale;
     stackHolder.clipsToBounds = YES;
-    stackHolder.backgroundColor = UIColor.cr_secondarySystemBackgroundColor;
+    stackHolder.backgroundColor =
+        [UIColor colorNamed:kSecondaryBackgroundColor];
     stackHolder.translatesAutoresizingMaskIntoConstraints = NO;
     self.textFieldStackHolder = stackHolder;
 

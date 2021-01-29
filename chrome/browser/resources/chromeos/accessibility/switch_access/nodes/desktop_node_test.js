@@ -4,20 +4,27 @@
 
 GEN_INCLUDE(['../switch_access_e2e_test_base.js']);
 
-/**
- * @constructor
- * @extends {SwitchAccessE2ETest}
- */
-function SwitchAccessDesktopNodeTest() {
-  SwitchAccessE2ETest.call(this);
-}
+/** Test fixture for the desktop node. */
+SwitchAccessDesktopNodeTest = class extends SwitchAccessE2ETest {
+  setUp() {
+    var runTest = this.deferRunTest(WhenTestDone.EXPECT);
+    (async function() {
+      let module = await import('/switch_access/nodes/desktop_node.js');
+      window.DesktopNode = module.DesktopNode;
 
-SwitchAccessDesktopNodeTest.prototype = {
-  __proto__: SwitchAccessE2ETest.prototype,
+      module = await import('/switch_access/nodes/back_button_node.js');
+      window.BackButtonNode = module.BackButtonNode;
+
+      module = await import('/switch_access/switch_access_constants.js');
+      window.SwitchAccessMenuAction = module.SwitchAccessMenuAction;
+
+      runTest();
+    })();
+  }
 };
 
 TEST_F('SwitchAccessDesktopNodeTest', 'Build', function() {
-  this.runWithLoadedTree('', (desktop) => {
+  this.runWithLoadedDesktop((desktop) => {
     const desktopNode = DesktopNode.build(desktop);
 
     const children = desktopNode.children;

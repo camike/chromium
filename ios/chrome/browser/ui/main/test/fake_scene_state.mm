@@ -10,7 +10,7 @@
 #import "ios/chrome/browser/ui/main/test/stub_browser_interface_provider.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_opener.h"
-#import "ios/web/public/test/fakes/test_web_state.h"
+#import "ios/web/public/test/fakes/fake_web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -25,12 +25,13 @@
 @implementation FakeSceneState {
   // Owning pointer for the browser that backs the interface provider.
   std::unique_ptr<TestBrowser> _browser;
+  UIWindow* _window;
 }
 
 @synthesize interfaceProvider = _interfaceProvider;
 
-- (instancetype)init {
-  if (self = [super init]) {
+- (instancetype)initWithAppState:(AppState*)appState {
+  if (self = [super initWithAppState:appState]) {
     self.activationLevel = SceneActivationLevelForegroundInactive;
     self.interfaceProvider = [[StubBrowserInterfaceProvider alloc] init];
     StubBrowserInterface* mainInterface = static_cast<StubBrowserInterface*>(
@@ -44,13 +45,13 @@
 + (NSArray<FakeSceneState*>*)sceneArrayWithCount:(int)count {
   NSMutableArray<SceneState*>* scenes = [NSMutableArray array];
   for (int i = 0; i < count; i++) {
-    [scenes addObject:[[self alloc] init]];
+    [scenes addObject:[[self alloc] initWithAppState:nil]];
   }
   return [scenes copy];
 }
 
 - (void)appendWebStateWithURL:(const GURL)URL {
-  auto test_web_state = std::make_unique<web::TestWebState>();
+  auto test_web_state = std::make_unique<web::FakeWebState>();
   test_web_state->SetCurrentURL(URL);
   WebStateList* web_state_list =
       self.interfaceProvider.mainInterface.browser->GetWebStateList();
@@ -63,6 +64,14 @@
   for (int i = 0; i < count; i++) {
     [self appendWebStateWithURL:URL];
   }
+}
+
+- (UIWindow*)window {
+  return _window;
+}
+
+- (void)setWindow:(UIWindow*)window {
+  _window = window;
 }
 
 @end

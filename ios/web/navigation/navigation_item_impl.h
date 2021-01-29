@@ -57,9 +57,7 @@ class NavigationItemImpl : public web::NavigationItem {
   void SetTimestamp(base::Time timestamp) override;
   base::Time GetTimestamp() const override;
   void SetUserAgentType(UserAgentType type) override;
-  UserAgentType GetUserAgentType(
-      id<UITraitEnvironment> web_view) const override;
-  UserAgentType GetUserAgentForInheritance() const override;
+  UserAgentType GetUserAgentType() const override;
   bool HasPostData() const override;
   NSDictionary* GetHttpRequestHeaders() const override;
   void AddHttpRequestHeaders(NSDictionary* additional_headers) override;
@@ -125,7 +123,7 @@ class NavigationItemImpl : public web::NavigationItem {
   // doesn't specify a title.
   static base::string16 GetDisplayTitleForURL(const GURL& url);
 
-  // Used only by WKBasedNavigationManager.  SetUntrusted() is only used for
+  // Used only by NavigationManagerImpl.  SetUntrusted() is only used for
   // Visible or LastCommitted NavigationItems where the |url_| may be incorrect
   // due to timining problems or bugs in WKWebView.
   void SetUntrusted();
@@ -156,7 +154,6 @@ class NavigationItemImpl : public web::NavigationItem {
   SSLStatus ssl_;
   base::Time timestamp_;
   UserAgentType user_agent_type_;
-  UserAgentType user_agent_type_inheritance_;
   NSMutableDictionary* http_request_headers_;
 
   NSString* serialized_state_object_;
@@ -173,7 +170,7 @@ class NavigationItemImpl : public web::NavigationItem {
   // |ResetForCommit| and not persisted.
   web::NavigationInitiationType navigation_initiation_type_;
 
-  // Used only by WKBasedNavigationManager.  |is_untrusted_| is only |true| for
+  // Used only by NavigationManagerImpl.  |is_untrusted_| is only |true| for
   // Visible or LastCommitted NavigationItems where the |url_| may be incorrect
   // due to timining problems or bugs in WKWebView.
   bool is_untrusted_;

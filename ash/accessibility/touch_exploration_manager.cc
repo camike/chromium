@@ -17,10 +17,12 @@
 #include "ash/shell.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
+#include "base/metrics/histogram_functions.h"
 #include "chromeos/audio/chromeos_sounds.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "extensions/common/constants.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/wm/public/activation_client.h"
@@ -99,7 +101,7 @@ void TouchExplorationManager::SetOutputLevel(int volume) {
 }
 
 void TouchExplorationManager::SilenceSpokenFeedback() {
-  if (GetA11yController()->spoken_feedback_enabled())
+  if (GetA11yController()->spoken_feedback().enabled())
     GetA11yController()->SilenceSpokenFeedback();
 }
 
@@ -108,25 +110,29 @@ void TouchExplorationManager::PlayVolumeAdjustEarcon() {
     return;
   if (!audio_handler_->IsOutputMuted() &&
       audio_handler_->GetOutputVolumePercent() != 100) {
-    GetA11yController()->PlayEarcon(chromeos::SOUND_VOLUME_ADJUST);
+    GetA11yController()->PlayEarcon(chromeos::Sound::kVolumeAdjust);
   }
 }
 
 void TouchExplorationManager::PlayPassthroughEarcon() {
-  GetA11yController()->PlayEarcon(chromeos::SOUND_PASSTHROUGH);
+  GetA11yController()->PlayEarcon(chromeos::Sound::kPassthrough);
 }
 
-void TouchExplorationManager::PlayExitScreenEarcon() {
-  GetA11yController()->PlayEarcon(chromeos::SOUND_EXIT_SCREEN);
+void TouchExplorationManager::PlayLongPressRightClickEarcon() {
+  // TODO: Rename this sound to SOUND_LONG_PRESS_RIGHT_CLICK.
+  GetA11yController()->PlayEarcon(chromeos::Sound::kExitScreen);
 }
 
 void TouchExplorationManager::PlayEnterScreenEarcon() {
-  GetA11yController()->PlayEarcon(chromeos::SOUND_ENTER_SCREEN);
+  GetA11yController()->PlayEarcon(chromeos::Sound::kEnterScreen);
 }
 
 void TouchExplorationManager::HandleAccessibilityGesture(
-    ax::mojom::Gesture gesture) {
-  GetA11yController()->HandleAccessibilityGesture(gesture);
+    ax::mojom::Gesture gesture,
+    gfx::PointF location) {
+  base::UmaHistogramEnumeration("Accessibility.ChromeVox.PerformGestureType",
+                                gesture);
+  GetA11yController()->HandleAccessibilityGesture(gesture, location);
 }
 
 void TouchExplorationManager::OnDisplayMetricsChanged(
@@ -156,13 +162,13 @@ void TouchExplorationManager::PlaySpokenFeedbackToggleCountdown(
 }
 
 void TouchExplorationManager::PlayTouchTypeEarcon() {
-  GetA11yController()->PlayEarcon(chromeos::SOUND_TOUCH_TYPE);
+  GetA11yController()->PlayEarcon(chromeos::Sound::kTouchType);
 }
 
 void TouchExplorationManager::ToggleSpokenFeedback() {
   if (GetA11yController()->ShouldToggleSpokenFeedbackViaTouch()) {
     GetA11yController()->SetSpokenFeedbackEnabled(
-        !GetA11yController()->spoken_feedback_enabled(),
+        !GetA11yController()->spoken_feedback().enabled(),
         A11Y_NOTIFICATION_SHOW);
   }
 }
@@ -209,7 +215,7 @@ void TouchExplorationManager::UpdateTouchExplorationState() {
           aura::client::kAccessibilityTouchExplorationPassThrough);
 
   const bool spoken_feedback_enabled =
-      GetA11yController()->spoken_feedback_enabled();
+      GetA11yController()->spoken_feedback().enabled();
 
   if (!touch_accessibility_enabler_) {
     // Always enable gesture to toggle spoken feedback.

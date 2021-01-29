@@ -6,8 +6,7 @@
 
 #include "base/no_destructor.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_process_platform_part.h"
-#include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
+#include "chrome/browser/ui/webui/settings/chromeos/search/search_tag_registry.h"
 #include "chrome/browser/ui/webui/settings/reset_settings_handler.h"
 #include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/grit/chromium_strings.h"
@@ -24,33 +23,44 @@ namespace {
 
 const std::vector<SearchConcept>& GetResetSearchConcepts() {
   static const base::NoDestructor<std::vector<SearchConcept>> tags({
-      // TODO(khorimoto): Add "Reset" search concepts.
+      {IDS_OS_SETTINGS_TAG_RESET,
+       mojom::kResetSectionPath,
+       mojom::SearchResultIcon::kReset,
+       mojom::SearchResultDefaultRank::kMedium,
+       mojom::SearchResultType::kSection,
+       {.section = mojom::Section::kReset}},
+      {IDS_OS_SETTINGS_TAG_RESET_POWERWASH,
+       mojom::kResetSectionPath,
+       mojom::SearchResultIcon::kReset,
+       mojom::SearchResultDefaultRank::kMedium,
+       mojom::SearchResultType::kSetting,
+       {.setting = mojom::Setting::kPowerwash},
+       {IDS_OS_SETTINGS_TAG_RESET_POWERWASH_ALT1, SearchConcept::kAltTagEnd}},
   });
   return *tags;
 }
 
 bool IsPowerwashAllowed() {
-  policy::BrowserPolicyConnectorChromeOS* connector =
-      g_browser_process->platform_part()->browser_policy_connector_chromeos();
-  return !connector->IsEnterpriseManaged() &&
+  return !webui::IsEnterpriseManaged() &&
          !user_manager::UserManager::Get()->IsLoggedInAsGuest() &&
-         !user_manager::UserManager::Get()->IsLoggedInAsSupervisedUser() &&
          !user_manager::UserManager::Get()->IsLoggedInAsChildUser();
 }
 
 }  // namespace
 
-ResetSection::ResetSection(Profile* profile, Delegate* per_page_delegate)
-    : OsSettingsSection(profile, per_page_delegate) {
+ResetSection::ResetSection(Profile* profile,
+                           SearchTagRegistry* search_tag_registry)
+    : OsSettingsSection(profile, search_tag_registry) {
+  SearchTagRegistry::ScopedTagUpdater updater = registry()->StartUpdate();
   if (IsPowerwashAllowed())
-    delegate()->AddSearchTags(GetResetSearchConcepts());
+    updater.AddSearchTags(GetResetSearchConcepts());
 }
 
 ResetSection::~ResetSection() = default;
 
 void ResetSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
   static constexpr webui::LocalizedString kLocalizedStrings[] = {
-      {"resetPageTitle", IDS_SETTINGS_RESET},
+      {"resetPageTitle", IDS_SETTINGS_RESET_TITLE},
       {"powerwashTitle", IDS_SETTINGS_FACTORY_RESET},
       {"powerwashDialogTitle", IDS_SETTINGS_FACTORY_RESET_HEADING},
       {"powerwashDialogButton", IDS_SETTINGS_RESTART},
@@ -73,6 +83,36 @@ void ResetSection::AddLoadTimeData(content::WebUIDataSource* html_source) {
       "powerwashDescription",
       l10n_util::GetStringFUTF16(IDS_SETTINGS_FACTORY_RESET_DESCRIPTION,
                                  l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
+}
+
+void ResetSection::AddHandlers(content::WebUI* web_ui) {
+  web_ui->AddMessageHandler(
+      std::make_unique<::settings::ResetSettingsHandler>(profile()));
+}
+
+int ResetSection::GetSectionNameMessageId() const {
+  return IDS_SETTINGS_RESET;
+}
+
+mojom::Section ResetSection::GetSection() const {
+  return mojom::Section::kReset;
+}
+
+mojom::SearchResultIcon ResetSection::GetSectionIcon() const {
+  return mojom::SearchResultIcon::kReset;
+}
+
+std::string ResetSection::GetSectionPath() const {
+  return mojom::kResetSectionPath;
+}
+
+bool ResetSection::LogMetric(mojom::Setting setting, base::Value& value) const {
+  // Unimplemented.
+  return false;
+}
+
+void ResetSection::RegisterHierarchy(HierarchyGenerator* generator) const {
+  generator->RegisterTopLevelSetting(mojom::Setting::kPowerwash);
 }
 
 }  // namespace settings

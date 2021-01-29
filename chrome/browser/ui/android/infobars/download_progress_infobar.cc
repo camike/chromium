@@ -7,6 +7,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/bind.h"
 #include "chrome/android/chrome_jni_headers/DownloadProgressInfoBar_jni.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/infobars/infobar_service.h"
@@ -50,7 +51,7 @@ class DownloadProgressInfoBarDelegate : public infobars::InfoBarDelegate {
 
 DownloadProgressInfoBar::DownloadProgressInfoBar(
     std::unique_ptr<DownloadProgressInfoBarDelegate> delegate)
-    : InfoBarAndroid(std::move(delegate)) {}
+    : infobars::InfoBarAndroid(std::move(delegate)) {}
 
 DownloadProgressInfoBar::~DownloadProgressInfoBar() = default;
 
@@ -59,7 +60,8 @@ infobars::InfoBarDelegate* DownloadProgressInfoBar::GetDelegate() {
 }
 
 ScopedJavaLocalRef<jobject> DownloadProgressInfoBar::CreateRenderInfoBar(
-    JNIEnv* env) {
+    JNIEnv* env,
+    const ResourceIdMapper& resource_id_mapper) {
   DownloadProgressInfoBarDelegate* delegate =
       static_cast<DownloadProgressInfoBarDelegate*>(GetDelegate());
 

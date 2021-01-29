@@ -11,8 +11,6 @@ component("constants") {
     "//base",
     "//base:i18n",
     "//build:branding_buildflags",
-    "//chromeos/dbus/constants",
-    "//third_party/icu",
   ]
   sources = [
     "chromeos_constants.cc",

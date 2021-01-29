@@ -8,7 +8,16 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+namespace chromeos {
+namespace memory {
+class SystemMemoryPressureEvaluator;
+}
+}  // namespace chromeos
+#endif
 
 namespace memory {
 class EnterpriseMemoryLimitPrefObserver;
@@ -33,6 +42,11 @@ class ChromeBrowserMainExtraPartsMemory : public ChromeBrowserMainExtraParts {
   // supported platforms.
   std::unique_ptr<memory::EnterpriseMemoryLimitPrefObserver>
       memory_limit_pref_observer_;
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  std::unique_ptr<chromeos::memory::SystemMemoryPressureEvaluator>
+      cros_evaluator_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainExtraPartsMemory);
 };

@@ -9,11 +9,11 @@
 #include "components/sessions/core/session_command.h"
 #include "components/sessions/core/session_service_commands.h"
 #include "components/sessions/core/session_types.h"
-#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_url_handler.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/storage_partition.h"
+#include "weblayer/browser/browser_context_impl.h"
 #include "weblayer/browser/browser_impl.h"
 #include "weblayer/browser/profile_impl.h"
 #include "weblayer/browser/tab_impl.h"
@@ -76,14 +76,12 @@ void ProcessRestoreCommands(
     ua_override.ua_metadata_override = blink::UserAgentMetadata::Demarshal(
         session_tab.user_agent_override.opaque_ua_metadata_override);
     web_contents->SetUserAgentOverride(ua_override, false);
-    // CURRENT_SESSION matches what clank does. On the desktop, we should
-    // use a different type.
-    web_contents->GetController().Restore(selected_navigation_index,
-                                          content::RestoreType::CURRENT_SESSION,
-                                          &entries);
+    web_contents->GetController().Restore(
+        selected_navigation_index, content::RestoreType::kRestored, &entries);
     DCHECK(entries.empty());
     TabImpl* tab = browser->CreateTabForSessionRestore(std::move(web_contents),
                                                        session_tab.guid);
+    tab->SetData(session_tab.data);
 
     if (!had_tabs && i == (windows[0])->selected_tab_index)
       browser->SetActiveTab(tab);
@@ -141,6 +139,8 @@ BuildCommandsForTabConfiguration(const SessionID& browser_session_id,
       tab_id, tab->web_contents()->GetController().GetCurrentEntryIndex()));
 
   result.push_back(sessions::CreateSetTabGuidCommand(tab_id, tab->GetGuid()));
+
+  result.push_back(sessions::CreateSetTabDataCommand(tab_id, tab->GetData()));
 
   return result;
 }

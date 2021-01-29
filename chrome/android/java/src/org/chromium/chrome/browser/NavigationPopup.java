@@ -29,6 +29,7 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.history.HistoryManagerUtils;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.ui.favicon.FaviconHelper;
@@ -38,6 +39,7 @@ import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.content_public.browser.NavigationHistory;
+import org.chromium.url.GURL;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -102,8 +104,9 @@ public class NavigationPopup implements AdapterView.OnItemClickListener {
 
         mHistory = mNavigationController.getDirectedNavigationHistory(
                 isForward, MAXIMUM_HISTORY_ITEMS);
-        mHistory.addEntry(new NavigationEntry(FULL_HISTORY_ENTRY_INDEX, UrlConstants.HISTORY_URL,
-                null, null, null, resources.getString(R.string.show_full_history), null, 0, 0));
+        mHistory.addEntry(new NavigationEntry(FULL_HISTORY_ENTRY_INDEX,
+                new GURL(UrlConstants.HISTORY_URL), GURL.emptyGURL(), GURL.emptyGURL(),
+                GURL.emptyGURL(), resources.getString(R.string.show_full_history), null, 0, 0));
 
         mAdapter = new NavigationAdapter();
 
@@ -207,7 +210,7 @@ public class NavigationPopup implements AdapterView.OnItemClickListener {
         for (int i = 0; i < mHistory.getEntryCount(); i++) {
             NavigationEntry entry = mHistory.getEntryAtIndex(i);
             if (entry.getFavicon() != null) continue;
-            final String pageUrl = entry.getUrl();
+            final String pageUrl = entry.getUrl().getSpec();
             if (!requestedUrls.contains(pageUrl)) {
                 FaviconImageCallback imageCallback =
                         (bitmap, iconUrl) -> NavigationPopup.this.onFaviconAvailable(pageUrl,
@@ -232,7 +235,7 @@ public class NavigationPopup implements AdapterView.OnItemClickListener {
         }
         for (int i = 0; i < mHistory.getEntryCount(); i++) {
             NavigationEntry entry = mHistory.getEntryAtIndex(i);
-            if (TextUtils.equals(pageUrl, entry.getUrl())) entry.updateFavicon(favicon);
+            if (TextUtils.equals(pageUrl, entry.getUrl().getSpec())) entry.updateFavicon(favicon);
         }
         mAdapter.notifyDataSetChanged();
     }
@@ -319,9 +322,12 @@ public class NavigationPopup implements AdapterView.OnItemClickListener {
 
         private void setViewText(NavigationEntry entry, TextView view) {
             String entryText = entry.getTitle();
-            if (TextUtils.isEmpty(entryText)) entryText = entry.getVirtualUrl();
-            if (TextUtils.isEmpty(entryText)) entryText = entry.getUrl();
-
+            if (TextUtils.isEmpty(entryText)) {
+                entryText = entry.getVirtualUrl().getSpec();
+            }
+            if (TextUtils.isEmpty(entryText)) {
+                entryText = entry.getUrl().getSpec();
+            }
             view.setText(entryText);
         }
     }

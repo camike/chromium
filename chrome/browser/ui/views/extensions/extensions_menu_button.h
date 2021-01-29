@@ -13,6 +13,7 @@
 #include "chrome/browser/ui/views/toolbar/toolbar_action_view_delegate_views.h"
 #include "ui/views/bubble/bubble_dialog_delegate_view.h"
 #include "ui/views/controls/button/label_button.h"
+#include "ui/views/metadata/metadata_header_macros.h"
 
 class ExtensionsMenuItemView;
 
@@ -24,27 +25,25 @@ class Button;
 // the extensions menu. This includes the extension icon and name and triggers
 // the extension action.
 class ExtensionsMenuButton : public views::LabelButton,
-                             public views::ButtonListener,
                              public ToolbarActionViewDelegateViews {
  public:
+  METADATA_HEADER(ExtensionsMenuButton);
   ExtensionsMenuButton(Browser* browser,
                        ExtensionsMenuItemView* parent,
-                       ToolbarActionViewController* controller);
+                       ToolbarActionViewController* controller,
+                       bool allow_pinning);
+  ExtensionsMenuButton(const ExtensionsMenuButton&) = delete;
+  ExtensionsMenuButton& operator=(const ExtensionsMenuButton&) = delete;
   ~ExtensionsMenuButton() override;
 
-  static const char kClassName[];
-
   SkColor GetInkDropBaseColor() const override;
+  bool CanShowIconInToolbar() const override;
 
   const base::string16& label_text_for_testing() const {
     return label()->GetText();
   }
 
  private:
-  // views::ButtonListener:
-  const char* GetClassName() const override;
-  void ButtonPressed(Button* sender, const ui::Event& event) override;
-
   // ToolbarActionViewDelegateViews:
   views::View* GetAsView() override;
   views::FocusManager* GetFocusManagerForAccelerator() override;
@@ -52,6 +51,8 @@ class ExtensionsMenuButton : public views::LabelButton,
   content::WebContents* GetCurrentWebContents() const override;
   void UpdateState() override;
   bool IsMenuRunning() const override;
+
+  void ButtonPressed();
 
   Browser* const browser_;
 
@@ -61,7 +62,7 @@ class ExtensionsMenuButton : public views::LabelButton,
   // Responsible for executing the extension's actions.
   ToolbarActionViewController* const controller_;
 
-  DISALLOW_COPY_AND_ASSIGN(ExtensionsMenuButton);
+  bool allow_pinning_;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_EXTENSIONS_EXTENSIONS_MENU_BUTTON_H_

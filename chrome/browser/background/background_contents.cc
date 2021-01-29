@@ -48,10 +48,6 @@ BackgroundContents::BackgroundContents(
       opener ? opener->GetRoutingID() : MSG_ROUTING_NONE;
   create_params.is_never_visible = true;
 
-  // This isn't semantically sensible, but it is what the old code implicitly
-  // did.
-  create_params.renderer_initiated_creation = !is_new_browsing_instance;
-
   if (session_storage_namespace) {
     content::SessionStorageNamespaceMap session_storage_namespace_map;
     session_storage_namespace_map.insert(
@@ -116,12 +112,13 @@ void BackgroundContents::DidNavigateMainFramePostCommit(WebContents* tab) {
 void BackgroundContents::AddNewContents(
     WebContents* source,
     std::unique_ptr<WebContents> new_contents,
+    const GURL& target_url,
     WindowOpenDisposition disposition,
     const gfx::Rect& initial_rect,
     bool user_gesture,
     bool* was_blocked) {
-  delegate_->AddWebContents(std::move(new_contents), disposition, initial_rect,
-                            was_blocked);
+  delegate_->AddWebContents(std::move(new_contents), target_url, disposition,
+                            initial_rect, was_blocked);
 }
 
 bool BackgroundContents::IsNeverComposited(content::WebContents* web_contents) {

@@ -9,8 +9,8 @@
 
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
-#include "chrome/browser/chromeos/accessibility/magnification_manager.h"
+#include "chrome/browser/ash/accessibility/accessibility_manager.h"
+#include "chrome/browser/ash/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/power/ml/adaptive_screen_brightness_ukm_logger.h"
 #include "chrome/browser/chromeos/power/ml/screen_brightness_event.pb.h"
@@ -169,9 +169,9 @@ class AdaptiveScreenBrightnessManagerTest
                                              bool is_focused,
                                              bool is_incognito = false) {
     Profile* const original_profile = profile();
-    Profile* const used_profile =
-        is_incognito ? original_profile->GetOffTheRecordProfile()
-                     : original_profile;
+    Profile* const used_profile = is_incognito
+                                      ? original_profile->GetPrimaryOTRProfile()
+                                      : original_profile;
     Browser::CreateParams params(used_profile, true);
 
     auto dummy_window = std::make_unique<aura::Window>(nullptr);
@@ -584,7 +584,7 @@ TEST_F(AdaptiveScreenBrightnessManagerTest, UserEventCounts) {
 
   const ui::TouchEvent kTouchEvent(
       ui::ET_TOUCH_PRESSED, kEventLocation, base::TimeTicks(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+      ui::PointerDetails(ui::EventPointerType::kTouch, 0));
   ReportUserActivity(&kTouchEvent);
   ReportUserActivity(&kTouchEvent);
 
@@ -597,8 +597,7 @@ TEST_F(AdaptiveScreenBrightnessManagerTest, UserEventCounts) {
 
   const ui::TouchEvent kStylusEvent(
       ui::ET_TOUCH_MOVED, kEventLocation, base::TimeTicks(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_PEN, 0),
-      ui::EF_NONE);
+      ui::PointerDetails(ui::EventPointerType::kPen, 0), ui::EF_NONE);
   ReportUserActivity(&kStylusEvent);
   ReportUserActivity(&kStylusEvent);
   ReportUserActivity(&kStylusEvent);

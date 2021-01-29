@@ -189,11 +189,11 @@ suite('route', function() {
 
     // Path with a slash.
     assertEquals(
-        routes.SITE_SETTINGS_COOKIES,
-        Router.getInstance().getRouteForPath('/content/cookies'));
+        routes.SITE_SETTINGS_SITE_DETAILS,
+        Router.getInstance().getRouteForPath('/content/siteDetails/'));
     assertEquals(
-        routes.SITE_SETTINGS_COOKIES,
-        Router.getInstance().getRouteForPath('/content/cookies/'));
+        routes.SITE_SETTINGS_SITE_DETAILS,
+        Router.getInstance().getRouteForPath('/content/siteDetails'));
   });
 
   test('isNavigableDialog', function() {
@@ -206,7 +206,9 @@ suite('route', function() {
     }
 
     assertFalse(routes.PRIVACY.isNavigableDialog);
+    // <if expr="not chromeos and not lacros">
     assertFalse(routes.DEFAULT_BROWSER.isNavigableDialog);
+    // </if>
   });
 
   test('pageVisibility affects route availability', function() {
@@ -217,7 +219,6 @@ suite('route', function() {
       onStartup: false,
       reset: false,
     });
-    loadTimeData.overrideValues({showOSSettings: false});
 
     const router = buildRouter();
     const hasRoute = route => router.getRoutes().hasOwnProperty(route);
@@ -239,8 +240,7 @@ suite('route', function() {
         // correct path.
         window.location.href = 'https://example.com/path/to/page.html';
         assertEquals(
-            'chrome://settings/cloudPrinters',
-            routes.CLOUD_PRINTERS.getAbsolutePath());
+            'chrome://settings/cookies', routes.COOKIES.getAbsolutePath());
 
         // Check getting the absolute path while inside settings returns the
         // correct path for the current route and a different route.
@@ -255,14 +255,10 @@ suite('route', function() {
 
 suite('DynamicParameters', function() {
   setup(function() {
-    // TODO(https://crbug.com/1026426): Remove conditional when Polymer 2 tests
-    // are no longer run.
-    if (window.location.pathname === '/test_loader.html') {
-      PolymerTest.clearBody();
-      window.history.replaceState({}, '', 'search?guid=a%2Fb&foo=42');
-      const settingsUi = document.createElement('settings-ui');
-      document.body.appendChild(settingsUi);
-    }
+    PolymerTest.clearBody();
+    window.history.replaceState({}, '', 'search?guid=a%2Fb&foo=42');
+    const settingsUi = document.createElement('settings-ui');
+    document.body.appendChild(settingsUi);
   });
 
   test('get parameters from URL and navigation', function(done) {
@@ -293,14 +289,10 @@ suite('DynamicParameters', function() {
 
 suite('NonExistentRoute', function() {
   setup(function() {
-    // TODO(https://crbug.com/1026426): Remove conditional when Polymer 2 tests
-    // are no longer run.
-    if (window.location.pathname === '/test_loader.html') {
-      PolymerTest.clearBody();
-      window.history.replaceState({}, '', 'non/existent/route');
-      const settingsUi = document.createElement('settings-ui');
-      document.body.appendChild(settingsUi);
-    }
+    PolymerTest.clearBody();
+    window.history.replaceState({}, '', 'non/existent/route');
+    const settingsUi = document.createElement('settings-ui');
+    document.body.appendChild(settingsUi);
   });
 
   test('redirect to basic', function() {

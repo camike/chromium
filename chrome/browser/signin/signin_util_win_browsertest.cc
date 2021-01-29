@@ -10,7 +10,8 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/win/wincrypt_shim.h"
 #include "build/build_config.h"
@@ -22,6 +23,7 @@
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/signin_util_win.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/webui/signin/dice_turn_sync_on_helper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -33,6 +35,7 @@
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/identity_test_utils.h"
 #include "components/signin/public/identity_manager/primary_account_mutator.h"
+#include "content/public/test/browser_test.h"
 
 namespace {
 
@@ -58,6 +61,9 @@ class TestDiceTurnSyncOnHelperDelegate : public DiceTurnSyncOnHelper::Delegate {
           callback) override {
     std::move(callback).Run(LoginUIService::SYNC_WITH_DEFAULT_SETTINGS);
   }
+  void ShowSyncDisabledConfirmation(
+      base::OnceCallback<void(LoginUIService::SyncConfirmationUIClosedResult)>
+          callback) override {}
   void ShowSyncSettings() override {}
   void SwitchToProfile(Profile* new_profile) override {}
 };
@@ -295,8 +301,7 @@ IN_PROC_BROWSER_TEST_P(SigninUtilWinBrowserTest, NoReauthAfterSignout) {
     auto* primary_account_mutator =
         IdentityManagerFactory::GetForProfile(profile)
             ->GetPrimaryAccountMutator();
-    primary_account_mutator->ClearPrimaryAccount(
-        signin::PrimaryAccountMutator::ClearAccountsAction::kDefault,
+    primary_account_mutator->RevokeSyncConsent(
         signin_metrics::FORCE_SIGNOUT_ALWAYS_ALLOWED_FOR_TEST,
         signin_metrics::SignoutDelete::DELETED);
 
@@ -573,7 +578,8 @@ void CreateAndSwitchToProfile(const std::string& basepath) {
   base::FilePath path = profile_manager->user_data_dir().AppendASCII(basepath);
   base::RunLoop run_loop;
   profile_manager->CreateProfileAsync(
-      path, base::Bind(&UnblockOnProfileInitialized, run_loop.QuitClosure()),
+      path,
+      base::BindRepeating(&UnblockOnProfileInitialized, run_loop.QuitClosure()),
       base::string16(), std::string());
   // Run the message loop to allow profile creation to take place; the loop is
   // terminated by UnblockOnProfileCreation when the profile is created.
@@ -613,7 +619,11 @@ class ExistingWinBrowserProfilesSigninUtilTest
                           L"foo@gmail.com",
                           "lst-123456",
                           0,
-                          1) {}
+                          1) {
+    // TODO(droger): Disable the profile picker using the local state preference
+    // instead.
+    feature_list_.InitAndDisableFeature(features::kNewProfilePicker);
+  }
 
  protected:
   bool SetUpUserDataDirectory() override {
@@ -634,6 +644,7 @@ class ExistingWinBrowserProfilesSigninUtilTest
   }
 
  private:
+  base::test::ScopedFeatureList feature_list_;
   registry_util::RegistryOverrideManager registry_override_;
 };
 

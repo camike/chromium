@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 
+#include "base/scoped_observation.h"
 #include "build/build_config.h"
 #include "components/translate/content/browser/content_translate_driver.h"
 #include "components/translate/core/browser/translate_client.h"
@@ -27,13 +28,14 @@ namespace weblayer {
 
 class TranslateClientImpl
     : public translate::TranslateClient,
+      public translate::TranslateDriver::LanguageDetectionObserver,
       public content::WebContentsObserver,
       public content::WebContentsUserData<TranslateClientImpl> {
  public:
   ~TranslateClientImpl() override;
 
   // Gets the LanguageState associated with the page.
-  translate::LanguageState& GetLanguageState();
+  const translate::LanguageState& GetLanguageState();
 
   // Returns the ContentTranslateDriver instance associated with this
   // WebContents.
@@ -62,6 +64,15 @@ class TranslateClientImpl
                        bool triggered_from_menu) override;
   bool IsTranslatableURL(const GURL& url) override;
   void ShowReportLanguageDetectionErrorUI(const GURL& report_url) override;
+  bool IsAutofillAssistantRunning() const override;
+
+  // TranslateDriver::LanguageDetectionObserver implementation.
+  void OnLanguageDetermined(
+      const translate::LanguageDetectionDetails& details) override;
+
+  // Trigger a manual translation when the necessary state (e.g. source
+  // language) is ready.
+  void ManualTranslateWhenReady();
 
  private:
   explicit TranslateClientImpl(content::WebContents* web_contents);
@@ -72,6 +83,16 @@ class TranslateClientImpl
 
   translate::ContentTranslateDriver translate_driver_;
   std::unique_ptr<translate::TranslateManager> translate_manager_;
+
+  // Whether to trigger a manual translation when ready.
+  bool manual_translate_on_ready_ = false;
+
+  base::ScopedObservation<
+      translate::TranslateDriver,
+      translate::TranslateDriver::LanguageDetectionObserver,
+      &translate::TranslateDriver::AddLanguageDetectionObserver,
+      &translate::TranslateDriver::RemoveLanguageDetectionObserver>
+      observation_{this};
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 

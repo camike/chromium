@@ -7,9 +7,12 @@
 #include "base/task/post_task.h"
 #include "components/safe_browsing/core/db/database_manager.h"
 #include "components/safe_browsing/core/db/v4_protocol_manager_util.h"
+#import "components/safe_browsing/ios/browser/safe_browsing_url_allow_list.h"
 #include "components/security_interstitials/core/unsafe_resource.h"
-#import "ios/chrome/browser/safe_browsing/safe_browsing_unsafe_resource_container.h"
-#import "ios/chrome/browser/safe_browsing/safe_browsing_url_allow_list.h"
+#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/prerender/prerender_service.h"
+#import "ios/chrome/browser/prerender/prerender_service_factory.h"
+#import "ios/chrome/browser/safe_browsing/safe_browsing_query_manager.h"
 #import "ios/chrome/browser/safe_browsing/unsafe_resource_util.h"
 #include "ios/web/public/thread/web_task_traits.h"
 #import "ios/web/public/thread/web_thread.h"
@@ -37,11 +40,12 @@ void HandleBlockingPageRequestOnUIThread(
     return;
   }
 
-  // The allow list is not created for prerender WebStates.  Send the do-not-
-  // proceed signal for unsafe prerender navigations.
-  SafeBrowsingUrlAllowList* allow_list =
-      SafeBrowsingUrlAllowList::FromWebState(web_state);
-  if (!allow_list) {
+  // Send do-not-proceed signal if the WebState is for a prerender tab.
+  PrerenderService* prerender_service =
+      PrerenderServiceFactory::GetForBrowserState(
+          ChromeBrowserState::FromBrowserState(web_state->GetBrowserState()));
+  if (prerender_service &&
+      prerender_service->IsWebStatePrerendered(web_state)) {
     RunUnsafeResourceCallback(resource, /*proceed=*/false,
                               /*showed_interstitial=*/false);
     return;
@@ -52,6 +56,8 @@ void HandleBlockingPageRequestOnUIThread(
   std::set<safe_browsing::SBThreatType> allowed_threats;
   const GURL url = resource.url;
   safe_browsing::SBThreatType threat_type = resource.threat_type;
+  SafeBrowsingUrlAllowList* allow_list =
+      SafeBrowsingUrlAllowList::FromWebState(web_state);
   if (allow_list->AreUnsafeNavigationsAllowed(url, &allowed_threats)) {
     if (allowed_threats.find(threat_type) != allowed_threats.end()) {
       RunUnsafeResourceCallback(resource, /*proceed=*/true,
@@ -60,19 +66,14 @@ void HandleBlockingPageRequestOnUIThread(
     }
   }
 
-  // Record the pending unsafe navigation decision.
-  allow_list->AddPendingUnsafeNavigationDecision(url, threat_type);
-
-  // Add a copy of the unsafe resource to the WebState's stack.  This will be
-  // popped later to populate the error page.
-  SafeBrowsingUnsafeResourceContainer::FromWebState(web_state)
-      ->StoreUnsafeResource(resource);
+  // Store the unsafe resource in the query manager.
+  SafeBrowsingQueryManager::FromWebState(web_state)->StoreUnsafeResource(
+      resource);
 
   // Send the do-not-proceed signal to cancel the navigation.  This will cause
   // the error page to be displayed using the stored UnsafeResource copy.
-  RunUnsafeResourceCallback(
-      resource, /*proceed=*/false,
-      /*showed_interstitial=*/resource.IsMainPageLoadBlocked());
+  RunUnsafeResourceCallback(resource, /*proceed=*/false,
+                            /*showed_interstitial=*/true);
 }
 }  // namespace
 
@@ -89,7 +90,7 @@ UrlCheckerDelegateImpl::UrlCheckerDelegateImpl(
 
 UrlCheckerDelegateImpl::~UrlCheckerDelegateImpl() = default;
 
-void UrlCheckerDelegateImpl::MaybeDestroyPrerenderContents(
+void UrlCheckerDelegateImpl::MaybeDestroyNoStatePrefetchContents(
     base::OnceCallback<content::WebContents*()> web_contents_getter) {}
 
 void UrlCheckerDelegateImpl::StartDisplayingBlockingPageHelper(
@@ -110,7 +111,7 @@ void UrlCheckerDelegateImpl::
         const security_interstitials::UnsafeResource& resource,
         bool is_main_frame) {}
 
-bool UrlCheckerDelegateImpl::IsUrlWhitelisted(const GURL& url) {
+bool UrlCheckerDelegateImpl::IsUrlAllowlisted(const GURL& url) {
   return false;
 }
 

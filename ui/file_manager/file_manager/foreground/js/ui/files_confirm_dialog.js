@@ -2,15 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// #import {util} from '../../../common/js/util.m.js';
+// #import {ConfirmDialog} from 'chrome://resources/js/cr/ui/dialogs.m.js';
+
 /**
  * Confirm dialog.
  */
-class FilesConfirmDialog extends cr.ui.dialogs.ConfirmDialog {
+/* #export */ class FilesConfirmDialog extends cr.ui.dialogs.ConfirmDialog {
   /**
    * @param {!Element} parentElement
    */
   constructor(parentElement) {
     super(parentElement);
+
+    if (util.isFilesNg()) {
+      this.container.classList.add('files-ng');
+    }
 
     /**
      * @type {?function()} showModalElement Optional call to show the
@@ -34,5 +41,21 @@ class FilesConfirmDialog extends cr.ui.dialogs.ConfirmDialog {
   initDom() {
     super.initDom();
     this.frame.classList.add('files-confirm-dialog');
+  }
+
+  /**
+   * @override
+   */
+  showWithTitle(title, message, ...args) {
+    this.frame.classList.toggle('no-title', !title);
+    super.showWithTitle(title, message, ...args);
+  }
+
+  /**
+   * @override
+   */
+  showHtml(title, message, ...args) {
+    this.frame.classList.toggle('no-title', !title);
+    super.showHtml(title, message, ...args);
   }
 }

@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/browser/visibility.h"
 #include "content/public/browser/web_contents.h"
 
 namespace metrics {
@@ -32,8 +33,6 @@ TabStatsDataStore::TabsStats::TabsStats()
       max_tab_per_window(0U),
       window_count(0U),
       window_count_max(0U) {
-  tab_discard_counts.fill(0U);
-  tab_reload_counts.fill(0U);
 }
 TabStatsDataStore::TabsStats::TabsStats(const TabsStats& other) = default;
 
@@ -104,6 +103,27 @@ void TabStatsDataStore::OnTabReplaced(content::WebContents* old_contents,
   existing_tabs_[new_contents] = old_contents_id;
 }
 
+void TabStatsDataStore::OnTabInteraction(content::WebContents* web_contents) {
+  DCHECK(base::Contains(existing_tabs_, web_contents));
+  TabID web_contents_id = GetTabID(web_contents);
+  // Mark the tab as interacted with in all the intervals.
+  for (auto& interval_map : interval_maps_) {
+    DCHECK(base::Contains(*interval_map, web_contents_id));
+    (*interval_map)[web_contents_id].interacted_during_interval = true;
+  }
+}
+
+void TabStatsDataStore::OnTabAudible(content::WebContents* web_contents) {
+  OnTabAudibleOrVisible(web_contents);
+}
+
+void TabStatsDataStore::OnTabVisibilityChanged(
+    content::WebContents* web_contents,
+    content::Visibility visibility) {
+  if (visibility == content::Visibility::VISIBLE)
+    OnTabAudibleOrVisible(web_contents);
+}
+
 void TabStatsDataStore::UpdateMaxTabsPerWindowIfNeeded(size_t value) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (value <= tab_stats_.max_tab_per_window)
@@ -131,24 +151,6 @@ void TabStatsDataStore::ResetMaximumsToCurrentState() {
   }
 }
 
-void TabStatsDataStore::OnTabInteraction(content::WebContents* web_contents) {
-  DCHECK(base::Contains(existing_tabs_, web_contents));
-  TabID web_contents_id = GetTabID(web_contents);
-  // Mark the tab as interacted with in all the intervals.
-  for (auto& interval_map : interval_maps_) {
-    DCHECK(base::Contains(*interval_map, web_contents_id));
-    (*interval_map)[web_contents_id].interacted_during_interval = true;
-  }
-}
-
-void TabStatsDataStore::OnTabAudible(content::WebContents* web_contents) {
-  OnTabAudibleOrVisible(web_contents);
-}
-
-void TabStatsDataStore::OnTabVisible(content::WebContents* web_contents) {
-  OnTabAudibleOrVisible(web_contents);
-}
-
 TabStatsDataStore::TabsStateDuringIntervalMap*
 TabStatsDataStore::AddInterval() {
   // Creates the interval and initialize its data.
@@ -166,20 +168,6 @@ void TabStatsDataStore::ResetIntervalData(
   interval_map->clear();
   for (auto& iter : existing_tabs_)
     AddTabToIntervalMap(iter.first, GetTabID(iter.first), true, interval_map);
-}
-
-void TabStatsDataStore::OnTabDiscardStateChange(
-    LifecycleUnitDiscardReason discard_reason,
-    bool is_discarding) {
-  if (is_discarding)
-    tab_stats_.tab_discard_counts[static_cast<size_t>(discard_reason)]++;
-  else
-    tab_stats_.tab_reload_counts[static_cast<size_t>(discard_reason)]++;
-}
-
-void TabStatsDataStore::ClearTabDiscardAndReloadCounts() {
-  tab_stats_.tab_discard_counts.fill(0U);
-  tab_stats_.tab_reload_counts.fill(0U);
 }
 
 base::Optional<TabStatsDataStore::TabID> TabStatsDataStore::GetTabIDForTesting(

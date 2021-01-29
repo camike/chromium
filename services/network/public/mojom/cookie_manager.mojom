@@ -34,6 +34,11 @@ struct CookieManagerParams {
   array<content_settings.mojom.ContentSettingPatternSource>
       settings_for_legacy_cookie_access;
 
+  // Content settings for which storage access grants have been set using
+  // the Storage Access API.
+  array<content_settings.mojom.ContentSettingPatternSource>
+      settings_for_storage_access;
+
   // The type of CookieAccessDelegate to pass to the underlying CookieStore.
   // If these params are not present, CookieManager defaults to using
   // USE_CONTENT_SETTINGS.
@@ -46,6 +51,8 @@ enum CookieAccessDelegateType {
   USE_CONTENT_SETTINGS,
   // Always returns Legacy access semantics.
   ALWAYS_LEGACY,
+  // Always returns Non-Legacy access semantics.
+  ALWAYS_NONLEGACY,
 };
 
 enum CookiePriority {
@@ -73,6 +80,14 @@ enum CookieSameSite {
   // Reserved 3 (was EXTENDED_MODE), next number is 4.
 };
 
+enum CookieEffectiveSameSite {
+  kNoRestriction = 0,
+  kLaxMode = 1,
+  kStrictMode = 2,
+  kLaxModeAllowUnsafe = 3,
+  kUndefined = 4,
+};
+
 enum ContextType {
   CROSS_SITE,
   SAME_SITE_LAX_METHOD_UNSAFE,
@@ -84,6 +99,16 @@ enum ContextType {
 struct CookieSameSiteContext {
   ContextType context = CROSS_SITE;
   ContextType schemeful_context = CROSS_SITE;
+};
+
+// Computed for every cookie access attempt but is only relevant for SameParty
+// cookies.
+enum SamePartyCookieContextType {
+  // The opposite to kSameParty. Should be the default value.
+  kCrossParty,
+  // If the request URL is in the same First-Party Sets as the top-frame site
+  // and each member of the isolation_info.party_context.
+  kSameParty,
 };
 
 // What rules to apply when determining whether access to a particular cookie is
@@ -101,6 +126,12 @@ struct CookieOptions {
   CookieSameSiteContext same_site_cookie_context;
   bool update_access_time = true;
   bool return_excluded_cookies = false;
+  SamePartyCookieContextType same_party_cookie_context_type = kCrossParty;
+  // The size of the isolation_info.party_context plus the top-frame site for
+  // logging purposes.
+  uint32 full_party_context_size = 0;
+  // Whether the site is a member of a nontrivial First-Party Set.
+  bool is_in_nontrivial_first_party_set = false;
 };
 
 // See net/cookies/canonical_cookie.{h,cc} for documentation.
@@ -118,26 +149,48 @@ struct CanonicalCookie {
   CookieSameSite site_restrictions = NO_RESTRICTION;
   CookiePriority priority = MEDIUM;
   CookieSourceScheme source_scheme = kUnset;
+  bool same_party = false;
+  // -1 because of url::PORT_UNSPECIFIED
+  // url/third_party/mozilla/url_parse.h
+  int32 source_port = -1;
 };
 
 struct CookieInclusionStatus {
   // Bitfield. Is defined in
-  // net::CanonicalCookie::CookieInclusionStatus::ExclusionReason.
+  // net::CookieInclusionStatus::ExclusionReason.
+  // net::CookieInclusionStatus::WarningReason.
   uint32 exclusion_reasons;
   // Bitfield. Is defined in
-  // net::CanonicalCookie::CookieInclusionStatus::WarningReason.
   uint32 warning_reasons;
 };
 
-struct CookieWithStatus {
-  CanonicalCookie cookie;
-  CookieInclusionStatus status;
-};
-
-struct CookieAndLineWithStatus {
+struct CookieAndLineWithAccessResult {
   CanonicalCookie? cookie;
   string cookie_string;
+  CookieAccessResult access_result;
+};
+
+union CookieOrLine {
+  CanonicalCookie cookie;
+  string cookie_string;
+};
+
+struct CookieOrLineWithAccessResult {
+  CookieOrLine cookie_or_line;
+  CookieAccessResult access_result;
+};
+
+// See net/cookies/cookie_access_result.{cc,h} for documentation.
+struct CookieAccessResult {
+  CookieEffectiveSameSite effective_same_site;
+  CookieAccessSemantics access_semantics;
   CookieInclusionStatus status;
+  bool is_allowed_to_access_secure_cookies;
+};
+
+struct CookieWithAccessResult {
+  CanonicalCookie cookie;
+  CookieAccessResult access_result;
 };
 
 // Keep values here in sync with net::CookieChangeCause.
@@ -162,8 +215,8 @@ enum CookieChangeCause {
 struct CookieChangeInfo {
   // The cookie that changed, in its post-change state.
   CanonicalCookie cookie;
-  // Access semantics of the cookie at the time of the change.
-  CookieAccessSemantics access_semantics;
+  // Access results at the time of the change.
+  CookieAccessResult access_result;
   CookieChangeCause cause;
 };
 
@@ -271,8 +324,8 @@ interface CookieManager {
   // blocked from being sent along with the reason each cookie was blocked. By
   // default, that option is not set and |excluded_cookies| is an empty list.
   GetCookieList(url.mojom.Url url, CookieOptions cookie_options)
-      => (array<CookieWithStatus> cookies,
-          array<CookieWithStatus> excluded_cookies);
+      => (array<CookieWithAccessResult> cookies,
+          array<CookieWithAccessResult> excluded_cookies);
 
   // Set a cookie.  |source_url| is used to check whether existing secure
   // cookies can be overwritten (secure cookies may be created from a
@@ -283,7 +336,7 @@ interface CookieManager {
   // |status| will be set to INCLUDE.
   SetCanonicalCookie(CanonicalCookie cookie, url.mojom.Url source_url,
                      CookieOptions cookie_options)
-      => (CookieInclusionStatus status);
+      => (CookieAccessResult access_result);
 
   // Delete a cookie. Returns true if a cookie was deleted.
   DeleteCanonicalCookie(CanonicalCookie cookie) => (bool success);

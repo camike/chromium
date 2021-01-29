@@ -18,14 +18,15 @@
 #include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/task_manager/providers/browser_process_task_provider.h"
 #include "chrome/browser/task_manager/providers/child_process_task_provider.h"
 #include "chrome/browser/task_manager/providers/fallback_task_provider.h"
 #include "chrome/browser/task_manager/providers/render_process_host_task_provider.h"
+#include "chrome/browser/task_manager/providers/spare_render_process_host_task_provider.h"
 #include "chrome/browser/task_manager/providers/web_contents/web_contents_task_provider.h"
 #include "chrome/browser/task_manager/providers/worker_task_provider.h"
 #include "chrome/browser/task_manager/sampling/shared_sampler.h"
-#include "chrome/common/chrome_switches.h"
 #include "components/nacl/common/buildflags.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/gpu_data_manager.h"
@@ -38,12 +39,12 @@
 #include "services/network/public/cpp/features.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/chromeos/arc/process/arc_process_service.h"
 #include "chrome/browser/task_manager/providers/arc/arc_process_task_provider.h"
 #include "chrome/browser/task_manager/providers/vm/vm_process_task_provider.h"
 #include "components/arc/arc_util.h"
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace task_manager {
 
@@ -74,9 +75,9 @@ bool BytesTransferredKey::operator==(const BytesTransferredKey& other) const {
 }
 
 TaskManagerImpl::TaskManagerImpl()
-    : on_background_data_ready_callback_(
-          base::Bind(&TaskManagerImpl::OnTaskGroupBackgroundCalculationsDone,
-                     base::Unretained(this))),
+    : on_background_data_ready_callback_(base::BindRepeating(
+          &TaskManagerImpl::OnTaskGroupBackgroundCalculationsDone,
+          base::Unretained(this))),
       blocking_pool_runner_(base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})),
@@ -85,27 +86,28 @@ TaskManagerImpl::TaskManagerImpl()
       waiting_for_memory_dump_(false) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  task_providers_.emplace_back(new BrowserProcessTaskProvider());
-  task_providers_.emplace_back(new ChildProcessTaskProvider());
-  task_providers_.emplace_back(new WorkerTaskProvider());
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kTaskManagerShowExtraRenderers)) {
-    task_providers_.emplace_back(new WebContentsTaskProvider());
-  } else {
-    std::unique_ptr<TaskProvider> primary_subprovider(
-        new WebContentsTaskProvider());
-    std::unique_ptr<TaskProvider> secondary_subprovider(
-        new RenderProcessHostTaskProvider());
-    task_providers_.emplace_back(new FallbackTaskProvider(
-        std::move(primary_subprovider), std::move(secondary_subprovider)));
-  }
+  task_providers_.push_back(std::make_unique<BrowserProcessTaskProvider>());
+  task_providers_.push_back(std::make_unique<ChildProcessTaskProvider>());
 
-#if defined(OS_CHROMEOS)
+  // Put all task providers for various types of RenderProcessHosts in this
+  // section. All of them should be added as primary subproviders for the
+  // FallbackTaskProvider, so that a fallback task can be shown for a renderer
+  // process if no other provider is shown for it.
+  std::vector<std::unique_ptr<TaskProvider>> primary_subproviders;
+  primary_subproviders.push_back(
+      std::make_unique<SpareRenderProcessHostTaskProvider>());
+  primary_subproviders.push_back(std::make_unique<WorkerTaskProvider>());
+  primary_subproviders.push_back(std::make_unique<WebContentsTaskProvider>());
+  task_providers_.push_back(std::make_unique<FallbackTaskProvider>(
+      std::move(primary_subproviders),
+      std::make_unique<RenderProcessHostTaskProvider>()));
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (arc::IsArcAvailable())
-    task_providers_.emplace_back(new ArcProcessTaskProvider());
-  task_providers_.emplace_back(new VmProcessTaskProvider());
+    task_providers_.push_back(std::make_unique<ArcProcessTaskProvider>());
+  task_providers_.push_back(std::make_unique<VmProcessTaskProvider>());
   arc_shared_sampler_ = std::make_unique<ArcSharedSampler>();
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
 TaskManagerImpl::~TaskManagerImpl() {
@@ -157,7 +159,7 @@ int64_t TaskManagerImpl::GetMemoryFootprintUsage(TaskId task_id) const {
 }
 
 int64_t TaskManagerImpl::GetSwappedMemoryUsage(TaskId task_id) const {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   return GetTaskGroupByTaskId(task_id)->swapped_bytes();
 #else
   return -1;
@@ -219,11 +221,11 @@ void TaskManagerImpl::GetUSERHandles(TaskId task_id,
 }
 
 int TaskManagerImpl::GetOpenFdCount(TaskId task_id) const {
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_MAC)
   return GetTaskGroupByTaskId(task_id)->open_fd_count();
 #else
   return -1;
-#endif  // defined(OS_LINUX) || defined(OS_MACOSX)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_MAC)
 }
 
 bool TaskManagerImpl::IsTaskOnBackgroundedProcess(TaskId task_id) const {
@@ -294,11 +296,13 @@ bool TaskManagerImpl::GetV8Memory(TaskId task_id,
                                   int64_t* allocated,
                                   int64_t* used) const {
   const Task* task = GetTaskByTaskId(task_id);
-  if (!task->ReportsV8Memory())
+  const int64_t allocated_memory = task->GetV8MemoryAllocated();
+  const int64_t used_memory = task->GetV8MemoryUsed();
+  if (allocated_memory == -1 || used_memory == -1)
     return false;
 
-  *allocated = task->GetV8MemoryAllocated();
-  *used = task->GetV8MemoryUsed();
+  *allocated = allocated_memory;
+  *used = used_memory;
 
   return true;
 }
@@ -478,7 +482,7 @@ void TaskManagerImpl::TaskAdded(Task* task) {
                                    is_running_in_vm,
                                    on_background_data_ready_callback_,
                                    shared_sampler_, blocking_pool_runner_));
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     if (task->GetType() == Task::ARC)
       task_group->SetArcSampler(arc_shared_sampler_.get());
 #endif
@@ -599,8 +603,8 @@ void TaskManagerImpl::Refresh() {
       !waiting_for_memory_dump_) {
     // The callback keeps this object alive until the callback is invoked.
     waiting_for_memory_dump_ = true;
-    auto callback = base::Bind(&TaskManagerImpl::OnReceivedMemoryDump,
-                               weak_ptr_factory_.GetWeakPtr());
+    auto callback = base::BindOnce(&TaskManagerImpl::OnReceivedMemoryDump,
+                                   weak_ptr_factory_.GetWeakPtr());
     memory_instrumentation::MemoryInstrumentation::GetInstance()
         ->RequestPrivateMemoryFootprint(base::kNullProcessId,
                                         std::move(callback));
@@ -624,12 +628,12 @@ void TaskManagerImpl::Refresh() {
                                enabled_resources_flags());
   }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (TaskManagerObserver::IsResourceRefreshEnabled(
           REFRESH_TYPE_MEMORY_FOOTPRINT, enabled_resources_flags())) {
     arc_shared_sampler_->Refresh();
   }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   NotifyObserversOnRefresh(GetTaskIdsList());
 }

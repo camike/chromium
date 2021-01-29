@@ -9,6 +9,7 @@
 #include "base/mac/bundle_locations.h"
 #include "base/strings/sys_string_conversions.h"
 #include "ios/web/public/browser_state.h"
+#include "ios/web/public/browsing_data/cookie_blocking_mode.h"
 #import "ios/web/public/web_client.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -16,29 +17,6 @@
 #endif
 
 namespace {
-
-// Make sure that script is injected only once. For example, content of
-// WKUserScript can be injected into the same page multiple times
-// without notifying WKNavigationDelegate (e.g. after window.document.write
-// JavaScript call). Injecting the script multiple times invalidates the
-// __gCrWeb.windowId variable and will break the ability to send messages from
-// JS to the native code. Wrapping injected script into "if (!injected)" check
-// prevents multiple injections into the same page. |script_identifier| should
-// identify the script being injected in order to enforce the injection of
-// |script| to only once.
-// NOTE: |script_identifier| will be used as the prefix for a JavaScript var, so
-// it must adhere to JavaScript var naming rules.
-NSString* MakeScriptInjectableOnce(NSString* script_identifier,
-                                   NSString* script) {
-  NSString* kOnceWrapperTemplate =
-      @"if (typeof %@ === 'undefined') { var %@ = true; %%@ }";
-  NSString* injected_var_name =
-      [NSString stringWithFormat:@"%@_injected", script_identifier];
-  NSString* once_wrapper =
-      [NSString stringWithFormat:kOnceWrapperTemplate, injected_var_name,
-                                 injected_var_name];
-  return [NSString stringWithFormat:once_wrapper, script];
-}
 
 // Returns a string with \ and ' escaped.
 // This is used instead of GetQuotedJSONString because that will convert
@@ -71,6 +49,18 @@ NSString* GetPageScript(NSString* script_file_name) {
   return content;
 }
 
+NSString* MakeScriptInjectableOnce(NSString* script_identifier,
+                                   NSString* script) {
+  NSString* kOnceWrapperTemplate =
+      @"if (typeof %@ === 'undefined') { var %@ = true; %%@ }";
+  NSString* injected_var_name =
+      [NSString stringWithFormat:@"_injected_%@", script_identifier];
+  NSString* once_wrapper =
+      [NSString stringWithFormat:kOnceWrapperTemplate, injected_var_name,
+                                 injected_var_name];
+  return [NSString stringWithFormat:once_wrapper, script];
+}
+
 NSString* GetDocumentStartScriptForMainFrame(BrowserState* browser_state) {
   DCHECK(GetWebClient());
   NSString* embedder_page_script =
@@ -96,6 +86,21 @@ NSString* GetDocumentStartScriptForAllFrames(BrowserState* browser_state) {
       GetWebClient()->GetDocumentStartScriptForAllFrames(browser_state);
   DCHECK(embedder_page_script);
   NSString* web_bundle = GetPageScript(@"all_frames_web_bundle");
+  NSString* injectedCookieState = @"allow";
+  switch (browser_state->GetCookieBlockingMode()) {
+    case CookieBlockingMode::kBlock:
+      injectedCookieState = @"block";
+      break;
+    case CookieBlockingMode::kBlockThirdParty:
+      injectedCookieState = @"block-third-party";
+      break;
+    case CookieBlockingMode::kAllow:
+      injectedCookieState = @"allow";
+      break;
+  }
+  web_bundle =
+      [web_bundle stringByReplacingOccurrencesOfString:@"$(COOKIE_STATE)"
+                                            withString:injectedCookieState];
   NSString* script =
       [NSString stringWithFormat:@"%@; %@", web_bundle, embedder_page_script];
   return MakeScriptInjectableOnce(@"start_all_frames", script);

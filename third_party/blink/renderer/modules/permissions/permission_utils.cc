@@ -108,7 +108,6 @@ PermissionDescriptorPtr ParsePermissionDescriptor(
   if (name == "geolocation")
     return CreatePermissionDescriptor(PermissionName::GEOLOCATION);
   if (name == "camera") {
-#if !defined(OS_ANDROID)
     CameraDevicePermissionDescriptor* camera_device_permission =
         NativeValueTraits<CameraDevicePermissionDescriptor>::NativeValue(
             script_state->GetIsolate(), raw_descriptor.V8Value(),
@@ -116,12 +115,8 @@ PermissionDescriptorPtr ParsePermissionDescriptor(
     if (exception_state.HadException())
       return nullptr;
 
-    if (RuntimeEnabledFeatures::MediaCapturePanTiltEnabled()) {
-      return CreateVideoCapturePermissionDescriptor(
-          camera_device_permission->panTiltZoom());
-    }
-#endif
-    return CreateVideoCapturePermissionDescriptor(false /* pan_tilt_zoom */);
+    return CreateVideoCapturePermissionDescriptor(
+        camera_device_permission->panTiltZoom());
   }
   if (name == "microphone")
     return CreatePermissionDescriptor(PermissionName::AUDIO_CAPTURE);
@@ -228,6 +223,30 @@ PermissionDescriptorPtr ParsePermissionDescriptor(
       return nullptr;
     }
     return CreatePermissionDescriptor(PermissionName::STORAGE_ACCESS);
+  }
+  if (name == "window-placement") {
+    if (!RuntimeEnabledFeatures::WindowPlacementEnabled(
+            ExecutionContext::From(script_state))) {
+      exception_state.ThrowTypeError("Window Placement is not enabled.");
+      return nullptr;
+    }
+    return CreatePermissionDescriptor(PermissionName::WINDOW_PLACEMENT);
+  }
+  if (name == "font-access") {
+    if (!RuntimeEnabledFeatures::FontAccessEnabled(
+            ExecutionContext::From(script_state))) {
+      exception_state.ThrowTypeError("Font Access is not enabled.");
+      return nullptr;
+    }
+    return CreatePermissionDescriptor(PermissionName::FONT_ACCESS);
+  }
+  if (name == "display-capture") {
+    if (!RuntimeEnabledFeatures::DisplayCapturePermissionPolicyEnabled(
+            ExecutionContext::From(script_state))) {
+      exception_state.ThrowTypeError("Display Capture is not enabled.");
+      return nullptr;
+    }
+    return CreatePermissionDescriptor(PermissionName::DISPLAY_CAPTURE);
   }
   return nullptr;
 }

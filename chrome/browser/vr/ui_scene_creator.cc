@@ -11,9 +11,10 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/i18n/case_conversion.h"
+#include "base/logging.h"
 #include "base/numerics/math_constants.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -78,7 +79,6 @@
 #include "components/url_formatter/elide_url.h"
 #include "components/vector_icons/vector_icons.h"
 #include "device/base/features.h"
-#include "device/vr/buildflags/buildflags.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/transform_util.h"
@@ -965,7 +965,7 @@ void BindIndicatorTranscienceForWin(
   e->RefreshVisible();
 
   SetVisibleInLayout(scene->GetUiElementByName(kWebVrExclusiveScreenToast),
-                     !model->browsing_disabled);
+                     model->gvr_input_support);
 
   for (const auto& spec : GetIndicatorSpecs()) {
     SetVisibleInLayout(
@@ -1005,7 +1005,8 @@ void BindIndicatorTranscienceForWin(
 
   e->AddKeyframeModel(cc::KeyframeModel::Create(
       std::move(curve), Animation::GetNextKeyframeModelId(),
-      Animation::GetNextGroupId(), TRANSFORM));
+      Animation::GetNextGroupId(),
+      cc::KeyframeModel::TargetPropertyId(TRANSFORM)));
 }
 
 #else
@@ -1043,7 +1044,7 @@ void BindIndicatorTranscience(
   e->SetVisible(true);
   e->RefreshVisible();
   SetVisibleInLayout(scene->GetUiElementByName(kWebVrExclusiveScreenToast),
-                     !model->browsing_disabled && !in_long_press);
+                     model->gvr_input_support && !in_long_press);
 
   auto specs = GetIndicatorSpecs();
   for (const auto& spec : specs) {
@@ -1090,17 +1091,20 @@ void BindIndicatorTranscience(
 
   e->AddKeyframeModel(cc::KeyframeModel::Create(
       std::move(curve), Animation::GetNextKeyframeModelId(),
-      Animation::GetNextGroupId(), TRANSFORM));
+      Animation::GetNextGroupId(),
+      cc::KeyframeModel::TargetPropertyId(TRANSFORM)));
 }
 
 #endif
 
 int GetIndicatorsTimeout() {
-#if BUILDFLAG(ENABLE_WINDOWS_MR)
-  if (base::FeatureList::IsEnabled(device::features::kWindowsMixedReality))
-    return kWmrInitialIndicatorsTimeoutSeconds;
-#endif
+  // Some runtimes on Windows have quite lengthy animations that may cause
+  // indicators to not be visible at our normal timeout length.
+#if defined(OS_WIN)
+  return kWindowsInitialIndicatorsTimeoutSeconds;
+#else
   return kToastTimeoutSeconds;
+#endif
 }
 
 NOINLINE void CrashIntentionally() {

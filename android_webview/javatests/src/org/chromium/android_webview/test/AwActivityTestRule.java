@@ -7,8 +7,9 @@ package org.chromium.android_webview.test;
 import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
 import android.content.Context;
+import android.content.Intent;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.rule.ActivityTestRule;
+import android.support.test.runner.lifecycle.Stage;
 import android.util.AndroidRuntimeException;
 import android.util.Base64;
 import android.view.ViewGroup;
@@ -28,15 +29,20 @@ import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.test.util.GraphicsTestUtils;
 import org.chromium.android_webview.test.util.JSUtils;
 import org.chromium.base.Log;
+import org.chromium.base.test.BaseActivityTestRule;
+import org.chromium.base.test.util.ApplicationTestUtils;
 import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.InMemorySharedPreferences;
 import org.chromium.content_public.browser.LoadUrlParams;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnPageFinishedHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.util.TestWebServer;
 
 import java.lang.annotation.Annotation;
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
@@ -48,7 +54,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Custom ActivityTestRunner for WebView instrumentation tests */
-public class AwActivityTestRule extends ActivityTestRule<AwTestRunnerActivity> {
+public class AwActivityTestRule extends BaseActivityTestRule<AwTestRunnerActivity> {
     public static final long WAIT_TIMEOUT_MS = scaleTimeout(15000L);
 
     public static final int CHECK_INTERVAL = 100;
@@ -56,6 +62,8 @@ public class AwActivityTestRule extends ActivityTestRule<AwTestRunnerActivity> {
     private static final String TAG = "AwActivityTestRule";
 
     private static final Pattern MAYBE_QUOTED_STRING = Pattern.compile("^(\"?)(.*)\\1$");
+
+    private static boolean sBrowserProcessStarted;
 
     /**
      * An interface to call onCreateWindow(AwContents).
@@ -70,8 +78,10 @@ public class AwActivityTestRule extends ActivityTestRule<AwTestRunnerActivity> {
     // The browser context needs to be a process-wide singleton.
     private AwBrowserContext mBrowserContext;
 
+    private List<WeakReference<AwContents>> mAwContentsDestroyedInTearDown = new ArrayList<>();
+
     public AwActivityTestRule() {
-        super(AwTestRunnerActivity.class, /* initialTouchMode */ false, /* launchActivity */ false);
+        super(AwTestRunnerActivity.class);
     }
 
     @Override
@@ -82,6 +92,7 @@ public class AwActivityTestRule extends ActivityTestRule<AwTestRunnerActivity> {
             public void evaluate() throws Throwable {
                 setUp();
                 base.evaluate();
+                tearDown();
             }
         }, description);
     }
@@ -92,13 +103,48 @@ public class AwActivityTestRule extends ActivityTestRule<AwTestRunnerActivity> {
         }
         if (needsBrowserProcessStarted()) {
             startBrowserProcess();
+        } else {
+            assert !sBrowserProcessStarted
+                : "needsBrowserProcessStarted false and @Batch are incompatible";
         }
     }
 
-    public AwTestRunnerActivity launchActivity() {
-        if (getActivity() == null) {
-            return launchActivity(null);
+    public void tearDown() {
+        if (!needsAwContentsCleanup()) return;
+
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            for (WeakReference<AwContents> awContentsRef : mAwContentsDestroyedInTearDown) {
+                AwContents awContents = awContentsRef.get();
+                if (awContents == null) continue;
+                awContents.destroy();
+            }
+        });
+        // Flush the UI queue since destroy posts again to UI thread.
+        TestThreadUtils.runOnUiThreadBlocking(() -> { mAwContentsDestroyedInTearDown.clear(); });
+    }
+
+    public boolean needsHideActionBar() {
+        return false;
+    }
+
+    private Intent getLaunchIntent() {
+        if (needsHideActionBar()) {
+            Intent intent = getActivityIntent();
+            intent.putExtra(AwTestRunnerActivity.FLAG_HIDE_ACTION_BAR, true);
+            return intent;
         }
+        return null;
+    }
+
+    @Override
+    public void launchActivity(Intent intent) {
+        if (getActivity() != null) return;
+        super.launchActivity(intent);
+        ApplicationTestUtils.waitForActivityState(getActivity(), Stage.RESUMED);
+    }
+
+    public AwTestRunnerActivity launchActivity() {
+        launchActivity(getLaunchIntent());
         return getActivity();
     }
 
@@ -130,6 +176,14 @@ public class AwActivityTestRule extends ActivityTestRule<AwTestRunnerActivity> {
         return true;
     }
 
+    /**
+     * Override this to return false if test doesn't need all AwContents to be
+     * destroyed explicitly after the test.
+     */
+    public boolean needsAwContentsCleanup() {
+        return true;
+    }
+
     public void createAwBrowserContext() {
         if (mBrowserContext != null) {
             throw new AndroidRuntimeException("There should only be one browser context.");
@@ -141,14 +195,32 @@ public class AwActivityTestRule extends ActivityTestRule<AwTestRunnerActivity> {
     }
 
     public void startBrowserProcess() {
+        doStartBrowserProcess(false);
+    }
+
+    public void startBrowserProcessWithVulkan() {
+        doStartBrowserProcess(true);
+    }
+
+    private void doStartBrowserProcess(boolean useVulkan) {
         // The Activity must be launched in order for proper webview statics to be setup.
         launchActivity();
-        TestThreadUtils.runOnUiThreadBlocking(() -> AwBrowserProcess.start());
+        if (!sBrowserProcessStarted) {
+            sBrowserProcessStarted = true;
+            TestThreadUtils.runOnUiThreadBlocking(() -> {
+                AwTestContainerView.installDrawFnFunctionTable(useVulkan);
+                AwBrowserProcess.start();
+            });
+        }
         if (mBrowserContext != null) {
             TestThreadUtils.runOnUiThreadBlocking(
                     () -> mBrowserContext.setNativePointer(
                             AwBrowserContext.getDefault().getNativePointer()));
         }
+    }
+
+    public void runOnUiThread(Runnable r) {
+        TestThreadUtils.runOnUiThreadBlocking(r);
     }
 
     public static void enableJavaScriptOnUiThread(final AwContents awContents) {
@@ -376,6 +448,7 @@ public class AwActivityTestRule extends ActivityTestRule<AwTestRunnerActivity> {
                 testContainerView.getNativeDrawFunctorFactory(), awContentsClient, awSettings,
                 testDependencyFactory);
         testContainerView.initialize(awContents);
+        mAwContentsDestroyedInTearDown.add(new WeakReference<>(awContents));
         return testContainerView;
     }
 
@@ -573,10 +646,6 @@ public class AwActivityTestRule extends ActivityTestRule<AwTestRunnerActivity> {
      */
     public boolean canZoomOutOnUiThread(final AwContents awContents) throws Exception {
         return TestThreadUtils.runOnUiThreadBlocking(() -> awContents.canZoomOut());
-    }
-
-    public void killRenderProcessOnUiThreadAsync(final AwContents awContents) {
-        TestThreadUtils.runOnUiThreadBlocking(() -> awContents.killRenderProcess());
     }
 
     /**

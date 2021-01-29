@@ -7,6 +7,8 @@
 // Polymer BrowserTest fixture.
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
 
+GEN('#include "content/public/test/browser_test.h"');
+
 // eslint-disable-next-line no-var
 var WebUIResourcesV3BrowserTest = class extends PolymerTest {
   /** @override */
@@ -18,14 +20,6 @@ var WebUIResourcesV3BrowserTest = class extends PolymerTest {
   get webuiHost() {
     return 'dummyurl';
   }
-
-  /** @override */
-  get extraLibraries() {
-    return [
-      '//third_party/mocha/mocha.js',
-      '//chrome/test/data/webui/mocha_adapter.js',
-    ];
-  }
 };
 
 // eslint-disable-next-line no-var
@@ -33,7 +27,7 @@ var WebUIResourcesListPropertyUpdateBehaviorV3Test =
     class extends WebUIResourcesV3BrowserTest {
   /** @override */
   get browsePreload() {
-    return 'chrome://test?module=resources/list_property_update_behavior_tests.m.js';
+    return 'chrome://test/test_loader.html?module=resources/list_property_update_behavior_tests.m.js';
   }
 };
 

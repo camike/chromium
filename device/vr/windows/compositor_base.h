@@ -39,6 +39,15 @@ class XRDeviceAbstraction {
   virtual bool SubmitCompositedFrame() = 0;
   virtual void HandleDeviceLost();
   virtual void OnLayerBoundsChanged();
+  // Sets enabled_features_ based on what features are supported
+  virtual void EnableSupportedFeatures(
+      const std::vector<device::mojom::XRSessionFeature>& requiredFeatures,
+      const std::vector<device::mojom::XRSessionFeature>& optionalFeatures) = 0;
+  virtual device::mojom::XREnvironmentBlendMode GetEnvironmentBlendMode(
+      device::mojom::XRSessionMode session_mode);
+  virtual device::mojom::XRInteractionMode GetInteractionMode(
+      device::mojom::XRSessionMode session_mode);
+  virtual bool CanEnableAntiAliasing() const;
 };
 
 class XRCompositorCommon : public base::Thread,
@@ -73,13 +82,15 @@ class XRCompositorCommon : public base::Thread,
   void GetEnvironmentIntegrationProvider(
       mojo::PendingAssociatedReceiver<
           device::mojom::XREnvironmentIntegrationProvider> environment_provider)
-      final;
+      override;
 
   void RequestOverlay(mojo::PendingReceiver<mojom::ImmersiveOverlay> receiver);
 
  protected:
   virtual bool UsesInputEventing();
   void SetVisibilityState(mojom::XRVisibilityState visibility_state);
+  const mojom::VRStageParametersPtr& GetCurrentStageParameters() const;
+  void SetStageParameters(mojom::VRStageParametersPtr stage_parameters);
 #if defined(OS_WIN)
   D3D11TextureHelper texture_helper_;
 #endif
@@ -92,6 +103,8 @@ class XRCompositorCommon : public base::Thread,
 
   // Derived classes override this to be notified to clear its pending frame.
   virtual void ClearPendingFrameInternal() {}
+
+  std::unordered_set<device::mojom::XRSessionFeature> enabled_features_;
 
  private:
   // base::Thread overrides:
@@ -149,7 +162,9 @@ class XRCompositorCommon : public base::Thread,
     bool overlay_submitted_ = false;
     bool waiting_for_webxr_ = false;
     bool waiting_for_overlay_ = false;
+
     mojom::XRFrameDataPtr frame_data_;
+    mojom::XRRenderInfoPtr render_info_;
 
     base::TimeTicks sent_frame_data_time_;
     base::TimeTicks submit_frame_time_;
@@ -183,6 +198,8 @@ class XRCompositorCommon : public base::Thread,
   mojo::Receiver<mojom::ImmersiveOverlay> overlay_receiver_{this};
   mojom::XRVisibilityState visibility_state_ =
       mojom::XRVisibilityState::VISIBLE;
+  mojom::VRStageParametersPtr current_stage_parameters_;
+  uint32_t stage_parameters_id_;
 
   DISALLOW_COPY_AND_ASSIGN(XRCompositorCommon);
 };

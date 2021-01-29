@@ -25,7 +25,6 @@ namespace chromeos {
 // finished (either successful or failed) wallpaper download.
 class CustomizationWallpaperDownloader {
  public:
-  // - |url_context_getter| - Context to initialize net::URLFetcher.
   // - |wallpaper_url| - wallpaper URL to download.
   // - |wallpaper_dir| - directory, where wallpaper will be downloaded
   // (it will be created).
@@ -38,7 +37,7 @@ class CustomizationWallpaperDownloader {
       const GURL& wallpaper_url,
       const base::FilePath& wallpaper_dir,
       const base::FilePath& wallpaper_downloaded_file,
-      base::Callback<void(bool success, const GURL&)>
+      base::OnceCallback<void(bool success, const GURL&)>
           on_wallpaper_fetch_completed);
 
   ~CustomizationWallpaperDownloader();
@@ -100,7 +99,8 @@ class CustomizationWallpaperDownloader {
   base::TimeDelta retry_current_delay_;
 
   // Callback supplied by caller.
-  base::Callback<void(bool success, const GURL&)> on_wallpaper_fetch_completed_;
+  base::OnceCallback<void(bool success, const GURL&)>
+      on_wallpaper_fetch_completed_;
 
   base::WeakPtrFactory<CustomizationWallpaperDownloader> weak_factory_{this};
 

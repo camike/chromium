@@ -69,7 +69,6 @@ class CORE_EXPORT Animation : public EventTargetWithInlineData,
                               public CompositorAnimationClient,
                               public AnimationEffectOwner {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(Animation);
   USING_PRE_FINALIZER(Animation, Dispose);
 
  public:
@@ -99,6 +98,10 @@ class CORE_EXPORT Animation : public EventTargetWithInlineData,
   // kPointerOrder simply compares Element pointers and determine animations'
   // relative position.
   enum CompareAnimationsOrdering { kTreeOrder, kPointerOrder };
+
+  // Only expect timing accuracy to within 1 microsecond.
+  // drafts.csswg.org/web-animations/#precision-of-time-values.
+  static constexpr double kTimeToleranceMs = 0.001;
 
   static Animation* Create(AnimationEffect*,
                            AnimationTimeline*,
@@ -147,7 +150,7 @@ class CORE_EXPORT Animation : public EventTargetWithInlineData,
                       ExceptionState& exception_state);
   void setCurrentTime(base::Optional<double> new_current_time);
 
-  base::Optional<double> UnlimitedCurrentTime() const;
+  base::Optional<AnimationTimeDelta> UnlimitedCurrentTime() const;
 
   // https://drafts.csswg.org/web-animations/#play-states
   String PlayStateString() const;
@@ -200,10 +203,13 @@ class CORE_EXPORT Animation : public EventTargetWithInlineData,
   double playbackRate() const;
   void setPlaybackRate(double, ExceptionState& = ASSERT_NO_EXCEPTION);
   AnimationTimeline* timeline() { return timeline_; }
+  virtual void setTimeline(AnimationTimeline* timeline);
   Document* GetDocument() const;
 
   base::Optional<double> startTime() const;
-  base::Optional<double> StartTimeInternal() const { return start_time_; }
+  base::Optional<AnimationTimeDelta> StartTimeInternal() const {
+    return start_time_;
+  }
   virtual void setStartTime(base::Optional<double>, ExceptionState&);
   void setStartTime(base::Optional<double>);
 
@@ -216,17 +222,21 @@ class CORE_EXPORT Animation : public EventTargetWithInlineData,
 
   // Pausing via this method is not reflected in the value returned by
   // paused() and must never overlap with pausing via pause().
-  void PauseForTesting(double pause_time);
+  void PauseForTesting(AnimationTimeDelta pause_time);
   void DisableCompositedAnimationForTesting();
 
   // This should only be used for CSS
   void Unpause();
+  bool ResetsCurrentTimeOnResume() const {
+    return reset_current_time_on_resume_;
+  }
 
   void SetOutdated();
   bool Outdated() { return outdated_; }
 
   CompositorAnimations::FailureReasons CheckCanStartAnimationOnCompositor(
-      const PaintArtifactCompositor* paint_artifact_compositor) const;
+      const PaintArtifactCompositor* paint_artifact_compositor,
+      PropertyHandleSet* unsupported_properties = nullptr) const;
   void StartAnimationOnCompositor(
       const PaintArtifactCompositor* paint_artifact_compositor);
   void CancelAnimationOnCompositor();
@@ -234,9 +244,9 @@ class CORE_EXPORT Animation : public EventTargetWithInlineData,
   void CancelIncompatibleAnimationsOnCompositor();
   bool HasActiveAnimationsOnCompositor();
   void SetCompositorPending(bool effect_changed = false);
-  void NotifyReady(double ready_time);
-  void CommitPendingPlay(double ready_time);
-  void CommitPendingPause(double ready_time);
+  void NotifyReady(AnimationTimeDelta ready_time);
+  void CommitPendingPlay(AnimationTimeDelta ready_time);
+  void CommitPendingPause(AnimationTimeDelta ready_time);
   // CompositorAnimationClient implementation.
   CompositorAnimation* GetCompositorAnimation() const override {
     return compositor_animation_ ? compositor_animation_->GetAnimation()
@@ -265,8 +275,9 @@ class CORE_EXPORT Animation : public EventTargetWithInlineData,
   void SetEffectSuppressed(bool);
 
   void InvalidateKeyframeEffect(const TreeScope&);
+  void InvalidateEffectTargetStyle();
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   bool CompositorPendingForTesting() const { return compositor_pending_; }
 
@@ -286,16 +297,12 @@ class CORE_EXPORT Animation : public EventTargetWithInlineData,
   // depends on computed values.
   virtual void FlushPendingUpdates() const {}
 
-  // TODO(yigu): This is a reverse dependency between AnimationTimeline and
-  // Animation. We should move the update logic once snapshotting is
-  // implemented. https://crbug.com/1060578.
-  void UpdateCompositorScrollTimeline();
-
  protected:
   DispatchEventResult DispatchEventInternal(Event&) override;
   void AddedEventListener(const AtomicString& event_type,
                           RegisteredEventListener&) override;
-  base::Optional<double> CurrentTimeInternal() const;
+  base::Optional<AnimationTimeDelta> CurrentTimeInternal() const;
+  TimelinePhase CurrentPhaseInternal() const;
   virtual AnimationEffect::EventDelegate* CreateEventDelegate(
       Element* target,
       const AnimationEffect::EventDelegate* old_event_delegate) {
@@ -303,13 +310,17 @@ class CORE_EXPORT Animation : public EventTargetWithInlineData,
   }
 
  private:
-  void SetCurrentTimeInternal(double new_current_time);
+  void SetCurrentTimeInternal(AnimationTimeDelta new_current_time);
+  void SetHoldTimeAndPhase(base::Optional<AnimationTimeDelta> new_hold_time,
+                           TimelinePhase new_hold_phase);
+  void ResetHoldTimeAndPhase();
+  bool ValidateHoldTimeAndPhase() const;
 
   void ClearOutdated();
   void ForceServiceOnNextFrame();
 
-  double EffectEnd() const;
-  bool Limited(base::Optional<double> current_time) const;
+  AnimationTimeDelta EffectEnd() const;
+  bool Limited(base::Optional<AnimationTimeDelta> current_time) const;
 
   // Playback rate that will take effect once any pending tasks are resolved.
   // If there are no pending tasks, then the effective playback rate equals the
@@ -317,8 +328,10 @@ class CORE_EXPORT Animation : public EventTargetWithInlineData,
   double EffectivePlaybackRate() const;
   void ApplyPendingPlaybackRate();
 
-  base::Optional<double> CalculateStartTime(double current_time) const;
-  base::Optional<double> CalculateCurrentTime() const;
+  base::Optional<AnimationTimeDelta> CalculateStartTime(
+      AnimationTimeDelta current_time) const;
+  base::Optional<AnimationTimeDelta> CalculateCurrentTime() const;
+  TimelinePhase CalculateCurrentPhase() const;
 
   void BeginUpdatingState();
   void EndUpdatingState();
@@ -380,9 +393,11 @@ class CORE_EXPORT Animation : public EventTargetWithInlineData,
   // effect when running a scheduled task in response to the animation being
   // ready.
   base::Optional<double> pending_playback_rate_;
-  base::Optional<double> start_time_;
-  base::Optional<double> hold_time_;
-  base::Optional<double> previous_current_time_;
+  base::Optional<AnimationTimeDelta> start_time_;
+  base::Optional<AnimationTimeDelta> hold_time_;
+  base::Optional<TimelinePhase> hold_phase_;
+  base::Optional<AnimationTimeDelta> previous_current_time_;
+  bool reset_current_time_on_resume_ = false;
 
   unsigned sequence_number_;
 
@@ -436,9 +451,17 @@ class CORE_EXPORT Animation : public EventTargetWithInlineData,
     USING_FAST_MALLOC(CompositorState);
 
    public:
+    // TODO(https://crbug.com/1166397): Convert composited animations to use
+    // AnimationTimeDelta for start_time_ and hold_time_.
     explicit CompositorState(Animation& animation)
-        : start_time(animation.start_time_),
-          hold_time(animation.hold_time_),
+        : start_time(animation.start_time_
+                         ? base::make_optional(
+                               animation.start_time_.value().InSecondsF())
+                         : base::nullopt),
+          hold_time(animation.hold_time_
+                        ? base::make_optional(
+                              animation.hold_time_.value().InSecondsF())
+                        : base::nullopt),
           playback_rate(animation.EffectivePlaybackRate()),
           effect_changed(false),
           pending_action(animation.start_time_ ? kNone : kStart) {}
@@ -470,7 +493,7 @@ class CORE_EXPORT Animation : public EventTargetWithInlineData,
 
     void Detach();
 
-    void Trace(Visitor* visitor) { visitor->Trace(animation_); }
+    void Trace(Visitor* visitor) const { visitor->Trace(animation_); }
 
     CompositorAnimation* GetAnimation() const {
       return compositor_animation_.get();

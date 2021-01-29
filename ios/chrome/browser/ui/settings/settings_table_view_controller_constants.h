@@ -7,11 +7,60 @@
 
 #import <Foundation/Foundation.h>
 
+#import "ios/chrome/browser/ui/list_model/list_model.h"
+
+// Sections used in Settings page.
+typedef NS_ENUM(NSInteger, SettingsSectionIdentifier) {
+  SettingsSectionIdentifierSignIn = kSectionIdentifierEnumZero,
+  SettingsSectionIdentifierAccount,
+  SettingsSectionIdentifierBasics,
+  SettingsSectionIdentifierAdvanced,
+  SettingsSectionIdentifierInfo,
+  SettingsSectionIdentifierDebug,
+  SettingsSectionIdentifierDefaults,
+};
+
+// Item types used per Setting section.
+typedef NS_ENUM(NSInteger, SettingsItemType) {
+  SettingsItemTypeSignInButton = kItemTypeEnumZero,
+  SettingsItemTypeSigninPromo,
+  SettingsItemTypeAccount,
+  SettingsItemTypeSyncAndGoogleServices,
+  SettingsItemTypeGoogleSync,
+  SettingsItemTypeGoogleServices,
+  SettingsItemTypeHeader,
+  SettingsItemTypeSearchEngine,
+  SettingsItemTypeManagedDefaultSearchEngine,
+  SettingsItemTypePasswords,
+  SettingsItemTypeAutofillCreditCard,
+  SettingsItemTypeAutofillProfile,
+  SettingsItemTypeVoiceSearch,
+  SettingsItemTypePrivacy,
+  SettingsItemTypeLanguageSettings,
+  SettingsItemTypeContentSettings,
+  SettingsItemTypeBandwidth,
+  SettingsItemTypeAboutChrome,
+  SettingsItemTypeMemoryDebugging,
+  SettingsItemTypeViewSource,
+  SettingsItemTypeTableCellCatalog,
+  SettingsItemTypeArticlesForYou,
+  SettingsItemTypeSafetyCheck,
+  SettingsItemTypeDefaultBrowser,
+  SettingsItemTypeSigninDisabled,
+};
+
+// The radius of the profile photo in the sign-in cell.
+extern const CGFloat kAccountProfilePhotoDimension;
+
 // The accessibility identifier of the settings TableView.
 extern NSString* const kSettingsTableViewId;
 
 // The accessibility identifier of the sign in cell.
 extern NSString* const kSettingsSignInCellId;
+
+// The accessibility identifier of the sign in cell when sign-in is disabled by
+// policy.
+extern NSString* const kSettingsSignInDisabledCellId;
 
 // The accessibility identifier of the account cell.
 extern NSString* const kSettingsAccountCellId;
@@ -19,11 +68,17 @@ extern NSString* const kSettingsAccountCellId;
 // The accessibility identifier of the Search Engine cell.
 extern NSString* const kSettingsSearchEngineCellId;
 
+// The accessibility identifier of the Managed Search Engine cell.
+extern NSString* const kSettingsManagedSearchEngineCellId;
+
 // The accessibility identifier of the Voice Search cell.
 extern NSString* const kSettingsVoiceSearchCellId;
 
 // The accessibility identifier of the Sync and Google services cell.
 extern NSString* const kSettingsGoogleSyncAndServicesCellId;
+
+// The accessibility identifier of the Google services cell.
+extern NSString* const kSettingsGoogleServicesCellId;
 
 // The accessibility identifier of the Passwords cell.
 extern NSString* const kSettingsPasswordsCellId;

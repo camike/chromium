@@ -24,6 +24,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/i18n/file_util_icu.h"
+#include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/nix/xdg_util.h"
 #include "base/path_service.h"
@@ -40,6 +41,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/channel_info.h"
@@ -106,7 +108,7 @@ const int EXIT_XDG_SETTINGS_SYNTAX_ERROR = 1;
 // If |protocol| is empty this function sets Chrome as the default browser,
 // otherwise it sets Chrome as the default handler application for |protocol|.
 bool SetDefaultWebClient(const std::string& protocol) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   return true;
 #else
   std::unique_ptr<base::Environment> env(base::Environment::Create());
@@ -139,7 +141,7 @@ bool SetDefaultWebClient(const std::string& protocol) {
 // |protocol|.
 shell_integration::DefaultWebClientState GetIsDefaultWebClient(
     const std::string& protocol) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   return shell_integration::UNKNOWN_DEFAULT;
 #else
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
@@ -234,7 +236,7 @@ std::string QuoteCommandLineForDesktopFileExec(
     const base::CommandLine& command_line) {
   // http://standards.freedesktop.org/desktop-entry-spec/latest/ar01s06.html
 
-  std::string quoted_path = "";
+  std::string quoted_path;
   const base::CommandLine::StringVector& argv = command_line.argv();
   for (auto i = argv.begin(); i != argv.end(); ++i) {
     if (i != argv.begin())

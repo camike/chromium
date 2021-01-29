@@ -77,23 +77,13 @@ class CC_ANIMATION_EXPORT TransformAnimationCurve : public AnimationCurve {
 
   virtual TransformOperations GetValue(base::TimeDelta t) const = 0;
 
-  // Returns true if this animation is a translation.
-  virtual bool IsTranslation() const = 0;
-
   // Returns true if this animation preserves axis alignment.
   virtual bool PreservesAxisAlignment() const = 0;
 
-  // Animation start scale
-  virtual bool AnimationStartScale(bool forward_direction,
-                                   float* start_scale) const = 0;
-
-  // Set |max_scale| to the maximum scale along any dimension at the end of
-  // intermediate animation target points (eg keyframe end points). When
-  // |forward_direction| is true, the animation curve assumes it plays from
-  // the first keyframe to the last, otherwise it assumes the opposite. Returns
-  // false if the maximum scale cannot be computed.
-  virtual bool MaximumTargetScale(bool forward_direction,
-                                  float* max_scale) const = 0;
+  // Set |max_scale| to the maximum scale along any dimension during the
+  // animation, of all steps (keyframes) with calculatable scale. Returns
+  // false if none of the steps can calculate a scale.
+  virtual bool MaximumScale(float* max_scale) const = 0;
 
   CurveType Type() const override;
 };

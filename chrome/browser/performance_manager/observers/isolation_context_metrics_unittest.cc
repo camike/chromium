@@ -42,6 +42,8 @@ class TestIsolationContextMetrics : public IsolationContextMetrics {
 
 class IsolationContextMetricsTest : public GraphTestHarness {
  public:
+  using Super = GraphTestHarness;
+
   IsolationContextMetricsTest()
       : GraphTestHarness(
             base::test::TaskEnvironment::ThreadPoolExecutionMode::QUEUED,
@@ -64,6 +66,7 @@ class IsolationContextMetricsTest : public GraphTestHarness {
   static constexpr int32_t kSID3 = 3;
 
   void SetUp() override {
+    Super::SetUp();
     metrics_ = new TestIsolationContextMetrics();
 
     // Sets a valid starting time.
@@ -81,8 +84,8 @@ class IsolationContextMetricsTest : public GraphTestHarness {
       FrameNodeImpl* parent_frame_node = nullptr) {
     return CreateNode<FrameNodeImpl>(
         process_node, page_node, parent_frame_node, 0 /* frame_tree_node_id */,
-        ++next_render_frame_id_, base::UnguessableToken::Create(),
-        browsing_instance_id, site_instance_id);
+        ++next_render_frame_id_, blink::LocalFrameToken(), browsing_instance_id,
+        site_instance_id);
   }
 
   // Advance time until the timer fires.

@@ -20,12 +20,27 @@ function createImpressionTag(id, url, data, destination) {
   createImpressionTagWithTarget(id, url, data, destination, "_top");
 }
 
+function createImpressionTagAtLocation(id, url, data, destination, left, top) {
+  let anchor =
+      createImpressionTagWithTarget(id, url, data, destination, "_top");
+  const style =  "position: absolute; left: " + (left - 10) + "px; top: " +
+      (top - 10) + "px; width: 20px; height: 20px;";
+  anchor.setAttribute("style", style);
+}
+
 function createImpressionTagWithReportingAndExpiry(
     id, url, data, destination, report_origin, expiry) {
   let anchor = createImpressionTagWithTarget(
       id, url, data, destination, "_top");
   anchor.setAttribute("reportingorigin", report_origin);
   anchor.setAttribute("impressionexpiry", expiry);
+}
+
+function createImpressionTagWithReporting(
+    id, url, data, destination, report_origin) {
+  let anchor = createImpressionTagWithTarget(
+      id, url, data, destination, "_top");
+  anchor.setAttribute("reportingorigin", report_origin);
 }
 
 function createImpressionTagWithTarget(id, url, data, destination, target) {

@@ -5,6 +5,10 @@
 #ifndef CC_ANIMATION_KEYFRAME_EFFECT_H_
 #define CC_ANIMATION_KEYFRAME_EFFECT_H_
 
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "cc/animation/animation_events.h"
@@ -16,12 +20,10 @@
 #include "ui/gfx/geometry/box_f.h"
 #include "ui/gfx/geometry/scroll_offset.h"
 
-#include <memory>
-#include <vector>
-
 namespace cc {
 
 class Animation;
+enum class PauseCondition { kUnconditional, kAfterStart };
 struct PropertyAnimationState;
 
 // A KeyframeEffect owns a group of KeyframeModels for a single target
@@ -86,7 +88,8 @@ class CC_ANIMATION_EXPORT KeyframeEffect {
   void UpdateState(bool start_ready_keyframe_models, AnimationEvents* events);
   void UpdateTickingState();
 
-  void Pause(base::TimeDelta pause_offset);
+  void Pause(base::TimeDelta pause_offset,
+             PauseCondition = PauseCondition::kUnconditional);
 
   void AddKeyframeModel(std::unique_ptr<KeyframeModel> keyframe_model);
   void PauseKeyframeModel(int keyframe_model_id, base::TimeDelta time_offset);
@@ -106,7 +109,6 @@ class CC_ANIMATION_EXPORT KeyframeEffect {
   // Returns true if there are any KeyframeModels that have neither finished
   // nor aborted.
   bool HasTickingKeyframeModel() const;
-  size_t TickingKeyframeModelsCount() const;
 
   bool AffectsCustomProperty() const;
 
@@ -114,15 +116,10 @@ class CC_ANIMATION_EXPORT KeyframeEffect {
 
   bool AnimationsPreserveAxisAlignment() const;
 
-  // Gets scales transform animations. On return, |maximum_scale| is the maximum
-  // scale along any dimension at any destination in active scale animations,
-  // and |starting_scale| is the maximum of starting animation scale along any
-  // dimension at any destination in active scale animations. They are set to
-  // kNotScaled if there is no active scale animation or the scales cannot be
-  // computed. Returns false if the scales cannot be computed.
-  bool GetAnimationScales(ElementListType,
-                          float* maximum_scale,
-                          float* starting_scale) const;
+  // Returns the maximum scale along any dimension at any destination in active
+  // scale animations, or kInvalidScale if there is no active transform
+  // animation or the scale cannot be computed.
+  float MaximumScale(ElementListType) const;
 
   // Returns true if there is a keyframe_model that is either currently
   // animating the given property or scheduled to animate this property in the

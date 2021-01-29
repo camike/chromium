@@ -4,8 +4,10 @@
 
 #include "chrome/browser/ui/toolbar/test_toolbar_actions_bar_bubble_delegate.h"
 
+#include "base/check.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/threading/thread_restrictions.h"
 
 class TestToolbarActionsBarBubbleDelegate::DelegateImpl
     : public ToolbarActionsBarBubbleDelegate {
@@ -15,7 +17,7 @@ class TestToolbarActionsBarBubbleDelegate::DelegateImpl
   ~DelegateImpl() override {}
 
  private:
-  bool ShouldShow() override { return true; }
+  bool ShouldShow() override { return !parent_->shown_; }
   bool ShouldCloseOnDeactivate() override {
     return parent_->close_on_deactivate_;
   }
@@ -37,7 +39,7 @@ class TestToolbarActionsBarBubbleDelegate::DelegateImpl
     return nullptr;
   }
   std::string GetAnchorActionId() override { return std::string(); }
-  void OnBubbleShown(const base::Closure& close_bubble_callback) override {
+  void OnBubbleShown(base::OnceClosure close_bubble_callback) override {
     CHECK(!parent_->shown_);
     parent_->shown_ = true;
   }

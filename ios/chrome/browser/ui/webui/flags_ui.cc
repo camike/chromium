@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -190,8 +190,8 @@ void FlagsDOMHandler::HandleResetAllFlags(const base::ListValue* args) {
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-FlagsUI::FlagsUI(web::WebUIIOS* web_ui)
-    : web::WebUIIOSController(web_ui), weak_factory_(this) {
+FlagsUI::FlagsUI(web::WebUIIOS* web_ui, const std::string& host)
+    : web::WebUIIOSController(web_ui, host), weak_factory_(this) {
   FlagsDOMHandler* handler = new FlagsDOMHandler();
   web_ui->AddMessageHandler(base::WrapUnique(handler));
 
@@ -230,6 +230,7 @@ void FlagsUI::AddFlagsIOSStrings(web::WebUIIOSDataSource* source) {
   source->AddLocalizedString("reset", IDS_FLAGS_UI_PAGE_RESET);
   source->AddLocalizedString("reset-acknowledged",
                              IDS_FLAGS_UI_RESET_ACKNOWLEDGED);
+  source->AddLocalizedString("search-label", IDS_FLAGS_UI_SEARCH_LABEL);
   source->AddLocalizedString("search-placeholder",
                              IDS_FLAGS_UI_SEARCH_PLACEHOLDER);
   source->AddLocalizedString("title", IDS_FLAGS_UI_TITLE);

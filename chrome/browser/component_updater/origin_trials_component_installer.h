@@ -42,15 +42,13 @@ class OriginTrialsComponentInstallerPolicy : public ComponentInstallerPolicy {
   void GetHash(std::vector<uint8_t>* hash) const override;
   std::string GetName() const override;
   update_client::InstallerAttributes GetInstallerAttributes() const override;
-  std::vector<std::string> GetMimeTypes() const override;
 
   DISALLOW_COPY_AND_ASSIGN(OriginTrialsComponentInstallerPolicy);
 };
 
 // Call once during startup to make the component update service aware of
 // the origin trials update component.
-void RegisterOriginTrialsComponent(ComponentUpdateService* cus,
-                                   const base::FilePath& user_data_dir);
+void RegisterOriginTrialsComponent(ComponentUpdateService* cus);
 
 }  // namespace component_updater
 

@@ -23,7 +23,6 @@
 #include "components/sync/engine_impl/cycle/sync_cycle.h"
 #include "components/sync/engine_impl/cycle/sync_cycle_context.h"
 #include "components/sync/engine_impl/net/server_connection_manager.h"
-#include "components/sync/engine_impl/nudge_source.h"
 #include "components/sync/engine_impl/sync_scheduler.h"
 #include "components/sync/engine_impl/syncer.h"
 
@@ -34,12 +33,11 @@ struct ModelNeutralState;
 
 class SyncSchedulerImpl : public SyncScheduler {
  public:
-  // |name| is a display string to identify the syncer thread.  Takes
-  // ownership of |syncer| and |delay_provider|.
+  // |name| is a display string to identify the syncer thread.
   SyncSchedulerImpl(const std::string& name,
-                    BackoffDelayProvider* delay_provider,
+                    std::unique_ptr<BackoffDelayProvider> delay_provider,
                     SyncCycleContext* context,
-                    Syncer* syncer,
+                    std::unique_ptr<Syncer> syncer,
                     bool ignore_auth_credentials);
 
   // Calls Stop().
@@ -255,7 +253,7 @@ class SyncSchedulerImpl : public SyncScheduler {
   NudgeTracker nudge_tracker_;
 
   // Invoked to run through the sync cycle.
-  std::unique_ptr<Syncer> syncer_;
+  const std::unique_ptr<Syncer> syncer_;
 
   SyncCycleContext* cycle_context_;
 

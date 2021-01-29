@@ -3,21 +3,25 @@
 // found in the LICENSE file.
 
 #include "ash/frame/non_client_frame_view_ash.h"
-#include "ash/public/cpp/ash_constants.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/test/test_window_builder.h"
 #include "ash/wm/cursor_manager_test_api.h"
 #include "ash/wm/resize_shadow.h"
 #include "ash/wm/resize_shadow_controller.h"
 #include "ash/wm/window_state.h"
 #include "base/bind.h"
+#include "chromeos/ui/base/chromeos_ui_constants.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/cursor/cursor.h"
+#include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
 #include "ui/base/hit_test.h"
-#include "ui/base/mojom/cursor_type.mojom-shared.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
+
+using chromeos::kResizeInsideBoundsSize;
+using chromeos::kResizeOutsideBoundsSize;
 
 namespace ash {
 
@@ -26,16 +30,17 @@ namespace {
 // views::WidgetDelegate which uses ash::NonClientFrameViewAsh.
 class TestWidgetDelegate : public views::WidgetDelegateView {
  public:
-  TestWidgetDelegate() = default;
+  TestWidgetDelegate() {
+    SetCanMaximize(true);
+    SetCanMinimize(true);
+    SetCanResize(true);
+  }
   ~TestWidgetDelegate() override = default;
 
   // views::WidgetDelegateView overrides:
-  bool CanResize() const override { return true; }
-  bool CanMaximize() const override { return true; }
-  bool CanMinimize() const override { return true; }
-  views::NonClientFrameView* CreateNonClientFrameView(
+  std::unique_ptr<views::NonClientFrameView> CreateNonClientFrameView(
       views::Widget* widget) override {
-    return new NonClientFrameViewAsh(widget);
+    return std::make_unique<NonClientFrameViewAsh>(widget);
   }
 
  private:
@@ -63,8 +68,11 @@ class ResizeShadowAndCursorTest : public AshTestBase {
     // Add a child window to |window_| in order to properly test that the resize
     // handles and the resize shadows are shown when the mouse is
     // ash::kResizeInsideBoundsSize inside of |window_|'s edges.
-    aura::Window* child =
-        CreateTestWindowInShell(SK_ColorWHITE, 0, gfx::Rect(0, 10, 200, 90));
+    aura::Window* child = TestWindowBuilder()
+                              .SetColorWindowDelegate(SK_ColorWHITE)
+                              .SetBounds(gfx::Rect(0, 10, 200, 90))
+                              .Build()
+                              .release();
     window_->AddChild(child);
   }
 

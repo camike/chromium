@@ -8,11 +8,14 @@
 #include <string>
 
 #include "ash/ambient/ui/ambient_assistant_dialog_plate.h"
+#include "ash/ambient/ui/ambient_view_ids.h"
 #include "ash/ambient/ui/assistant_response_container_view.h"
 #include "ash/assistant/assistant_controller_impl.h"
+#include "ash/assistant/model/assistant_ui_model.h"
 #include "ash/assistant/ui/assistant_ui_constants.h"
 #include "ash/assistant/ui/assistant_view_delegate.h"
 #include "ash/assistant/util/assistant_util.h"
+#include "ash/public/cpp/assistant/controller/assistant_ui_controller.h"
 #include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
@@ -21,7 +24,11 @@
 #include "ui/views/background.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
-#include "ui/views/layout/box_layout.h"
+#include "ui/views/layout/flex_layout.h"
+#include "ui/views/layout/flex_layout_types.h"
+#include "ui/views/layout/layout_types.h"
+#include "ui/views/metadata/metadata_impl_macros.h"
+#include "ui/views/view_class_properties.h"
 
 namespace ash {
 
@@ -30,8 +37,11 @@ namespace {
 // Appearance.
 constexpr int kAvatarImageSizeDip = 32;
 
+constexpr int kAssistantPreferredHeightDip = 128;
+
 // Greeting message.
 base::string16 GetGreetingMessage(const UserSession* user_session) {
+  DCHECK(user_session);
   const std::string& username = user_session->user_info.display_name;
   return l10n_util::GetStringFUTF16(IDS_ASSISTANT_AMBIENT_GREETING_MESSAGE,
                                     base::UTF8ToUTF16(username));
@@ -42,15 +52,23 @@ base::string16 GetGreetingMessage(const UserSession* user_session) {
 AmbientAssistantContainerView::AmbientAssistantContainerView()
     : delegate_(Shell::Get()->assistant_controller()->view_delegate()) {
   DCHECK(delegate_);
+  SetID(AmbientViewID::kAmbientAssistantContainerView);
   InitLayout();
 
-  assistant_ui_model_observer_.Add(AssistantUiController::Get());
+  assistant_controller_observation_.Observe(AssistantController::Get());
+  AssistantUiController::Get()->GetModel()->AddObserver(this);
 }
 
-AmbientAssistantContainerView::~AmbientAssistantContainerView() = default;
+AmbientAssistantContainerView::~AmbientAssistantContainerView() {
+  if (AssistantUiController::Get())
+    AssistantUiController::Get()->GetModel()->RemoveObserver(this);
+}
 
-const char* AmbientAssistantContainerView::GetClassName() const {
-  return "AmbientAssistantContainerView";
+void AmbientAssistantContainerView::OnAssistantControllerDestroying() {
+  AssistantUiController::Get()->GetModel()->RemoveObserver(this);
+  DCHECK(assistant_controller_observation_.IsObservingSource(
+      AssistantController::Get()));
+  assistant_controller_observation_.Reset();
 }
 
 void AmbientAssistantContainerView::OnUiVisibilityChanged(
@@ -69,53 +87,78 @@ void AmbientAssistantContainerView::OnUiVisibilityChanged(
 }
 
 void AmbientAssistantContainerView::InitLayout() {
-  SetPaintToLayer();
-  SetBackground(views::CreateSolidBackground(SK_ColorWHITE));
+  views::FlexLayout* outer_layout =
+      SetLayoutManager(std::make_unique<views::FlexLayout>());
+  outer_layout->SetOrientation(views::LayoutOrientation::kVertical);
+  outer_layout->SetMainAxisAlignment(views::LayoutAlignment::kStart);
+  outer_layout->SetCrossAxisAlignment(views::LayoutAlignment::kStretch);
 
+  auto* container = AddChildView(std::make_unique<views::View>());
+
+  // Set a placeholder value for width. |CrossAxisAlignment::kStretch| will
+  // expand the width to 100% of the parent.
+  container->SetPreferredSize(
+      {/*width=*/1, /*height=*/kAssistantPreferredHeightDip});
+  container->SetPaintToLayer();
+  container->SetBackground(views::CreateSolidBackground(SK_ColorWHITE));
+
+  views::FlexLayout* container_layout =
+      container->SetLayoutManager(std::make_unique<views::FlexLayout>());
   constexpr int kRightPaddingDip = 8;
-  views::BoxLayout* layout_manager =
-      SetLayoutManager(std::make_unique<views::BoxLayout>(
-          views::BoxLayout::Orientation::kHorizontal,
-          gfx::Insets(0, 0, 0, kRightPaddingDip)));
+  container_layout->SetInteriorMargin({0, 0, 0, kRightPaddingDip});
 
-  layout_manager->set_cross_axis_alignment(
-      views::BoxLayout::CrossAxisAlignment::kCenter);
+  container_layout->SetOrientation(views::LayoutOrientation::kHorizontal);
+  container_layout->SetMainAxisAlignment(views::LayoutAlignment::kStart);
+  container_layout->SetCrossAxisAlignment(views::LayoutAlignment::kCenter);
 
   // Mic button and input query view.
-  ambient_assistant_dialog_plate_ =
-      AddChildView(std::make_unique<AmbientAssistantDialogPlate>(delegate_));
+  ambient_assistant_dialog_plate_ = container->AddChildView(
+      std::make_unique<AmbientAssistantDialogPlate>(delegate_));
 
   // Response container view.
-  assistant_response_container_view_ =
-      AddChildView(std::make_unique<AssistantResponseContainerView>(delegate_));
+  assistant_response_container_view_ = container->AddChildView(
+      std::make_unique<AssistantResponseContainerView>(delegate_));
 
   // Greeting label.
   const UserSession* active_user_session =
       Shell::Get()->session_controller()->GetUserSession(0);
-  greeting_label_ = AddChildView(
-      std::make_unique<views::Label>(GetGreetingMessage(active_user_session)));
-  greeting_label_->SetEnabledColor(kTextColorSecondary);
-  greeting_label_->SetFontList(
-      assistant::ui::GetDefaultFontList()
-          .DeriveWithSizeDelta(8)
-          .DeriveWithWeight(gfx::Font::Weight::NORMAL));
-  greeting_label_->SetHorizontalAlignment(
-      gfx::HorizontalAlignment::ALIGN_CENTER);
+  // TODO(meilinw): uses login user info instead as no active user session is
+  // available on lock screen.
+  if (active_user_session) {
+    greeting_label_ = container->AddChildView(std::make_unique<views::Label>(
+        GetGreetingMessage(active_user_session)));
+    greeting_label_->SetEnabledColor(kTextColorSecondary);
+    greeting_label_->SetFontList(
+        assistant::ui::GetDefaultFontList()
+            .DeriveWithSizeDelta(8)
+            .DeriveWithWeight(gfx::Font::Weight::NORMAL));
+    greeting_label_->SetHorizontalAlignment(
+        gfx::HorizontalAlignment::ALIGN_CENTER);
+  }
 
   // Spacer.
-  views::View* spacer = AddChildView(std::make_unique<views::View>());
-  // Sets the flex weight to be 1 so the spacer view can be resized.
-  layout_manager->SetFlexForView(spacer, 1);
+  views::View* spacer =
+      container->AddChildView(std::make_unique<views::View>());
+  // Allow the spacer to expand to push the avatar image to the end of the
+  // container.
+  spacer->SetProperty(
+      views::kFlexBehaviorKey,
+      views::FlexSpecification(views::MinimumFlexSizeRule::kScaleToZero,
+                               views::MaximumFlexSizeRule::kUnbounded));
 
   // Rounded avatar image view.
-  avatar_view_ = AddChildView(std::make_unique<views::ImageView>());
+  avatar_view_ = container->AddChildView(std::make_unique<views::ImageView>());
   avatar_view_->SetImageSize(
       gfx::Size(kAvatarImageSizeDip, kAvatarImageSizeDip));
   avatar_view_->SetPreferredSize(
       gfx::Size(kAvatarImageSizeDip, kAvatarImageSizeDip));
-  gfx::ImageSkia avatar = active_user_session->user_info.avatar.image;
-  if (!avatar.isNull())
-    avatar_view_->SetImage(avatar);
+  // TODO(meilinw): uses login user info instead as no active user session is
+  // available on lock screen.
+  if (active_user_session) {
+    gfx::ImageSkia avatar = active_user_session->user_info.avatar.image;
+    if (!avatar.isNull())
+      avatar_view_->SetImage(avatar);
+  }
 
   SkPath circular_mask;
   constexpr int kClipCircleRadius = kAvatarImageSizeDip / 2;
@@ -124,4 +167,6 @@ void AmbientAssistantContainerView::InitLayout() {
   avatar_view_->SetClipPath(circular_mask);
 }
 
+BEGIN_METADATA(AmbientAssistantContainerView, views::View)
+END_METADATA
 }  // namespace ash

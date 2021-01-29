@@ -8,52 +8,55 @@
 #include "base/mac/foundation_util.h"
 #include "base/strings/strcat.h"
 #include "base/strings/sys_string_conversions.h"
+#include "chrome/updater/updater_branding.h"
 #include "chrome/updater/updater_version.h"
 
 namespace updater {
 
-base::ScopedCFTypeRef<CFStringRef> CopyGoogleUpdateCheckLaunchDName() {
-  return base::ScopedCFTypeRef<CFStringRef>(
-      base::SysUTF8ToCFStringRef(base::StrCat({
-          MAC_BUNDLE_IDENTIFIER_STRING,
-          ".check",
-      })),
-      base::scoped_policy::RETAIN);
+const char kUpdateServiceInternalLaunchdName[] =
+    MAC_BUNDLE_IDENTIFIER_STRING ".update-internal." UPDATER_VERSION_STRING;
+const char kUpdateServiceLaunchdName[] = MAC_BUNDLE_IDENTIFIER_STRING ".update";
+
+base::ScopedCFTypeRef<CFStringRef> CopyUpdateServiceLaunchdName() {
+  return base::SysUTF8ToCFStringRef(kUpdateServiceLaunchdName);
 }
 
-base::ScopedCFTypeRef<CFStringRef> CopyGoogleUpdateServiceLaunchDName() {
-  return base::ScopedCFTypeRef<CFStringRef>(
-      base::SysUTF8ToCFStringRef(base::StrCat({
-          MAC_BUNDLE_IDENTIFIER_STRING,
-          ".service",
-      })),
-      base::scoped_policy::RETAIN);
+base::ScopedCFTypeRef<CFStringRef> CopyWakeLaunchdName() {
+  return base::SysUTF8ToCFStringRef(MAC_BUNDLE_IDENTIFIER_STRING
+                                    ".wake." UPDATER_VERSION_STRING);
 }
 
-base::scoped_nsobject<NSString> GetGoogleUpdateCheckLaunchDLabel() {
+base::ScopedCFTypeRef<CFStringRef> CopyUpdateServiceInternalLaunchdName() {
+  return base::SysUTF8ToCFStringRef(kUpdateServiceInternalLaunchdName);
+}
+
+base::scoped_nsobject<NSString> GetUpdateServiceLaunchdLabel() {
   return base::scoped_nsobject<NSString>(
-      base::mac::CFToNSCast(CopyGoogleUpdateCheckLaunchDName()));
+      base::mac::CFToNSCast(CopyUpdateServiceLaunchdName().release()));
 }
 
-base::scoped_nsobject<NSString> GetGoogleUpdateServiceLaunchDLabel() {
+base::scoped_nsobject<NSString> GetWakeLaunchdLabel() {
   return base::scoped_nsobject<NSString>(
-      base::mac::CFToNSCast(CopyGoogleUpdateServiceLaunchDName()));
+      base::mac::CFToNSCast(CopyWakeLaunchdName().release()));
 }
 
-base::scoped_nsobject<NSString> GetGoogleUpdateServiceMachName(NSString* name) {
+base::scoped_nsobject<NSString> GetUpdateServiceInternalLaunchdLabel() {
   return base::scoped_nsobject<NSString>(
-      [name stringByAppendingFormat:@".%lu", [name hash]],
-      base::scoped_policy::RETAIN);
+      base::mac::CFToNSCast(CopyUpdateServiceInternalLaunchdName().release()));
 }
 
-base::scoped_nsobject<NSString> GetGoogleUpdateServiceMachName() {
-  base::scoped_nsobject<NSString> name(
-      base::mac::CFToNSCast(CopyGoogleUpdateServiceLaunchDName()));
+base::scoped_nsobject<NSString> GetUpdateServiceMachName(
+    base::scoped_nsobject<NSString> name) {
   return base::scoped_nsobject<NSString>(
-      [name
-          stringByAppendingFormat:@".%lu",
-                                  [GetGoogleUpdateServiceLaunchDLabel() hash]],
-      base::scoped_policy::RETAIN);
+      [name stringByAppendingString:@".mach"], base::scoped_policy::RETAIN);
+}
+
+base::scoped_nsobject<NSString> GetUpdateServiceMachName() {
+  return GetUpdateServiceMachName(GetUpdateServiceLaunchdLabel());
+}
+
+base::scoped_nsobject<NSString> GetUpdateServiceInternalMachName() {
+  return GetUpdateServiceMachName(GetUpdateServiceInternalLaunchdLabel());
 }
 
 }  // namespace updater

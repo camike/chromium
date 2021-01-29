@@ -44,10 +44,11 @@ namespace {
 
 // Returns the current animation time for a given |document|. This is
 // the animation clock time capped to be at least this document's
-// ZeroTime() such that the animation time is never negative when converted.
+// CalculateZeroTime() such that the animation time is never negative when
+// converted.
 base::TimeTicks CurrentAnimationTime(Document* document) {
   base::TimeTicks animation_time = document->GetAnimationClock().CurrentTime();
-  base::TimeTicks document_zero_time = document->Timeline().ZeroTime();
+  base::TimeTicks document_zero_time = document->Timeline().CalculateZeroTime();
 
   // The AnimationClock time may be null or less than the local document's
   // zero time if we have not generated any frames for this document yet. If
@@ -99,21 +100,11 @@ bool DocumentTimeline::IsActive() const {
 // timeline current time.
 base::Optional<base::TimeDelta>
 DocumentTimeline::InitialStartTimeForAnimations() {
-  base::Optional<double> current_time_ms = currentTime();
+  base::Optional<double> current_time_ms = CurrentTimeMilliseconds();
   if (current_time_ms.has_value()) {
     return base::TimeDelta::FromMillisecondsD(current_time_ms.value());
   }
   return base::nullopt;
-}
-
-Animation* DocumentTimeline::Play(AnimationEffect* child) {
-  Animation* animation = Animation::Create(child, this);
-  DCHECK(animations_.Contains(animation));
-
-  animation->play();
-  DCHECK(animations_needing_update_.Contains(animation));
-
-  return animation;
 }
 
 void DocumentTimeline::ScheduleNextService() {
@@ -150,12 +141,13 @@ void DocumentTimeline::DocumentTimelineTiming::WakeAfter(
   timer_.StartOneShot(duration, FROM_HERE);
 }
 
-void DocumentTimeline::DocumentTimelineTiming::Trace(Visitor* visitor) {
+void DocumentTimeline::DocumentTimelineTiming::Trace(Visitor* visitor) const {
   visitor->Trace(timeline_);
+  visitor->Trace(timer_);
   DocumentTimeline::PlatformTiming::Trace(visitor);
 }
 
-base::TimeTicks DocumentTimeline::ZeroTime() {
+base::TimeTicks DocumentTimeline::CalculateZeroTime() {
   if (!zero_time_initialized_ && document_->Loader()) {
     zero_time_ = document_->Loader()->GetTiming().ReferenceMonotonicTime() +
                  origin_time_;
@@ -182,12 +174,14 @@ AnimationTimeline::PhaseAndTime DocumentTimeline::CurrentPhaseAndTime() {
 
   base::Optional<base::TimeDelta> result =
       playback_rate_ == 0
-          ? ZeroTime().since_origin()
-          : (CurrentAnimationTime(GetDocument()) - ZeroTime()) * playback_rate_;
+          ? CalculateZeroTime().since_origin()
+          : (CurrentAnimationTime(GetDocument()) - CalculateZeroTime()) *
+                playback_rate_;
   return {TimelinePhase::kActive, result};
 }
 
-void DocumentTimeline::PauseAnimationsForTesting(double pause_time) {
+void DocumentTimeline::PauseAnimationsForTesting(
+    AnimationTimeDelta pause_time) {
   for (const auto& animation : animations_needing_update_)
     animation->PauseForTesting(pause_time);
   ServiceAnimations(kTimingUpdateOnDemand);
@@ -205,13 +199,7 @@ void DocumentTimeline::SetPlaybackRate(double playback_rate) {
 
   // Corresponding compositor animation may need to be restarted to pick up
   // the new playback rate. Marking the effect changed forces this.
-  SetAllCompositorPending(true);
-}
-
-void DocumentTimeline::SetAllCompositorPending(bool source_changed) {
-  for (const auto& animation : animations_) {
-    animation->SetCompositorPending(source_changed);
-  }
+  MarkAnimationsCompositorPending(true);
 }
 
 double DocumentTimeline::PlaybackRate() const {
@@ -231,7 +219,7 @@ CompositorAnimationTimeline* DocumentTimeline::EnsureCompositorTimeline() {
   return compositor_timeline_.get();
 }
 
-void DocumentTimeline::Trace(Visitor* visitor) {
+void DocumentTimeline::Trace(Visitor* visitor) const {
   visitor->Trace(timing_);
   AnimationTimeline::Trace(visitor);
 }

@@ -17,11 +17,13 @@
 #include "base/sequenced_task_runner.h"
 #include "base/time/time.h"
 #include "chrome/browser/media/router/providers/cast/cast_app_availability_tracker.h"
-#include "chrome/common/media_router/discovery/media_sink_service_base.h"
-#include "chrome/common/media_router/media_sink.h"
-#include "chrome/common/media_router/media_source.h"
-#include "chrome/common/media_router/providers/cast/cast_media_source.h"
 #include "components/cast_channel/cast_message_util.h"
+#include "components/media_router/common/discovery/media_sink_service_base.h"
+#include "components/media_router/common/media_sink.h"
+#include "components/media_router/common/media_source.h"
+#include "components/media_router/common/mojom/logger.mojom.h"
+#include "components/media_router/common/providers/cast/cast_media_source.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace base {
 class TickClock;
@@ -42,15 +44,14 @@ class CastAppDiscoveryService {
                              const std::vector<MediaSinkInternal>& sinks);
   using SinkQueryCallback = base::RepeatingCallback<SinkQueryFunc>;
   using SinkQueryCallbackList = base::CallbackList<SinkQueryFunc>;
-  using Subscription = std::unique_ptr<SinkQueryCallbackList::Subscription>;
 
   virtual ~CastAppDiscoveryService() = default;
 
   // Adds a sink query for |source|. Results will be continuously returned via
-  // |callback| until the returned Subscription is destroyed by the caller.
-  // If there are cached results available, |callback| will be invoked before
-  // this method returns.
-  virtual Subscription StartObservingMediaSinks(
+  // |callback| until the returned subscription is destroyed by the caller. If
+  // there are cached results available, |callback| will be invoked before this
+  // method returns.
+  virtual base::CallbackListSubscription StartObservingMediaSinks(
       const CastMediaSource& source,
       const SinkQueryCallback& callback) = 0;
 
@@ -58,6 +59,14 @@ class CastAppDiscoveryService {
   // this method when the user initiates a user gesture (such as opening the
   // Media Router dialog).
   virtual void Refresh() = 0;
+
+  // Binds |pending_remote| to the Mojo Remote owned by |impl_|.
+  virtual void BindLogger(
+      mojo::PendingRemote<mojom::Logger> pending_remote) = 0;
+
+  // Returns the SequencedTaskRunner that should be used to invoke methods on
+  // this instance. Can be invoked on any thread.
+  virtual scoped_refptr<base::SequencedTaskRunner> task_runner() = 0;
 };
 
 // Keeps track of sink queries and listens to CastMediaSinkServiceImpl for sink
@@ -74,13 +83,17 @@ class CastAppDiscoveryServiceImpl : public CastAppDiscoveryService,
   ~CastAppDiscoveryServiceImpl() override;
 
   // CastAppDiscoveryService implementation.
-  Subscription StartObservingMediaSinks(
+  base::CallbackListSubscription StartObservingMediaSinks(
       const CastMediaSource& source,
       const SinkQueryCallback& callback) override;
 
   // Reissues app availability requests for currently registered (sink, app_id)
   // pairs whose status is kUnavailable or kUnknown.
   void Refresh() override;
+
+  void BindLogger(mojo::PendingRemote<mojom::Logger> pending_remote) override;
+
+  scoped_refptr<base::SequencedTaskRunner> task_runner() override;
 
  private:
   friend class CastAppDiscoveryServiceImplTest;
@@ -136,6 +149,10 @@ class CastAppDiscoveryServiceImpl : public CastAppDiscoveryService,
   CastAppAvailabilityTracker availability_tracker_;
 
   const base::TickClock* const clock_;
+  // Mojo Remote to the logger owned by the Media Router. The Remote is not
+  // bound until |BindLogger()| is called. Always check if |logger_.is_bound()|
+  // is true before using.
+  mojo::Remote<mojom::Logger> logger_;
 
   SEQUENCE_CHECKER(sequence_checker_);
   base::WeakPtrFactory<CastAppDiscoveryServiceImpl> weak_ptr_factory_{this};

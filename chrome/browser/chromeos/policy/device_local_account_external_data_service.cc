@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/check.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
@@ -25,9 +25,8 @@ DeviceLocalAccountExternalDataService::DeviceLocalAccountExternalDataService(
     DeviceLocalAccountPolicyService* parent,
     scoped_refptr<base::SequencedTaskRunner> backend_task_runner)
     : parent_(parent), backend_task_runner_(std::move(backend_task_runner)) {
-  base::FilePath cache_dir;
-  CHECK(base::PathService::Get(chromeos::DIR_DEVICE_LOCAL_ACCOUNT_EXTERNAL_DATA,
-                               &cache_dir));
+  const base::FilePath cache_dir = base::PathService::CheckedGet(
+      chromeos::DIR_DEVICE_LOCAL_ACCOUNT_EXTERNAL_DATA);
   resource_cache_.reset(new ResourceCache(cache_dir, backend_task_runner_,
                                           /* max_cache_size */ base::nullopt));
   parent_->AddObserver(this);
@@ -75,10 +74,8 @@ scoped_refptr<DeviceLocalAccountExternalDataManager>
       external_data_managers_[account_id];
   if (!external_data_manager.get()) {
     external_data_manager = new DeviceLocalAccountExternalDataManager(
-        account_id,
-        base::Bind(&GetChromePolicyDetails),
-        backend_task_runner_,
-        resource_cache_.get());
+        account_id, base::BindRepeating(&GetChromePolicyDetails),
+        backend_task_runner_, resource_cache_.get());
   }
   external_data_manager->SetPolicyStore(policy_store);
   return external_data_manager;

@@ -6,8 +6,8 @@
 #define COMPONENTS_SYNC_ENGINE_IMPL_COMMIT_UTIL_H_
 
 #include <stdint.h>
-
-#include <set>
+#include <string>
+#include <vector>
 
 #include "components/sync/base/extensions_activity.h"
 #include "components/sync/base/model_type.h"
@@ -15,16 +15,9 @@
 
 namespace sync_pb {
 class CommitMessage;
-class SyncEntity;
 }
 
 namespace syncer {
-
-namespace syncable {
-class Entry;
-class Id;
-class BaseWriteTransaction;
-}
 
 namespace commit_util {
 
@@ -35,27 +28,12 @@ void AddExtensionsActivityToMessage(
     sync_pb::CommitMessage* message);
 
 // Fills the config_params field of |message|.
-void AddClientConfigParamsToMessage(ModelTypeSet enabled_types,
-                                    bool cookie_jar_mismatch,
-                                    sync_pb::CommitMessage* message);
-
-// Takes a snapshot of |meta_entry| and puts it into a protobuf suitable for use
-// in a commit request message.
-void BuildCommitItem(const syncable::Entry& meta_entry,
-                     sync_pb::SyncEntity* sync_entry);
-
-// Process a single commit response.  Updates the entry's SERVER fields using
-// |pb_commit_response| and |pb_committed_entry|.
-//
-// The |deleted_folders| parameter is a set of IDs that represent deleted
-// folders.  This function will add its entry's ID to this set if it finds
-// itself processing a folder deletion.
-sync_pb::CommitResponse::ResponseType ProcessSingleCommitResponse(
-    syncable::BaseWriteTransaction* trans,
-    const sync_pb::CommitResponse_EntryResponse& server_entry,
-    const sync_pb::SyncEntity& commit_request_entry,
-    int64_t metahandle,
-    std::set<syncable::Id>* deleted_folders);
+void AddClientConfigParamsToMessage(
+    ModelTypeSet enabled_types,
+    bool cookie_jar_mismatch,
+    bool single_client,
+    const std::vector<std::string>& fcm_registration_tokens,
+    sync_pb::CommitMessage* message);
 
 }  // namespace commit_util
 

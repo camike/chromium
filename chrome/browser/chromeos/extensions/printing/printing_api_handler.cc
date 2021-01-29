@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/no_destructor.h"
 #include "base/stl_util.h"
 #include "base/task/post_task.h"
 #include "base/threading/sequenced_task_runner_handle.h"
@@ -115,7 +116,7 @@ PrintingAPIHandler* PrintingAPIHandler::Get(
 
 // static
 void PrintingAPIHandler::RegisterProfilePrefs(PrefRegistrySimple* registry) {
-  registry->RegisterListPref(prefs::kPrintingAPIExtensionsWhitelist);
+  registry->RegisterListPref(prefs::kPrintingAPIExtensionsAllowlist);
 }
 
 void PrintingAPIHandler::SubmitJob(
@@ -318,8 +319,7 @@ BrowserContextKeyedAPIFactory<PrintingAPIHandler>::BuildServiceInstanceFor(
   Profile* profile = Profile::FromBrowserContext(context);
   // We do not want an instance of PrintingAPIHandler on the lock screen.
   // This will lead to multiple printing notifications.
-  if (chromeos::ProfileHelper::IsLockScreenAppProfile(profile) ||
-      chromeos::ProfileHelper::IsSigninProfile(profile)) {
+  if (!chromeos::ProfileHelper::IsRegularProfile(profile)) {
     return nullptr;
   }
   return new PrintingAPIHandler(context);

@@ -20,6 +20,7 @@
 #include "base/optional.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/common/buildflags.h"
 
 class Profile;
@@ -27,13 +28,12 @@ class Profile;
 namespace extensions {
 
 class Extension;
-class ExtensionServiceInterface;
+class ExtensionSystem;
 
 // For registering, loading, and unloading component extensions.
 class ComponentLoader {
  public:
-  ComponentLoader(ExtensionServiceInterface* extension_service,
-                  Profile* browser_context);
+  ComponentLoader(ExtensionSystem* extension_system, Profile* browser_context);
   virtual ~ComponentLoader();
 
   size_t registered_extensions_count() const {
@@ -92,15 +92,14 @@ class ComponentLoader {
   // Return ids of all registered extensions.
   std::vector<std::string> GetRegisteredComponentExtensionsIds() const;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Add a component extension from a specific directory. Assumes that the
   // extension uses a different manifest file when this is a guest session
   // and that the manifest file lives in |root_directory|. Calls |done_cb|
   // on success, unless the component loader is shut down during loading.
-  void AddComponentFromDir(
-      const base::FilePath& root_directory,
-      const char* extension_id,
-      const base::Closure& done_cb);
+  void AddComponentFromDir(const base::FilePath& root_directory,
+                           const char* extension_id,
+                           base::OnceClosure done_cb);
 
   // Identical to above except allows for the caller to supply the name of the
   // manifest file.
@@ -109,7 +108,7 @@ class ComponentLoader {
       const char* extension_id,
       const base::FilePath::CharType* manifest_file_name,
       const base::FilePath::CharType* guest_manifest_file_name,
-      const base::Closure& done_cb);
+      base::OnceClosure done_cb);
 
   // Add a component extension from a specific directory. Assumes that the
   // extension's manifest file lives in |root_directory| and its name is
@@ -123,8 +122,8 @@ class ComponentLoader {
   void AddChromeOsSpeechSynthesisExtensions();
 #endif
 
-  void set_ignore_whitelist_for_testing(bool value) {
-    ignore_whitelist_for_testing_ = value;
+  void set_ignore_allowlist_for_testing(bool value) {
+    ignore_allowlist_for_testing_ = value;
   }
 
  private:
@@ -160,10 +159,10 @@ class ComponentLoader {
 
   std::string Add(const base::StringPiece& manifest_contents,
                   const base::FilePath& root_directory,
-                  bool skip_whitelist);
+                  bool skip_allowlist);
   std::string Add(std::unique_ptr<base::DictionaryValue> parsed_manifest,
                   const base::FilePath& root_directory,
-                  bool skip_whitelist);
+                  bool skip_allowlist);
 
   // Loads a registered component extension.
   void Load(const ComponentExtensionInfo& info);
@@ -184,7 +183,7 @@ class ComponentLoader {
                                  const std::string& description_string);
   void AddWebStoreApp();
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   void AddChromeApp();
   void AddFileManagerExtension();
   void AddVideoPlayerExtension();
@@ -194,7 +193,7 @@ class ComponentLoader {
   void AddKeyboardApp();
   void AddChromeCameraApp();
   void AddZipArchiverExtension();
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   scoped_refptr<const Extension> CreateExtension(
       const ComponentExtensionInfo& info, std::string* utf8_error);
@@ -202,7 +201,7 @@ class ComponentLoader {
   // Unloads |component| from the memory.
   void UnloadComponent(ComponentExtensionInfo* component);
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Used as a reply callback by |AddComponentFromDir|.
   // Called with a |root_directory| and parsed |manifest| and invokes
   // |done_cb| after adding the extension.
@@ -211,7 +210,7 @@ class ComponentLoader {
       const char* extension_id,
       const base::Optional<std::string>& name_string,
       const base::Optional<std::string>& description_string,
-      const base::Closure& done_cb,
+      base::OnceClosure done_cb,
       std::unique_ptr<base::DictionaryValue> manifest);
 
   // Finishes loading an extension tts engine.
@@ -220,13 +219,13 @@ class ComponentLoader {
 
   Profile* profile_;
 
-  ExtensionServiceInterface* extension_service_;
+  ExtensionSystem* extension_system_;
 
   // List of registered component extensions (see Manifest::Location).
   typedef std::vector<ComponentExtensionInfo> RegisteredComponentExtensions;
   RegisteredComponentExtensions component_extensions_;
 
-  bool ignore_whitelist_for_testing_;
+  bool ignore_allowlist_for_testing_;
 
   base::WeakPtrFactory<ComponentLoader> weak_factory_{this};
 

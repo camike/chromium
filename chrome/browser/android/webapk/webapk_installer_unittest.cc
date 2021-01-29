@@ -16,17 +16,16 @@
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "chrome/browser/android/shortcut_info.h"
 #include "chrome/browser/android/webapk/webapk.pb.h"
 #include "chrome/browser/android/webapk/webapk_install_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/webapps/browser/android/shortcut_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/browser_task_environment.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
-#include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -110,7 +109,7 @@ class WebApkInstallerRunner {
   ~WebApkInstallerRunner() {}
 
   void RunInstallWebApk(std::unique_ptr<WebApkInstaller> installer,
-                        const ShortcutInfo& info) {
+                        const webapps::ShortcutInfo& info) {
     base::RunLoop run_loop;
     on_completed_callback_ = run_loop.QuitClosure();
 
@@ -144,11 +143,11 @@ class WebApkInstallerRunner {
                    bool relax_updates,
                    const std::string& webapk_package) {
     result_ = result;
-    on_completed_callback_.Run();
+    std::move(on_completed_callback_).Run();
   }
 
   // Called after the installation process has succeeded or failed.
-  base::Closure on_completed_callback_;
+  base::OnceClosure on_completed_callback_;
 
   // The result of the installation process.
   WebApkInstallResult result_;
@@ -166,7 +165,7 @@ class UpdateRequestStorer {
     base::RunLoop run_loop;
     quit_closure_ = run_loop.QuitClosure();
     WebApkInstaller::StoreUpdateRequestToFile(
-        update_request_path, ShortcutInfo((GURL())), SkBitmap(), false,
+        update_request_path, webapps::ShortcutInfo((GURL())), SkBitmap(), false,
         SkBitmap(), "", "", std::map<std::string, WebApkIconHasher::Icon>(),
         false, WebApkUpdateReason::PRIMARY_ICON_HASH_DIFFERS,
         base::BindOnce(&UpdateRequestStorer::OnComplete,
@@ -175,9 +174,9 @@ class UpdateRequestStorer {
   }
 
  private:
-  void OnComplete(bool success) { quit_closure_.Run(); }
+  void OnComplete(bool success) { std::move(quit_closure_).Run(); }
 
-  base::Closure quit_closure_;
+  base::OnceClosure quit_closure_;
 
   DISALLOW_COPY_AND_ASSIGN(UpdateRequestStorer);
 };
@@ -212,7 +211,7 @@ class BuildProtoRunner {
       std::map<std::string, WebApkIconHasher::Icon> icon_url_to_murmur2_hash,
       bool is_manifest_stale,
       const std::vector<GURL>& best_shortcut_icon_urls) {
-    ShortcutInfo info(GURL::EmptyGURL());
+    webapps::ShortcutInfo info(GURL::EmptyGURL());
     info.best_primary_icon_url = best_primary_icon_url;
     info.splash_image_url = splash_image_url;
     info.icon_urls = {best_primary_icon_url.spec(), splash_image_url.spec(),
@@ -246,14 +245,14 @@ class BuildProtoRunner {
   void OnBuiltWebApkProto(std::unique_ptr<std::string> serialized_proto) {
     webapk_request_ = std::make_unique<webapk::WebApk>();
     webapk_request_->ParseFromString(*serialized_proto);
-    on_completed_callback_.Run();
+    std::move(on_completed_callback_).Run();
   }
 
   // The populated webapk::WebApk.
   std::unique_ptr<webapk::WebApk> webapk_request_;
 
   // Called after the |webapk_request_| is built.
-  base::Closure on_completed_callback_;
+  base::OnceClosure on_completed_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(BuildProtoRunner);
 };
@@ -262,9 +261,7 @@ class ScopedTempFile {
  public:
   ScopedTempFile() { CHECK(base::CreateTemporaryFile(&file_path_)); }
 
-  ~ScopedTempFile() {
-    base::DeleteFile(file_path_, false);
-  }
+  ~ScopedTempFile() { base::DeleteFile(file_path_); }
 
   const base::FilePath& GetFilePath() { return file_path_; }
 
@@ -278,7 +275,8 @@ class ScopedTempFile {
 
 class WebApkInstallerTest : public ::testing::Test {
  public:
-  typedef base::Callback<std::unique_ptr<net::test_server::HttpResponse>(void)>
+  typedef base::RepeatingCallback<
+      std::unique_ptr<net::test_server::HttpResponse>(void)>
       WebApkResponseBuilder;
 
   WebApkInstallerTest()
@@ -308,8 +306,8 @@ class WebApkInstallerTest : public ::testing::Test {
     return installer;
   }
 
-  ShortcutInfo DefaultShortcutInfo() {
-    ShortcutInfo info(test_server_.GetURL(kStartUrl));
+  webapps::ShortcutInfo DefaultShortcutInfo() {
+    webapps::ShortcutInfo info(test_server_.GetURL(kStartUrl));
     info.best_primary_icon_url = test_server_.GetURL(kBestPrimaryIconUrl);
     info.splash_image_url = test_server_.GetURL(kBestSplashIconUrl);
     info.best_shortcut_icon_urls.push_back(
@@ -326,7 +324,7 @@ class WebApkInstallerTest : public ::testing::Test {
 
   // Sets the function that should be used to build the response to the
   // WebAPK creation request.
-  void SetWebApkResponseBuilder(const WebApkResponseBuilder& builder) {
+  void SetWebApkResponseBuilder(WebApkResponseBuilder builder) {
     webapk_response_builder_ = builder;
   }
 
@@ -341,7 +339,8 @@ class WebApkInstallerTest : public ::testing::Test {
   // Sets default configuration for running WebApkInstaller.
   void SetDefaults() {
     SetWebApkServerUrl(test_server_.GetURL(kServerUrl));
-    SetWebApkResponseBuilder(base::Bind(&BuildValidWebApkResponse, kToken));
+    SetWebApkResponseBuilder(
+        base::BindRepeating(&BuildValidWebApkResponse, kToken));
   }
 
   std::unique_ptr<net::test_server::HttpResponse> HandleWebApkRequest(
@@ -383,7 +382,7 @@ TEST_F(WebApkInstallerTest, FailOnLowSpace) {
 // a Cross-Origin-Resource-Policy: same-origin header and the icon is
 // same-origin with the start URL.
 TEST_F(WebApkInstallerTest, CrossOriginResourcePolicySameOriginIconSuccess) {
-  ShortcutInfo shortcut_info = DefaultShortcutInfo();
+  webapps::ShortcutInfo shortcut_info = DefaultShortcutInfo();
   shortcut_info.best_primary_icon_url =
       test_server()->GetURL(kBestPrimaryIconCorpUrl);
 
@@ -396,7 +395,7 @@ TEST_F(WebApkInstallerTest, CrossOriginResourcePolicySameOriginIconSuccess) {
 // URL returns no content. In a perfect world the fetch would always succeed
 // because the fetch for the same icon succeeded recently.
 TEST_F(WebApkInstallerTest, BestPrimaryIconUrlDownloadTimesOut) {
-  ShortcutInfo shortcut_info = DefaultShortcutInfo();
+  webapps::ShortcutInfo shortcut_info = DefaultShortcutInfo();
   shortcut_info.best_primary_icon_url = test_server()->GetURL("/nocontent");
 
   WebApkInstallerRunner runner;
@@ -408,7 +407,7 @@ TEST_F(WebApkInstallerTest, BestPrimaryIconUrlDownloadTimesOut) {
 // URL returns no content. In a perfect world the fetch would always succeed
 // because the fetch for the same icon succeeded recently.
 TEST_F(WebApkInstallerTest, BestSplashIconUrlDownloadTimesOut) {
-  ShortcutInfo shortcut_info = DefaultShortcutInfo();
+  webapps::ShortcutInfo shortcut_info = DefaultShortcutInfo();
   shortcut_info.splash_image_url = test_server()->GetURL("/nocontent");
 
   WebApkInstallerRunner runner;
@@ -522,7 +521,7 @@ TEST_F(WebApkInstallerTest, StoreUpdateRequestToFileCreatesDirectories) {
   EXPECT_TRUE(base::PathExists(update_request_path));
 
   // Clean up
-  base::DeleteFileRecursively(outer_file_path);
+  base::DeletePathRecursively(outer_file_path);
 }
 
 // When there is no Web Manifest available for a site, an empty

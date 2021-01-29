@@ -8,6 +8,7 @@
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/extension_action_runner.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -17,6 +18,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/sessions/content/session_tab_helper.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
@@ -29,7 +31,7 @@
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/chromeos/extensions/extension_tab_util_delegate_chromeos.h"
 #include "chromeos/login/login_state/scoped_test_public_session_login_state.h"
 #endif
@@ -50,7 +52,6 @@ class ExtensionActiveTabTest : public ExtensionApiTest {
   }
 
  private:
-
   DISALLOW_COPY_AND_ASSIGN(ExtensionActiveTabTest);
 };
 
@@ -96,7 +97,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionActiveTabTest, ActiveTab) {
     EXPECT_TRUE(catcher.GetNextResult()) << message_;
   }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // For the third pass grant the activeTab permission and do it in a public
   // session. URL should be scrubbed down to origin.
   {
@@ -187,7 +188,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FileURLs) {
   ExtensionTestMessageListener background_page_ready("ready",
                                                      false /*will_reply*/);
   scoped_refptr<const Extension> extension =
-      LoadExtension(test_data_dir_.AppendASCII("active_tab_file_urls"));
+      LoadExtension(test_data_dir_.AppendASCII("active_tab_file_urls"),
+                    {.allow_file_access = true});
   ASSERT_TRUE(extension);
   const std::string extension_id = extension->id();
 
@@ -250,7 +252,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FileURLs) {
     // Sanity check the last committed url on the |file_iframe|.
     content::RenderFrameHost* file_iframe = content::FrameMatchingPredicate(
         browser()->tab_strip_model()->GetActiveWebContents(),
-        base::Bind(&content::FrameMatchesName, "file_iframe"));
+        base::BindRepeating(&content::FrameMatchesName, "file_iframe"));
     bool is_file_url = file_iframe->GetLastCommittedURL() == GURL("file:///");
     EXPECT_EQ(allowed, is_file_url)
         << "Unexpected committed url: "

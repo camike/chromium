@@ -20,6 +20,12 @@ class Details {
   Details();
   ~Details();
 
+  // Details is movable and copyable.
+  Details(Details&& other);
+  Details& operator=(Details&& other);
+  Details(const Details& other);
+  Details& operator=(const Details& other);
+
   // Returns a dictionary describing the current execution context, which
   // is intended to be serialized as JSON string. The execution context is
   // useful when analyzing feedback forms and for debugging in general.
@@ -36,10 +42,13 @@ class Details {
   static bool UpdateFromProto(const ShowDetailsProto& proto, Details* details);
 
   // Updates the details to show selected contact details. It shows only full
-  // name and email. Returns true if |details| were successfully updated.
-  static bool UpdateFromContactDetails(const ShowDetailsProto& proto,
-                                       const UserData* user_data,
-                                       Details* details);
+  // name and/or email, depending on |user_data_options|. Returns true if
+  // |details| were successfully updated.
+  static bool UpdateFromContactDetails(
+      const ShowDetailsProto& proto,
+      const UserData* user_data,
+      const CollectUserDataOptions* user_data_options,
+      Details* details);
 
   // Updates the details to show selected shipping details. It shows full name
   // and address. Returns true if |details| were successfully updated.
@@ -54,7 +63,6 @@ class Details {
                                            Details* details);
 
   const std::string title() const;
-  int titleMaxLines() const;
   const std::string imageUrl() const;
   const base::Optional<std::string> imageAccessibilityHint() const;
   bool imageAllowClickthrough() const;
@@ -62,7 +70,6 @@ class Details {
   const std::string imagePositiveText() const;
   const std::string imageNegativeText() const;
   const std::string imageClickthroughUrl() const;
-  bool showImagePlaceholder() const;
   const std::string totalPriceLabel() const;
   const std::string totalPrice() const;
   const std::string descriptionLine1() const;
@@ -74,7 +81,7 @@ class Details {
   bool highlightLine1() const;
   bool highlightLine2() const;
   bool highlightLine3() const;
-  bool animatePlaceholders() const;
+  DetailsProto::PlaceholdersConfiguration placeholders() const;
 
   // Clears all change flags.
   void ClearChanges();
@@ -94,9 +101,6 @@ class Details {
 
   DetailsProto proto_;
   DetailsChangesProto change_flags_;
-
-  // Maximum of lines for the title.
-  int title_max_lines_ = 1;
 
   // Content to be shown in description line 1 in the UI.
   std::string description_line_1_content_;

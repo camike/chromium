@@ -12,13 +12,17 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_avatar_downloader.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_util.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/account_id/account_id.h"
@@ -28,6 +32,11 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/native_theme/native_theme.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/ui/signin/profile_colors_util.h"
+#endif
 
 using ::testing::Mock;
 using ::testing::_;
@@ -93,6 +102,10 @@ class ProfileAttributesTestObserver
                void(const base::FilePath& profile_path));
   MOCK_METHOD1(OnProfileIsOmittedChanged,
                void(const base::FilePath& profile_path));
+  MOCK_METHOD1(OnProfileThemeColorsChanged,
+               void(const base::FilePath& profile_path));
+  MOCK_METHOD1(OnProfileHostedDomainChanged,
+               void(const base::FilePath& profile_path));
 };
 }  // namespace
 
@@ -129,6 +142,8 @@ class ProfileAttributesStorageTest : public testing::Test {
     EXPECT_CALL(observer_, OnProfileSigninRequiredChanged(_)).Times(0);
     EXPECT_CALL(observer_, OnProfileSupervisedUserIdChanged(_)).Times(0);
     EXPECT_CALL(observer_, OnProfileIsOmittedChanged(_)).Times(0);
+    EXPECT_CALL(observer_, OnProfileThemeColorsChanged(_)).Times(0);
+    EXPECT_CALL(observer_, OnProfileHostedDomainChanged(_)).Times(0);
   }
 
   void EnableObserver() { storage()->AddObserver(&observer_); }
@@ -287,7 +302,8 @@ TEST_F(ProfileAttributesStorageTest, InitialValues) {
   EXPECT_EQ(std::string("testing_profile_gaia0"), entry->GetGAIAId());
   EXPECT_EQ(base::ASCIIToUTF16("testing_profile_user0"), entry->GetUserName());
   EXPECT_EQ(0U, entry->GetAvatarIconIndex());
-  EXPECT_EQ(std::string(""), entry->GetSupervisedUserId());
+  EXPECT_EQ(std::string(), entry->GetSupervisedUserId());
+  EXPECT_EQ(std::string(), entry->GetHostedDomain());
 }
 
 TEST_F(ProfileAttributesStorageTest, EntryAccessors) {
@@ -300,7 +316,12 @@ TEST_F(ProfileAttributesStorageTest, EntryAccessors) {
   EXPECT_EQ(path, entry->GetPath());
 
   EXPECT_CALL(observer(), OnProfileNameChanged(path, _)).Times(2);
-  TEST_STRING16_ACCESSORS(ProfileAttributesEntry, entry, LocalProfileName);
+  entry->SetLocalProfileName(base::ASCIIToUTF16("first_value"), true);
+  EXPECT_EQ(base::ASCIIToUTF16("first_value"), entry->GetLocalProfileName());
+  EXPECT_TRUE(entry->IsUsingDefaultName());
+  entry->SetLocalProfileName(base::ASCIIToUTF16("second_value"), false);
+  EXPECT_EQ(base::ASCIIToUTF16("second_value"), entry->GetLocalProfileName());
+  EXPECT_FALSE(entry->IsUsingDefaultName());
   VerifyAndResetCallExpectations();
 
   TEST_STRING16_ACCESSORS(ProfileAttributesEntry, entry, ShortcutName);
@@ -318,8 +339,15 @@ TEST_F(ProfileAttributesStorageTest, EntryAccessors) {
   TEST_BOOL_ACCESSORS(ProfileAttributesEntry, entry, IsUsingGAIAPicture);
   VerifyAndResetCallExpectations();
 
+  // IsOmitted() should be set only on ephemeral profiles.
+  entry->SetIsEphemeral(true);
   EXPECT_CALL(observer(), OnProfileIsOmittedChanged(path)).Times(2);
   TEST_BOOL_ACCESSORS(ProfileAttributesEntry, entry, IsOmitted);
+  VerifyAndResetCallExpectations();
+  entry->SetIsEphemeral(false);
+
+  EXPECT_CALL(observer(), OnProfileHostedDomainChanged(path)).Times(2);
+  TEST_STRING_ACCESSORS(ProfileAttributesEntry, entry, HostedDomain);
   VerifyAndResetCallExpectations();
 
   TEST_BOOL_ACCESSORS(ProfileAttributesEntry, entry, IsEphemeral);
@@ -488,14 +516,12 @@ TEST_F(ProfileAttributesStorageTest, SupervisedUsersAccessors) {
   entry->SetSupervisedUserId("");
   ASSERT_FALSE(entry->IsSupervised());
   ASSERT_FALSE(entry->IsChild());
-  ASSERT_FALSE(entry->IsLegacySupervised());
 
   EXPECT_CALL(observer(), OnProfileSupervisedUserIdChanged(path)).Times(1);
   entry->SetSupervisedUserId("some_supervised_user_id");
   VerifyAndResetCallExpectations();
   ASSERT_TRUE(entry->IsSupervised());
   ASSERT_FALSE(entry->IsChild());
-  ASSERT_TRUE(entry->IsLegacySupervised());
 
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   EXPECT_CALL(observer(), OnProfileSupervisedUserIdChanged(path)).Times(1);
@@ -503,7 +529,6 @@ TEST_F(ProfileAttributesStorageTest, SupervisedUsersAccessors) {
   VerifyAndResetCallExpectations();
   ASSERT_TRUE(entry->IsSupervised());
   ASSERT_TRUE(entry->IsChild());
-  ASSERT_FALSE(entry->IsLegacySupervised());
 #endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
 }
 
@@ -525,7 +550,8 @@ TEST_F(ProfileAttributesStorageTest, ReSortTriggered) {
       GetProfilePath("alpha_path"), &entry));
 
   // Trigger a ProfileInfoCache re-sort.
-  entry->SetLocalProfileName(base::ASCIIToUTF16("zulu_name"));
+  entry->SetLocalProfileName(base::ASCIIToUTF16("zulu_name"),
+                             /*is_default_name=*/false);
   EXPECT_EQ(GetProfilePath("alpha_path"), entry->GetPath());
 }
 
@@ -580,7 +606,8 @@ TEST_F(ProfileAttributesStorageTest, AccessFromElsewhere) {
   ASSERT_TRUE(storage()->GetProfileAttributesWithPath(
       GetProfilePath("testing_profile_path0"), &second_entry));
 
-  first_entry->SetLocalProfileName(base::ASCIIToUTF16("NewName"));
+  first_entry->SetLocalProfileName(base::ASCIIToUTF16("NewName"),
+                                   /*is_default_name=*/false);
   EXPECT_EQ(base::ASCIIToUTF16("NewName"), second_entry->GetName());
   EXPECT_EQ(first_entry, second_entry);
 
@@ -588,7 +615,8 @@ TEST_F(ProfileAttributesStorageTest, AccessFromElsewhere) {
   // should be reflected by the ProfileAttributesStorage.
   EXPECT_EQ(base::ASCIIToUTF16("NewName"), second_entry->GetName());
 
-  second_entry->SetLocalProfileName(base::ASCIIToUTF16("OtherNewName"));
+  second_entry->SetLocalProfileName(base::ASCIIToUTF16("OtherNewName"),
+                                    /*is_default_name=*/false);
   EXPECT_EQ(base::ASCIIToUTF16("OtherNewName"), first_entry->GetName());
 }
 
@@ -680,7 +708,7 @@ TEST_F(ProfileAttributesStorageTest, AvatarIconIndex) {
 #endif
 
 // High res avatar downloading is only supported on desktop.
-#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+#if !defined(OS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
 TEST_F(ProfileAttributesStorageTest, DownloadHighResAvatarTest) {
   storage()->set_disable_avatar_download_for_testing(false);
 
@@ -749,9 +777,12 @@ TEST_F(ProfileAttributesStorageTest, DownloadHighResAvatarTest) {
             entry->GetHighResAvatar());
 
   // Since we are not using GAIA image, |GetAvatarIcon| should return the same
-  // image as |GetHighResAvatar| in desktop.
-  EXPECT_EQ(&storage()->cached_avatar_images_[icon_filename],
-            &entry->GetAvatarIcon());
+  // image as |GetHighResAvatar| in desktop. Since it returns a copy, the
+  // backing object needs to get checked.
+  const gfx::ImageSkia* avatar_icon = entry->GetAvatarIcon().ToImageSkia();
+  const gfx::ImageSkia* cached_icon =
+      storage()->cached_avatar_images_[icon_filename].ToImageSkia();
+  EXPECT_TRUE(avatar_icon->BackedBySameObjectAs(*cached_icon));
 
   // Finish the async calls that save the image to the disk.
   EXPECT_CALL(observer(), OnProfileHighResAvatarLoaded(profile_path)).Times(1);
@@ -761,7 +792,7 @@ TEST_F(ProfileAttributesStorageTest, DownloadHighResAvatarTest) {
   // Clean up.
   EXPECT_NE(std::string::npos, icon_path.MaybeAsASCII().find(icon_filename));
   ASSERT_TRUE(base::PathExists(icon_path));
-  EXPECT_TRUE(base::DeleteFile(icon_path, false));
+  EXPECT_TRUE(base::DeleteFile(icon_path));
   EXPECT_FALSE(base::PathExists(icon_path));
 }
 
@@ -827,7 +858,7 @@ TEST_F(ProfileAttributesStorageTest, LoadAvatarFromDiskTest) {
   VerifyAndResetCallExpectations();
 
   // Clean up.
-  EXPECT_TRUE(base::DeleteFile(icon_path, false));
+  EXPECT_TRUE(base::DeleteFile(icon_path));
   EXPECT_FALSE(base::PathExists(icon_path));
 }
 #endif
@@ -913,3 +944,47 @@ TEST_F(ProfileAttributesStorageTest, ProfilesState_SingleProfile) {
   histogram_tester.ExpectTotalCount(
       "Profile.State.LastUsed_LatentMultiProfileOthers", 0);
 }
+
+// Themes aren't used on Android
+#if !defined(OS_ANDROID)
+TEST_F(ProfileAttributesStorageTest, ProfileThemeColors) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(features::kNewProfilePicker);
+  AddTestingProfile();
+  base::FilePath profile_path = GetProfilePath("testing_profile_path0");
+
+  ProfileAttributesEntry* entry;
+  ASSERT_TRUE(storage()->GetProfileAttributesWithPath(profile_path, &entry));
+  EXPECT_CALL(observer(), OnProfileAvatarChanged(profile_path)).Times(1);
+  entry->SetAvatarIconIndex(profiles::GetPlaceholderAvatarIndex());
+  VerifyAndResetCallExpectations();
+
+  EXPECT_EQ(entry->GetProfileThemeColors(),
+            GetDefaultProfileThemeColors(false));
+
+  ui::NativeTheme::GetInstanceForNativeUi()->set_use_dark_colors(true);
+  EXPECT_EQ(entry->GetProfileThemeColors(), GetDefaultProfileThemeColors(true));
+  EXPECT_NE(entry->GetProfileThemeColors(),
+            GetDefaultProfileThemeColors(false));
+
+  ProfileThemeColors colors = {SK_ColorTRANSPARENT, SK_ColorBLACK,
+                               SK_ColorWHITE};
+  EXPECT_CALL(observer(), OnProfileAvatarChanged(profile_path)).Times(1);
+  EXPECT_CALL(observer(), OnProfileThemeColorsChanged(profile_path)).Times(1);
+  entry->SetProfileThemeColors(colors);
+  EXPECT_EQ(entry->GetProfileThemeColors(), colors);
+  VerifyAndResetCallExpectations();
+
+  // Colors shouldn't change after switching back to the light mode.
+  ui::NativeTheme::GetInstanceForNativeUi()->set_use_dark_colors(false);
+  EXPECT_EQ(entry->GetProfileThemeColors(), colors);
+
+  // base::nullopt resets the colors to default.
+  EXPECT_CALL(observer(), OnProfileAvatarChanged(profile_path)).Times(1);
+  EXPECT_CALL(observer(), OnProfileThemeColorsChanged(profile_path)).Times(1);
+  entry->SetProfileThemeColors(base::nullopt);
+  EXPECT_EQ(entry->GetProfileThemeColors(),
+            GetDefaultProfileThemeColors(false));
+  VerifyAndResetCallExpectations();
+}
+#endif

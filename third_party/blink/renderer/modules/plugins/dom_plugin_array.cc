@@ -20,6 +20,7 @@
 
 #include "third_party/blink/renderer/modules/plugins/dom_plugin_array.h"
 
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/navigator.h"
@@ -33,13 +34,13 @@
 
 namespace blink {
 
-DOMPluginArray::DOMPluginArray(LocalFrame* frame)
-    : ExecutionContextLifecycleObserver(frame ? frame->DomWindow() : nullptr),
-      PluginsChangedObserver(frame ? frame->GetPage() : nullptr) {
+DOMPluginArray::DOMPluginArray(LocalDOMWindow* window)
+    : ExecutionContextLifecycleObserver(window),
+      PluginsChangedObserver(window ? window->GetFrame()->GetPage() : nullptr) {
   UpdatePluginData();
 }
 
-void DOMPluginArray::Trace(Visitor* visitor) {
+void DOMPluginArray::Trace(Visitor* visitor) const {
   visitor->Trace(dom_plugins_);
   ScriptWrappable::Trace(visitor);
   ExecutionContextLifecycleObserver::Trace(visitor);
@@ -56,13 +57,15 @@ DOMPlugin* DOMPluginArray::item(unsigned index) {
 
   if (!dom_plugins_[index]) {
     dom_plugins_[index] = MakeGarbageCollected<DOMPlugin>(
-        GetFrame(), *GetPluginData()->Plugins()[index]);
+        DomWindow(), *GetPluginData()->Plugins()[index]);
   }
 
   return dom_plugins_[index];
 }
 
 DOMPlugin* DOMPluginArray::namedItem(const AtomicString& property_name) {
+  if (base::FeatureList::IsEnabled(features::kNavigatorPluginsEmpty))
+    return nullptr;
   PluginData* data = GetPluginData();
   if (!data)
     return nullptr;
@@ -79,6 +82,8 @@ DOMPlugin* DOMPluginArray::namedItem(const AtomicString& property_name) {
 
 void DOMPluginArray::NamedPropertyEnumerator(Vector<String>& property_names,
                                              ExceptionState&) const {
+  if (base::FeatureList::IsEnabled(features::kNavigatorPluginsEmpty))
+    return;
   PluginData* data = GetPluginData();
   if (!data)
     return;
@@ -96,14 +101,16 @@ bool DOMPluginArray::NamedPropertyQuery(const AtomicString& property_name,
 }
 
 void DOMPluginArray::refresh(bool reload) {
-  if (!GetFrame())
+  if (base::FeatureList::IsEnabled(features::kNavigatorPluginsEmpty))
+    return;
+  if (!DomWindow())
     return;
 
   PluginData::RefreshBrowserSidePluginCache();
   if (PluginData* data = GetPluginData())
     data->ResetPluginData();
 
-  for (Frame* frame = GetFrame()->GetPage()->MainFrame(); frame;
+  for (Frame* frame = DomWindow()->GetFrame()->GetPage()->MainFrame(); frame;
        frame = frame->Tree().TraverseNext()) {
     auto* local_frame = DynamicTo<LocalFrame>(frame);
     if (!local_frame)
@@ -114,16 +121,18 @@ void DOMPluginArray::refresh(bool reload) {
   }
 
   if (reload)
-    GetFrame()->Reload(WebFrameLoadType::kReload);
+    DomWindow()->GetFrame()->Reload(WebFrameLoadType::kReload);
 }
 
 PluginData* DOMPluginArray::GetPluginData() const {
-  if (!GetFrame())
-    return nullptr;
-  return GetFrame()->GetPluginData();
+  return DomWindow() ? DomWindow()->GetFrame()->GetPluginData() : nullptr;
 }
 
 void DOMPluginArray::UpdatePluginData() {
+  if (base::FeatureList::IsEnabled(features::kNavigatorPluginsEmpty)) {
+    dom_plugins_.clear();
+    return;
+  }
   PluginData* data = GetPluginData();
   if (!data) {
     dom_plugins_.clear();

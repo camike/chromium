@@ -243,12 +243,17 @@ void ArcSessionRunner::SetUserInfo(
   // can also be called multiple times in tests.
   // TODO(yusukes): Fix tests and add DCHECKs to make sure they are not empty
   // and the function is called only once.
-  DCHECK(!serial_number.empty());
+  DCHECK(!IsArcVmEnabled() || !serial_number.empty());
   cryptohome_id_ = cryptohome_id;
   user_id_hash_ = hash;
   serial_number_ = serial_number;
   if (arc_session_)
     arc_session_->SetUserInfo(cryptohome_id_, user_id_hash_, serial_number_);
+}
+
+void ArcSessionRunner::SetDemoModeDelegate(
+    std::unique_ptr<ArcClientAdapter::DemoModeDelegate> delegate) {
+  demo_mode_delegate_ = std::move(delegate);
 }
 
 void ArcSessionRunner::SetRestartDelayForTesting(
@@ -270,6 +275,7 @@ void ArcSessionRunner::StartArcSession() {
         !serial_number_.empty()) {
       arc_session_->SetUserInfo(cryptohome_id_, user_id_hash_, serial_number_);
     }
+    arc_session_->SetDemoModeDelegate(demo_mode_delegate_.get());
     arc_session_->AddObserver(this);
     arc_session_->StartMiniInstance();
     // Record the UMA only when |restart_after_crash_count_| is zero to avoid

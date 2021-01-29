@@ -10,6 +10,8 @@
 #include "ios/chrome/common/app_group/app_group_constants.h"
 #import "ios/chrome/common/credential_provider/constants.h"
 #import "ios/chrome/common/ui/confirmation_alert/confirmation_alert_action_handler.h"
+#import "ios/chrome/credential_provider_extension/password_util.h"
+#import "ios/chrome/credential_provider_extension/reauthentication_handler.h"
 #import "ios/chrome/credential_provider_extension/ui/consent_coordinator.h"
 #import "ios/chrome/credential_provider_extension/ui/credential_details_consumer.h"
 #import "ios/chrome/credential_provider_extension/ui/credential_details_view_controller.h"
@@ -22,8 +24,9 @@
 #error "This file requires ARC support."
 #endif
 
-@interface CredentialListCoordinator () <CredentialListUIHandler,
-                                         ConfirmationAlertActionHandler,
+@interface CredentialListCoordinator () <ConfirmationAlertActionHandler,
+                                         ConsentCoordinatorDelegate,
+                                         CredentialListUIHandler,
                                          CredentialDetailsConsumerDelegate>
 
 // Base view controller from where |viewController| is presented.
@@ -93,18 +96,20 @@
   [self.baseViewController presentViewController:self.viewController
                                         animated:NO
                                       completion:nil];
-  [self.mediator fetchCredentials];
 
-  NSUserDefaults* shared_defaults = app_group::GetGroupUserDefaults();
-  BOOL isConsentGiven = [shared_defaults
-      boolForKey:kUserDefaultsCredentialProviderConsentVerified];
+  NSUserDefaults* user_defaults = [NSUserDefaults standardUserDefaults];
+  BOOL isConsentGiven =
+      [user_defaults boolForKey:kUserDefaultsCredentialProviderConsentVerified];
   if (!isConsentGiven) {
     self.consentCoordinator = [[ConsentCoordinator alloc]
            initWithBaseViewController:self.viewController
                               context:self.context
               reauthenticationHandler:self.reauthenticationHandler
         isInitialConfigurationRequest:NO];
+    self.consentCoordinator.delegate = self;
     [self.consentCoordinator start];
+  } else {
+    [self.mediator fetchCredentials];
   }
 }
 
@@ -116,6 +121,14 @@
   self.mediator = nil;
 }
 
+#pragma mark - ConsentCoordinatorDelegate
+
+- (void)consentCoordinatorDidAcceptConsent:
+    (ConsentCoordinator*)consentCoordinator {
+  [consentCoordinator stop];
+  [self.mediator fetchCredentials];
+}
+
 #pragma mark - CredentialListUIHandler
 
 - (void)showEmptyCredentials {
@@ -124,10 +137,24 @@
   emptyCredentialsViewController.modalPresentationStyle =
       UIModalPresentationOverCurrentContext;
   emptyCredentialsViewController.actionHandler = self;
-  [self.viewController.navigationController
-      presentViewController:emptyCredentialsViewController
-                   animated:NO
-                 completion:nil];
+  [self.viewController presentViewController:emptyCredentialsViewController
+                                    animated:YES
+                                  completion:nil];
+}
+
+- (void)userSelectedCredential:(id<Credential>)credential {
+  [self reauthenticateIfNeededWithCompletionHandler:^(
+            ReauthenticationResult result) {
+    if (result != ReauthenticationResult::kFailure) {
+      NSString* password =
+          PasswordWithKeychainIdentifier(credential.keychainIdentifier);
+      ASPasswordCredential* ASCredential =
+          [ASPasswordCredential credentialWithUser:credential.user
+                                          password:password];
+      [self.context completeRequestWithSelectedCredential:ASCredential
+                                        completionHandler:nil];
+    }
+  }];
 }
 
 - (void)showDetailsForCredential:(id<Credential>)credential {
@@ -151,14 +178,19 @@
 
 - (void)unlockPasswordForCredential:(id<Credential>)credential
                   completionHandler:(void (^)(NSString*))completionHandler {
-  // TODO(crbug.com/1045454): show unlock if needed, then complete with
-  // password.
-  completionHandler(@"DreamOn");
+  [self reauthenticateIfNeededWithCompletionHandler:^(
+            ReauthenticationResult result) {
+    if (result != ReauthenticationResult::kFailure) {
+      NSString* password =
+          PasswordWithKeychainIdentifier(credential.keychainIdentifier);
+      completionHandler(password);
+    }
+  }];
 }
 
 #pragma mark - ConfirmationAlertActionHandler
 
-- (void)confirmationAlertDone {
+- (void)confirmationAlertDismissAction {
   // Finish the extension. There is no recovery from the empty credentials
   // state.
   NSError* error =
@@ -172,8 +204,22 @@
   // No-op.
 }
 
+- (void)confirmationAlertSecondaryAction {
+  // No-op.
+}
+
 - (void)confirmationAlertLearnMoreAction {
   // No-op.
+}
+
+#pragma mark - Private
+
+// Asks user for hardware reauthentication if needed.
+- (void)reauthenticateIfNeededWithCompletionHandler:
+    (void (^)(ReauthenticationResult))completionHandler {
+  [self.reauthenticationHandler
+      verifyUserWithCompletionHandler:completionHandler
+      presentReminderOnViewController:self.viewController];
 }
 
 @end

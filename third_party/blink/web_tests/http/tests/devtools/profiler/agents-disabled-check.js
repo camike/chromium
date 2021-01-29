@@ -9,7 +9,7 @@
   function collectMessages(message) {
     messages.push(message);
   }
-  Protocol.test.dumpProtocol = collectMessages;
+  ProtocolClient.test.dumpProtocol = collectMessages;
   messages.push('--> SDK.targetManager.suspendAllTargets();');
   await SDK.targetManager.suspendAllTargets();
   messages.push('');
@@ -17,11 +17,19 @@
   await SDK.targetManager.resumeAllTargets();
   messages.push('');
   messages.push('--> done');
-  Protocol.test.dumpProtocol = null;
+  ProtocolClient.test.dumpProtocol = null;
   for (var i = 0; i < messages.length; ++i) {
     var message = messages[i];
-    if (message.startsWith('backend'))
+    if (message.startsWith('backend')) {
       continue;
+    }
+    // TODO(crbug.com/1166710): Flexbox tooling is currently experimental so we skip
+    // the corresponding message to allow turning the experiment on and off easily.
+    // Once the experiment flag is removed, this check should be removed and test
+    // expectations have to be updated.
+    if (message.includes('setShowFlexOverlays')) {
+      continue;
+    }
     message = message.replace(/"id":\d+,/, '"id":<number>,');
     TestRunner.addResult(message);
   }

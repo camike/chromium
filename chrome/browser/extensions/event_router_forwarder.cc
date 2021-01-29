@@ -9,9 +9,9 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/task/post_task.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -64,8 +64,8 @@ void EventRouterForwarder::HandleEvent(
     const GURL& event_url,
     bool dispatch_to_off_the_record_profiles) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    base::PostTask(
-        FROM_HERE, {BrowserThread::UI},
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&EventRouterForwarder::HandleEvent, this, extension_id,
                        histogram_value, event_name, std::move(event_args),
                        profile_ptr, use_profile_to_restrict_events, event_url,
@@ -95,8 +95,8 @@ void EventRouterForwarder::HandleEvent(
 
   if (dispatch_to_off_the_record_profiles) {
     for (Profile* profile : profiles_to_dispatch_to) {
-      if (profile->HasOffTheRecordProfile())
-        profiles_to_dispatch_to.insert(profile->GetOffTheRecordProfile());
+      if (profile->HasPrimaryOTRProfile())
+        profiles_to_dispatch_to.insert(profile->GetPrimaryOTRProfile());
     }
   }
 
@@ -129,7 +129,7 @@ void EventRouterForwarder::CallEventRouter(
     std::unique_ptr<base::ListValue> event_args,
     Profile* restrict_to_profile,
     const GURL& event_url) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Extension does not exist for chromeos login.  This needs to be
   // removed once we have an extension service for login screen.
   // crosbug.com/12856.

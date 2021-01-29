@@ -10,12 +10,17 @@
 
 #include "base/containers/span.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/optional.h"
+#include "base/path_service.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
+#include "base/threading/thread_restrictions.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/certificate_provider.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/notification_details.h"
@@ -23,23 +28,33 @@
 #include "content/public/browser/notification_source.h"
 #include "crypto/rsa_private_key.h"
 #include "extensions/browser/api/test/test_api.h"
+#include "extensions/browser/event_router.h"
 #include "extensions/browser/notification_types.h"
+#include "extensions/common/api/test.h"
 #include "net/cert/asn1_util.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util.h"
 #include "net/test/cert_test_util.h"
-#include "net/test/key_util.h"
 #include "net/test/test_data_directory.h"
-#include "third_party/boringssl/src/include/openssl/nid.h"
 #include "third_party/boringssl/src/include/openssl/rsa.h"
+#include "third_party/boringssl/src/include/openssl/ssl.h"
 
 namespace {
 
+constexpr char kExtensionId[] = "ecmhnokcdiianioonpgakiooenfnonid";
+// Paths relative to |chrome::DIR_TEST_DATA|:
+constexpr base::FilePath::CharType kExtensionPath[] =
+    FILE_PATH_LITERAL("extensions/test_certificate_provider/extension/");
+constexpr base::FilePath::CharType kExtensionPemPath[] =
+    FILE_PATH_LITERAL("extensions/test_certificate_provider/extension.pem");
+
 // List of algorithms that the extension claims to support for the returned
 // certificates.
-constexpr extensions::api::certificate_provider::Hash kSupportedHashes[] = {
-    extensions::api::certificate_provider::Hash::HASH_SHA256,
-    extensions::api::certificate_provider::Hash::HASH_SHA1};
+constexpr extensions::api::certificate_provider::Algorithm
+    kSupportedAlgorithms[] = {extensions::api::certificate_provider::Algorithm::
+                                  ALGORITHM_RSASSA_PKCS1_V1_5_SHA256,
+                              extensions::api::certificate_provider::Algorithm::
+                                  ALGORITHM_RSASSA_PKCS1_V1_5_SHA1};
 
 base::Value ConvertBytesToValue(base::span<const uint8_t> bytes) {
   base::Value value(base::Value::Type::LIST);
@@ -55,25 +70,24 @@ std::vector<uint8_t> ExtractBytesFromValue(const base::Value& value) {
   return bytes;
 }
 
-scoped_refptr<net::X509Certificate> GetCertificate() {
-  return net::ImportCertFromFile(net::GetTestCertsDirectory(), "client_1.pem");
-}
-
 base::span<const uint8_t> GetCertDer(const net::X509Certificate& certificate) {
   return base::as_bytes(base::make_span(
       net::x509_util::CryptoBufferAsStringPiece(certificate.cert_buffer())));
 }
 
-base::Value MakeCertInfoValue(const net::X509Certificate& certificate) {
+base::Value MakeClientCertificateInfoValue(
+    const net::X509Certificate& certificate) {
   base::Value cert_info_value(base::Value::Type::DICTIONARY);
-  cert_info_value.SetKey("certificate",
-                         ConvertBytesToValue(GetCertDer(certificate)));
-  base::Value supported_hashes_value(base::Value::Type::LIST);
-  for (auto supported_hash : kSupportedHashes) {
-    supported_hashes_value.Append(base::Value(
-        extensions::api::certificate_provider::ToString(supported_hash)));
+  base::Value certificate_chain(base::Value::Type::LIST);
+  certificate_chain.Append(ConvertBytesToValue(GetCertDer(certificate)));
+  cert_info_value.SetKey("certificateChain", std::move(certificate_chain));
+  base::Value supported_algorithms_value(base::Value::Type::LIST);
+  for (auto supported_algorithm : kSupportedAlgorithms) {
+    supported_algorithms_value.Append(
+        extensions::api::certificate_provider::ToString(supported_algorithm));
   }
-  cert_info_value.SetKey("supportedHashes", std::move(supported_hashes_value));
+  cert_info_value.SetKey("supportedAlgorithms",
+                         std::move(supported_algorithms_value));
   return cert_info_value;
 }
 
@@ -89,22 +103,33 @@ base::Value ParseJsonToValue(const std::string& json) {
   return std::move(*value);
 }
 
-bool RsaSignPrehashed(const EVP_PKEY& key,
-                      int openssl_digest_type,
-                      const std::vector<uint8_t>& digest,
-                      std::vector<uint8_t>* signature) {
-  RSA* const rsa_key = EVP_PKEY_get0_RSA(&key);
-  if (!rsa_key)
+bool RsaSignRawData(crypto::RSAPrivateKey* key,
+                    uint16_t openssl_signature_algorithm,
+                    const std::vector<uint8_t>& input,
+                    std::vector<uint8_t>* signature) {
+  const EVP_MD* const digest_algorithm =
+      SSL_get_signature_algorithm_digest(openssl_signature_algorithm);
+  bssl::ScopedEVP_MD_CTX ctx;
+  EVP_PKEY_CTX* pkey_ctx = nullptr;
+  if (!EVP_DigestSignInit(ctx.get(), &pkey_ctx, digest_algorithm,
+                          /*ENGINE* e=*/nullptr, key->key()))
     return false;
-  unsigned signature_size = 0;
-  signature->resize(RSA_size(rsa_key));
-  if (!RSA_sign(openssl_digest_type, digest.data(), digest.size(),
-                signature->data(), &signature_size, rsa_key)) {
-    signature->clear();
-    return false;
+  if (SSL_is_signature_algorithm_rsa_pss(openssl_signature_algorithm)) {
+    // For RSA-PSS, configure the special padding and set the salt length to be
+    // equal to the hash size.
+    if (!EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_PKCS1_PSS_PADDING) ||
+        !EVP_PKEY_CTX_set_rsa_pss_saltlen(pkey_ctx, /*salt_len=*/-1)) {
+      return false;
+    }
   }
-  signature->resize(signature_size);
-  return true;
+  size_t sig_len = 0;
+  // Determine the signature length for the buffer.
+  if (!EVP_DigestSign(ctx.get(), /*out_sig=*/nullptr, &sig_len, input.data(),
+                      input.size()))
+    return false;
+  signature->resize(sig_len);
+  return EVP_DigestSign(ctx.get(), signature->data(), &sig_len, input.data(),
+                        input.size()) != 0;
 }
 
 void SendReplyToJs(extensions::TestSendMessageFunction* function,
@@ -112,9 +137,43 @@ void SendReplyToJs(extensions::TestSendMessageFunction* function,
   function->Reply(ConvertValueToJson(response));
 }
 
+std::unique_ptr<crypto::RSAPrivateKey> LoadPrivateKeyFromFile(
+    const base::FilePath& path) {
+  std::string key_pk8;
+  {
+    base::ScopedAllowBlockingForTesting allow_io;
+    EXPECT_TRUE(base::ReadFileToString(path, &key_pk8));
+  }
+  return crypto::RSAPrivateKey::CreateFromPrivateKeyInfo(
+      base::as_bytes(base::make_span(key_pk8)));
+}
+
 }  // namespace
 
-// Returns the Spki of the certificate provided by the extension.
+// static
+extensions::ExtensionId TestCertificateProviderExtension::extension_id() {
+  return kExtensionId;
+}
+
+// static
+base::FilePath TestCertificateProviderExtension::GetExtensionSourcePath() {
+  return base::PathService::CheckedGet(chrome::DIR_TEST_DATA)
+      .Append(kExtensionPath);
+}
+
+// static
+base::FilePath TestCertificateProviderExtension::GetExtensionPemPath() {
+  return base::PathService::CheckedGet(chrome::DIR_TEST_DATA)
+      .Append(kExtensionPemPath);
+}
+
+// static
+scoped_refptr<net::X509Certificate>
+TestCertificateProviderExtension::GetCertificate() {
+  return net::ImportCertFromFile(net::GetTestCertsDirectory(), "client_1.pem");
+}
+
+// static
 std::string TestCertificateProviderExtension::GetCertificateSpki() {
   const scoped_refptr<net::X509Certificate> certificate = GetCertificate();
   base::StringPiece spki_bytes;
@@ -127,16 +186,12 @@ std::string TestCertificateProviderExtension::GetCertificateSpki() {
 }
 
 TestCertificateProviderExtension::TestCertificateProviderExtension(
-    content::BrowserContext* browser_context,
-    const std::string& extension_id)
+    content::BrowserContext* browser_context)
     : browser_context_(browser_context),
-      extension_id_(extension_id),
       certificate_(GetCertificate()),
-      private_key_(net::key_util::LoadEVP_PKEYFromPEM(
-          net::GetTestCertsDirectory().Append(
-              FILE_PATH_LITERAL("client_1.key")))) {
+      private_key_(LoadPrivateKeyFromFile(net::GetTestCertsDirectory().Append(
+          FILE_PATH_LITERAL("client_1.pk8")))) {
   DCHECK(browser_context_);
-  DCHECK(!extension_id_.empty());
   CHECK(certificate_);
   CHECK(private_key_);
   notification_registrar_.Add(this,
@@ -146,6 +201,24 @@ TestCertificateProviderExtension::TestCertificateProviderExtension(
 
 TestCertificateProviderExtension::~TestCertificateProviderExtension() = default;
 
+void TestCertificateProviderExtension::TriggerSetCertificates() {
+  base::Value message_data(base::Value::Type::DICTIONARY);
+  message_data.SetStringKey("name", "setCertificates");
+  base::Value cert_info_values(base::Value::Type::LIST);
+  if (should_provide_certificates_)
+    cert_info_values.Append(MakeClientCertificateInfoValue(*certificate_));
+  message_data.SetKey("certificateInfoList", std::move(cert_info_values));
+
+  auto message = std::make_unique<base::Value>(base::Value::Type::LIST);
+  message->Append(std::move(message_data));
+  auto event = std::make_unique<extensions::Event>(
+      extensions::events::FOR_TEST,
+      extensions::api::test::OnMessage::kEventName,
+      base::ListValue::From(std::move(message)), browser_context_);
+  extensions::EventRouter::Get(browser_context_)
+      ->DispatchEventToExtension(extension_id(), std::move(event));
+}
+
 void TestCertificateProviderExtension::Observe(
     int type,
     const content::NotificationSource& source,
@@ -154,7 +227,7 @@ void TestCertificateProviderExtension::Observe(
 
   extensions::TestSendMessageFunction* function =
       content::Source<extensions::TestSendMessageFunction>(source).ptr();
-  if (!function->extension() || function->extension_id() != extension_id_ ||
+  if (!function->extension() || function->extension_id() != kExtensionId ||
       function->browser_context() != browser_context_) {
     // Ignore messages targeted to other extensions.
     return;
@@ -174,7 +247,7 @@ void TestCertificateProviderExtension::Observe(
   ReplyToJsCallback send_reply_to_js_callback =
       base::BindOnce(&SendReplyToJs, base::Unretained(function));
   *listener_will_respond = true;
-  if (request_type == "onCertificatesRequested") {
+  if (request_type == "getCertificates") {
     CHECK_EQ(message_value.GetList().size(), 1U);
     HandleCertificatesRequest(std::move(send_reply_to_js_callback));
   } else if (request_type == "onSignatureRequested") {
@@ -191,9 +264,10 @@ void TestCertificateProviderExtension::Observe(
 
 void TestCertificateProviderExtension::HandleCertificatesRequest(
     ReplyToJsCallback callback) {
+  ++certificate_request_count_;
   base::Value cert_info_values(base::Value::Type::LIST);
-  if (!should_fail_certificate_requests_)
-    cert_info_values.Append(MakeCertInfoValue(*certificate_));
+  if (should_provide_certificates_)
+    cert_info_values.Append(MakeClientCertificateInfoValue(*certificate_));
   std::move(callback).Run(cert_info_values);
 }
 
@@ -208,19 +282,22 @@ void TestCertificateProviderExtension::HandleSignatureRequest(
   const std::string pin_string = pin.GetString();
 
   const int sign_request_id = sign_request.FindKey("signRequestId")->GetInt();
-  const std::vector<uint8_t> digest =
-      ExtractBytesFromValue(*sign_request.FindKey("digest"));
+  const std::vector<uint8_t> input =
+      ExtractBytesFromValue(*sign_request.FindKey("input"));
 
-  const extensions::api::certificate_provider::Hash hash =
-      extensions::api::certificate_provider::ParseHash(
-          sign_request.FindKey("hash")->GetString());
-  int openssl_digest_type = 0;
-  if (hash == extensions::api::certificate_provider::Hash::HASH_SHA256)
-    openssl_digest_type = NID_sha256;
-  else if (hash == extensions::api::certificate_provider::Hash::HASH_SHA1)
-    openssl_digest_type = NID_sha1;
-  else
-    LOG(FATAL) << "Unexpected signature request hash: " << hash;
+  const extensions::api::certificate_provider::Algorithm algorithm =
+      extensions::api::certificate_provider::ParseAlgorithm(
+          sign_request.FindKey("algorithm")->GetString());
+  int openssl_signature_algorithm = 0;
+  if (algorithm == extensions::api::certificate_provider::Algorithm::
+                       ALGORITHM_RSASSA_PKCS1_V1_5_SHA256) {
+    openssl_signature_algorithm = SSL_SIGN_RSA_PKCS1_SHA256;
+  } else if (algorithm == extensions::api::certificate_provider::Algorithm::
+                              ALGORITHM_RSASSA_PKCS1_V1_5_SHA1) {
+    openssl_signature_algorithm = SSL_SIGN_RSA_PKCS1_SHA1;
+  } else {
+    LOG(FATAL) << "Unexpected signature request algorithm: " << algorithm;
+  }
 
   if (should_fail_sign_digest_requests_) {
     // Simulate a failure.
@@ -235,8 +312,17 @@ void TestCertificateProviderExtension::HandleSignatureRequest(
       // side before generating the signature.
       base::Value pin_request_parameters(base::Value::Type::DICTIONARY);
       pin_request_parameters.SetIntKey("signRequestId", sign_request_id);
+      if (remaining_pin_attempts_ == 0) {
+        pin_request_parameters.SetStringKey("errorType",
+                                            "MAX_ATTEMPTS_EXCEEDED");
+      }
       response.SetKey("requestPin", std::move(pin_request_parameters));
       std::move(callback).Run(response);
+      return;
+    }
+    if (remaining_pin_attempts_ == 0) {
+      // The error about the lockout is already displayed, so fail immediately.
+      std::move(callback).Run(/*response=*/base::Value());
       return;
     }
     if (pin_status_string == "canceled" ||
@@ -250,10 +336,19 @@ void TestCertificateProviderExtension::HandleSignatureRequest(
     }
     DCHECK_EQ(pin_status_string, "ok");
     if (pin_string != *required_pin_) {
-      // The PIN is wrong, so retry the PIN request with displaying an error.
+      // The entered PIN is wrong, so decrement the remaining attempt count, and
+      // update the PIN dialog with displaying an error.
+      if (remaining_pin_attempts_ > 0)
+        --remaining_pin_attempts_;
       base::Value pin_request_parameters(base::Value::Type::DICTIONARY);
       pin_request_parameters.SetIntKey("signRequestId", sign_request_id);
-      pin_request_parameters.SetStringKey("errorType", "INVALID_PIN");
+      pin_request_parameters.SetStringKey(
+          "errorType", remaining_pin_attempts_ == 0 ? "MAX_ATTEMPTS_EXCEEDED"
+                                                    : "INVALID_PIN");
+      if (remaining_pin_attempts_ > 0) {
+        pin_request_parameters.SetIntKey("attemptsLeft",
+                                         remaining_pin_attempts_);
+      }
       response.SetKey("requestPin", std::move(pin_request_parameters));
       std::move(callback).Run(response);
       return;
@@ -266,8 +361,8 @@ void TestCertificateProviderExtension::HandleSignatureRequest(
   }
   // Generate and return a valid signature.
   std::vector<uint8_t> signature;
-  CHECK(
-      RsaSignPrehashed(*private_key_, openssl_digest_type, digest, &signature));
+  CHECK(RsaSignRawData(private_key_.get(), openssl_signature_algorithm, input,
+                       &signature));
   response.SetKey("signature", ConvertBytesToValue(signature));
   std::move(callback).Run(response);
 }

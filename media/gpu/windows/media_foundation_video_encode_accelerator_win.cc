@@ -45,13 +45,16 @@ const size_t kOneMicrosecondInMFSampleTimeUnits = 10;
 const size_t kOutputSampleBufferSizeRatio = 4;
 
 constexpr const wchar_t* const kMediaFoundationVideoEncoderDLLs[] = {
-    L"mf.dll", L"mfplat.dll",
+    L"mf.dll",
+    L"mfplat.dll",
 };
 
-eAVEncH264VProfile GetH264VProfile(VideoCodecProfile profile) {
+eAVEncH264VProfile GetH264VProfile(VideoCodecProfile profile,
+                                   bool is_constrained_h264) {
   switch (profile) {
     case H264PROFILE_BASELINE:
-      return eAVEncH264VProfile_Base;
+      return is_constrained_h264 ? eAVEncH264VProfile_ConstrainedBase
+                                 : eAVEncH264VProfile_Base;
     case H264PROFILE_MAIN:
       return eAVEncH264VProfile_Main;
     case H264PROFILE_HIGH: {
@@ -65,7 +68,6 @@ eAVEncH264VProfile GetH264VProfile(VideoCodecProfile profile) {
       return eAVEncH264VProfile_unknown;
   }
 }
-
 }  // namespace
 
 class MediaFoundationVideoEncodeAccelerator::EncodeOutput {
@@ -179,13 +181,15 @@ bool MediaFoundationVideoEncodeAccelerator::Initialize(const Config& config,
   DVLOG(3) << __func__ << ": " << config.AsHumanReadableString();
   DCHECK(main_client_task_runner_->BelongsToCurrentThread());
 
-  if (PIXEL_FORMAT_I420 != config.input_format) {
+  if (PIXEL_FORMAT_I420 != config.input_format &&
+      PIXEL_FORMAT_NV12 != config.input_format) {
     DLOG(ERROR) << "Input format not supported= "
                 << VideoPixelFormatToString(config.input_format);
     return false;
   }
 
-  if (GetH264VProfile(config.output_profile) == eAVEncH264VProfile_unknown) {
+  if (GetH264VProfile(config.output_profile, config.is_constrained_h264) ==
+      eAVEncH264VProfile_unknown) {
     DLOG(ERROR) << "Output profile not supported= " << config.output_profile;
     return false;
   }
@@ -250,7 +254,8 @@ bool MediaFoundationVideoEncodeAccelerator::Initialize(const Config& config,
     return false;
   }
 
-  if (!InitializeInputOutputParameters(config.output_profile)) {
+  if (!InitializeInputOutputParameters(config.output_profile,
+                                       config.is_constrained_h264)) {
     DLOG(ERROR) << "Failed initializing input-output samples.";
     return false;
   }
@@ -524,7 +529,8 @@ bool MediaFoundationVideoEncodeAccelerator::ActivateAsyncEncoder(
 }
 
 bool MediaFoundationVideoEncodeAccelerator::InitializeInputOutputParameters(
-    VideoCodecProfile output_profile) {
+    VideoCodecProfile output_profile,
+    bool is_constrained_h264) {
   DCHECK(main_client_task_runner_->BelongsToCurrentThread());
   DCHECK(encoder_);
 
@@ -572,8 +578,9 @@ bool MediaFoundationVideoEncodeAccelerator::InitializeInputOutputParameters(
   hr = imf_output_media_type_->SetUINT32(MF_MT_INTERLACE_MODE,
                                          MFVideoInterlace_Progressive);
   RETURN_ON_HR_FAILURE(hr, "Couldn't set interlace mode", false);
-  hr = imf_output_media_type_->SetUINT32(MF_MT_MPEG2_PROFILE,
-                                         GetH264VProfile(output_profile));
+  hr = imf_output_media_type_->SetUINT32(
+      MF_MT_MPEG2_PROFILE,
+      GetH264VProfile(output_profile, is_constrained_h264));
   RETURN_ON_HR_FAILURE(hr, "Couldn't set codec profile", false);
   hr = encoder_->SetOutputType(output_stream_id_, imf_output_media_type_.Get(),
                                0);
@@ -676,9 +683,9 @@ void MediaFoundationVideoEncodeAccelerator::EncodeTask(
   DCHECK(encoder_thread_task_runner_->BelongsToCurrentThread());
 
   if (is_async_mft_) {
-    AsyncEncodeTask(frame, force_keyframe);
+    AsyncEncodeTask(std::move(frame), force_keyframe);
   } else {
-    SyncEncodeTask(frame, force_keyframe);
+    SyncEncodeTask(std::move(frame), force_keyframe);
   }
 }
 
@@ -689,7 +696,7 @@ void MediaFoundationVideoEncodeAccelerator::AsyncEncodeTask(
   HRESULT hr = E_FAIL;
   if (input_required_) {
     // Hardware MFT is waiting for this coming input.
-    hr = ProcessInput(frame, force_keyframe);
+    hr = ProcessInput(std::move(frame), force_keyframe);
     if (FAILED(hr)) {
       NotifyError(kPlatformFailureError);
       RETURN_ON_HR_FAILURE(hr, "Couldn't encode", );
@@ -715,7 +722,7 @@ void MediaFoundationVideoEncodeAccelerator::AsyncEncodeTask(
 
     // Always deliver the current input into HMFT.
     if (event_type == METransformNeedInput) {
-      hr = ProcessInput(frame, force_keyframe);
+      hr = ProcessInput(std::move(frame), force_keyframe);
       if (FAILED(hr)) {
         NotifyError(kPlatformFailureError);
         RETURN_ON_HR_FAILURE(hr, "Couldn't encode", );
@@ -742,7 +749,7 @@ void MediaFoundationVideoEncodeAccelerator::SyncEncodeTask(
     scoped_refptr<VideoFrame> frame,
     bool force_keyframe) {
   HRESULT hr = E_FAIL;
-  hr = ProcessInput(frame, force_keyframe);
+  hr = ProcessInput(std::move(frame), force_keyframe);
 
   // According to MSDN, if encoder returns MF_E_NOTACCEPTING, we need to try
   // processing the output. This error indicates that encoder does not accept
@@ -769,29 +776,50 @@ HRESULT MediaFoundationVideoEncodeAccelerator::ProcessInput(
     bool force_keyframe) {
   DVLOG(3) << __func__;
   DCHECK(encoder_thread_task_runner_->BelongsToCurrentThread());
-  DCHECK_EQ(frame->format(), PIXEL_FORMAT_I420);
-
-  // Convert I420 to NV12 as input.
-  Microsoft::WRL::ComPtr<IMFMediaBuffer> input_buffer;
-  input_sample_->GetBufferByIndex(0, &input_buffer);
 
   {
+    Microsoft::WRL::ComPtr<IMFMediaBuffer> input_buffer;
+    input_sample_->GetBufferByIndex(0, &input_buffer);
     MediaBufferScopedPointer scoped_buffer(input_buffer.Get());
     DCHECK(scoped_buffer.get());
-    int dst_stride_y = frame->stride(VideoFrame::kYPlane);
+    uint8_t* dst_y = scoped_buffer.get();
     uint8_t* dst_uv =
-        scoped_buffer.get() +
-        frame->stride(VideoFrame::kYPlane) * frame->rows(VideoFrame::kYPlane);
-    int dst_stride_uv = frame->stride(VideoFrame::kUPlane) * 2;
-    libyuv::I420ToNV12(frame->visible_data(VideoFrame::kYPlane),
-                       frame->stride(VideoFrame::kYPlane),
-                       frame->visible_data(VideoFrame::kUPlane),
-                       frame->stride(VideoFrame::kUPlane),
-                       frame->visible_data(VideoFrame::kVPlane),
-                       frame->stride(VideoFrame::kVPlane), scoped_buffer.get(),
-                       dst_stride_y, dst_uv, dst_stride_uv,
-                       input_visible_size_.width(),
-                       input_visible_size_.height());
+        scoped_buffer.get() + frame->row_bytes(VideoFrame::kYPlane) *
+                                  frame->rows(VideoFrame::kYPlane);
+    uint8_t* end = dst_uv + frame->row_bytes(VideoFrame::kUVPlane) *
+                                frame->rows(VideoFrame::kUVPlane);
+    DCHECK_GE(std::ptrdiff_t{scoped_buffer.max_length()},
+              end - scoped_buffer.get());
+
+    if (frame->format() == PIXEL_FORMAT_NV12) {
+      // Copy NV12 pixel data from |frame| to |input_buffer|.
+      int error = libyuv::NV12Copy(
+          frame->visible_data(VideoFrame::kYPlane),
+          frame->stride(VideoFrame::kYPlane),
+          frame->visible_data(VideoFrame::kUVPlane),
+          frame->stride(VideoFrame::kUVPlane), dst_y,
+          frame->row_bytes(VideoFrame::kYPlane), dst_uv,
+          frame->row_bytes(VideoFrame::kUPlane), input_visible_size_.width(),
+          input_visible_size_.height());
+      if (error)
+        return E_FAIL;
+    } else if (frame->format() == PIXEL_FORMAT_I420) {
+      // Convert I420 to NV12 as input.
+      int error = libyuv::I420ToNV12(
+          frame->visible_data(VideoFrame::kYPlane),
+          frame->stride(VideoFrame::kYPlane),
+          frame->visible_data(VideoFrame::kUPlane),
+          frame->stride(VideoFrame::kUPlane),
+          frame->visible_data(VideoFrame::kVPlane),
+          frame->stride(VideoFrame::kVPlane), dst_y,
+          frame->row_bytes(VideoFrame::kYPlane), dst_uv,
+          frame->row_bytes(VideoFrame::kUPlane) * 2,
+          input_visible_size_.width(), input_visible_size_.height());
+      if (error)
+        return E_FAIL;
+    } else {
+      NOTREACHED();
+    }
   }
 
   input_sample_->SetSampleTime(frame->timestamp().InMicroseconds() *
@@ -802,9 +830,6 @@ HRESULT MediaFoundationVideoEncodeAccelerator::ProcessInput(
   RETURN_ON_HR_FAILURE(hr, "Couldn't calculate sample duration", E_FAIL);
   input_sample_->SetSampleDuration(sample_duration);
 
-  // Release frame after input is copied.
-  frame = nullptr;
-
   if (force_keyframe) {
     VARIANT var;
     var.vt = VT_UI4;
@@ -812,7 +837,8 @@ HRESULT MediaFoundationVideoEncodeAccelerator::ProcessInput(
     hr = codec_api_->SetValue(&CODECAPI_AVEncVideoForceKeyFrame, &var);
     if (!compatible_with_win7_ && FAILED(hr)) {
       LOG(WARNING) << "Failed to set CODECAPI_AVEncVideoForceKeyFrame, "
-                      "HRESULT: 0x" << std::hex << hr;
+                      "HRESULT: 0x"
+                   << std::hex << hr;
     }
   }
 
@@ -1008,7 +1034,7 @@ bool MediaFoundationVideoEncodeAccelerator::TryToDeliverInputFrame(
         continue;
       }
       case METransformNeedInput: {
-        hr = ProcessInput(frame, force_keyframe);
+        hr = ProcessInput(std::move(frame), force_keyframe);
         if (FAILED(hr)) {
           NotifyError(kPlatformFailureError);
           RETURN_ON_HR_FAILURE(hr, "Couldn't encode", false);

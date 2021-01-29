@@ -27,6 +27,8 @@ import androidx.appcompat.widget.SwitchCompat;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.flags.CachedFeatureFlags;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.components.content_settings.CookieControlsEnforcement;
 import org.chromium.ui.text.NoUnderlineClickableSpan;
 import org.chromium.ui.text.SpanApplier;
@@ -55,6 +57,7 @@ public class IncognitoDescriptionView extends LinearLayout {
     private static final int BULLETPOINTS_HORIZONTAL_SPACING_DP = 40;
     private static final int CONTENT_WIDTH_DP = 600;
     private static final int WIDE_LAYOUT_THRESHOLD_DP = 720;
+    private static final int COOKIES_CONTROL_MARGIN_TOP_DP = 24;
 
     /** Default constructor needed to inflate via XML. */
     public IncognitoDescriptionView(Context context, AttributeSet attrs) {
@@ -108,7 +111,7 @@ public class IncognitoDescriptionView extends LinearLayout {
         mSubtitle = findViewById(R.id.new_tab_incognito_subtitle);
         mLearnMore = findViewById(R.id.learn_more);
         mParagraphs = new TextView[] {mSubtitle, findViewById(R.id.new_tab_incognito_features),
-                findViewById(R.id.new_tab_incognito_warning), mLearnMore};
+                findViewById(R.id.new_tab_incognito_warning)};
         mBulletpointsContainer = findViewById(R.id.new_tab_incognito_bulletpoints_container);
         mCookieControlsCard = findViewById(R.id.cookie_controls_card);
         mCookieControlsToggle = findViewById(R.id.cookie_controls_card_toggle);
@@ -256,6 +259,20 @@ public class IncognitoDescriptionView extends LinearLayout {
             paragraph.setLayoutParams(paragraph.getLayoutParams()); // Apply the new layout.
         }
 
+        // Set up margins of learn more link to maintain a constant space between link text
+        // and other views.
+        int innerSpacing = (int) ((getContext().getResources().getDimensionPixelSize(
+                                           R.dimen.min_touch_target_size)
+                                          - mLearnMore.getTextSize())
+                / 2);
+        int learnMoreSpacingTop = spacingPx - innerSpacing;
+        int learnMoreSpacingBottom =
+                dpToPx(getContext(), COOKIES_CONTROL_MARGIN_TOP_DP) - innerSpacing;
+        LinearLayout.LayoutParams params = (LayoutParams) mLearnMore.getLayoutParams();
+        params.setMargins(
+                0, Math.max(learnMoreSpacingTop, 0), 0, Math.max(learnMoreSpacingBottom, 0));
+        mLearnMore.requestLayout();
+
         ((LinearLayout.LayoutParams) mHeader.getLayoutParams()).setMargins(0, spacingPx, 0, 0);
         mHeader.setLayoutParams(mHeader.getLayoutParams()); // Apply the new layout.
     }
@@ -279,8 +296,10 @@ public class IncognitoDescriptionView extends LinearLayout {
 
     /** Adjust the "Learn More" link. */
     private void adjustLearnMore() {
-        final String subtitleText =
-                getContext().getResources().getString(R.string.new_tab_otr_subtitle);
+        boolean readLaterEnabled = CachedFeatureFlags.isEnabled(ChromeFeatureList.READ_LATER);
+        final String subtitleText = getContext().getResources().getString(readLaterEnabled
+                        ? R.string.new_tab_otr_subtitle_with_reading_list
+                        : R.string.new_tab_otr_subtitle);
         boolean learnMoreInSubtitle = mWidthDp > WIDE_LAYOUT_THRESHOLD_DP;
 
         mLearnMore.setVisibility(learnMoreInSubtitle ? View.GONE : View.VISIBLE);
@@ -356,7 +375,7 @@ public class IncognitoDescriptionView extends LinearLayout {
         String addition;
         switch (enforcement) {
             case CookieControlsEnforcement.ENFORCED_BY_POLICY:
-                iconRes = R.drawable.controlled_setting_mandatory;
+                iconRes = R.drawable.ic_business_small;
                 addition = resources.getString(R.string.managed_by_your_organization);
                 break;
             case CookieControlsEnforcement.ENFORCED_BY_COOKIE_SETTING:

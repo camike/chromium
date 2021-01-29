@@ -10,10 +10,10 @@
 #include <string>
 #include <vector>
 #include "base/time/time.h"
-#include "content/public/renderer/request_peer.h"
 #include "net/base/load_timing_info.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
 #include "services/network/public/mojom/url_response_head.mojom-forward.h"
+#include "third_party/blink/public/platform/web_request_peer.h"
 
 namespace net {
 struct RedirectInfo;
@@ -25,7 +25,7 @@ class ResourceDispatcher;
 
 // Listens for request response data and stores it so that it can be compared
 // to the reference data.
-class TestRequestPeer : public RequestPeer {
+class TestRequestPeer : public blink::WebRequestPeer {
  public:
   struct Context;
   TestRequestPeer(ResourceDispatcher* dispatcher, Context* context);
@@ -33,7 +33,8 @@ class TestRequestPeer : public RequestPeer {
 
   void OnUploadProgress(uint64_t position, uint64_t size) override;
   bool OnReceivedRedirect(const net::RedirectInfo& redirect_info,
-                          network::mojom::URLResponseHeadPtr head) override;
+                          network::mojom::URLResponseHeadPtr head,
+                          std::vector<std::string>*) override;
   void OnReceivedResponse(network::mojom::URLResponseHeadPtr head) override;
   void OnStartLoadingResponseBody(
       mojo::ScopedDataPipeConsumerHandle body) override;
@@ -41,7 +42,9 @@ class TestRequestPeer : public RequestPeer {
   void OnReceivedCachedMetadata(mojo_base::BigBuffer data) override;
   void OnCompletedRequest(
       const network::URLLoaderCompletionStatus& status) override;
-  scoped_refptr<base::TaskRunner> GetTaskRunner() override;
+  void EvictFromBackForwardCache(blink::mojom::RendererEvictionReason) override;
+  void DidBufferLoadWhileInBackForwardCache(size_t num_bytes) override;
+  bool CanContinueBufferingWhileInBackForwardCache() override;
 
   struct Context final {
     Context();

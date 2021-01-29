@@ -14,6 +14,7 @@
 #import "ios/chrome/browser/ui/infobars/infobar_feature.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/util/pointer_interaction_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -64,6 +65,7 @@ const CGFloat kLongPressTimeDurationInSeconds = 0.4;
 @property(nonatomic, assign) BOOL presentsModal;
 @property(nonatomic, copy) NSString* titleText;
 @property(nonatomic, copy) NSString* subtitleText;
+@property(nonatomic, assign) BOOL useIconBackgroundTint;
 
 // The original position of this InfobarVC view in the parent's view coordinate
 // system.
@@ -110,6 +112,7 @@ const CGFloat kLongPressTimeDurationInSeconds = 0.4;
     _metricsRecorder =
         [[InfobarMetricsRecorder alloc] initWithType:infobarType];
     _presentsModal = presentsModal;
+    _useIconBackgroundTint = YES;
   }
   return self;
 }
@@ -143,8 +146,12 @@ const CGFloat kLongPressTimeDurationInSeconds = 0.4;
   // Icon setup.
   UIView* iconContainerView = nil;
   if (self.iconImage) {
-    self.iconImage = [self.iconImage
-        imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    // If the icon image requires a background tint, ignore the original color
+    // information and draw the image as a template image.
+    if (self.useIconBackgroundTint) {
+      self.iconImage = [self.iconImage
+          imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    }
     UIImageView* iconImageView =
         [[UIImageView alloc] initWithImage:self.iconImage];
     iconImageView.contentMode = UIViewContentModeScaleAspectFit;
@@ -152,8 +159,10 @@ const CGFloat kLongPressTimeDurationInSeconds = 0.4;
 
     UIView* backgroundIconView =
         [[UIView alloc] initWithFrame:iconImageView.frame];
-    backgroundIconView.backgroundColor = [UIColor colorNamed:kBlueHaloColor];
     backgroundIconView.layer.cornerRadius = kIconCornerRadius;
+    if (self.useIconBackgroundTint) {
+      backgroundIconView.backgroundColor = [UIColor colorNamed:kBlueHaloColor];
+    }
     backgroundIconView.translatesAutoresizingMaskIntoConstraints = NO;
 
     iconContainerView = [[UIView alloc] init];
@@ -204,6 +213,9 @@ const CGFloat kLongPressTimeDurationInSeconds = 0.4;
   UIStackView* labelsStackView = [[UIStackView alloc]
       initWithArrangedSubviews:@[ self.titleLabel, self.subTitleLabel ]];
   labelsStackView.axis = UILayoutConstraintAxisVertical;
+  labelsStackView.layoutMarginsRelativeArrangement = YES;
+  labelsStackView.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(
+      kContainerStackVerticalPadding, 0, kContainerStackVerticalPadding, 0);
 
   // Button setup.
   self.infobarButton = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -219,6 +231,17 @@ const CGFloat kLongPressTimeDurationInSeconds = 0.4;
                forControlEvents:UIControlEventTouchUpInside];
   self.infobarButton.accessibilityIdentifier =
       kInfobarBannerAcceptButtonIdentifier;
+  if (@available(iOS 13.4, *)) {
+      self.infobarButton.pointerInteractionEnabled = YES;
+      self.infobarButton.pointerStyleProvider =
+          ^UIPointerStyle*(UIButton* button, UIPointerEffect* proposedEffect,
+                           UIPointerShape* proposedShape) {
+        UIPointerShape* shape =
+            [UIPointerShape shapeWithRoundedRect:button.frame
+                                    cornerRadius:kBannerViewCornerRadius];
+        return [UIPointerStyle styleWithEffect:proposedEffect shape:shape];
+      };
+  }
 
   UIView* buttonSeparator = [[UIView alloc] init];
   buttonSeparator.translatesAutoresizingMaskIntoConstraints = NO;
@@ -253,6 +276,11 @@ const CGFloat kLongPressTimeDurationInSeconds = 0.4;
   [containerStack addArrangedSubview:self.openModalButton];
   // Hide open modal button if user shouldn't be allowed to open the modal.
   self.openModalButton.hidden = !self.presentsModal;
+  if (@available(iOS 13.4, *)) {
+      self.openModalButton.pointerInteractionEnabled = YES;
+      self.openModalButton.pointerStyleProvider =
+          CreateDefaultEffectCirclePointerStyleProvider();
+  }
 
   // Add accept button.
   [containerStack addArrangedSubview:self.infobarButton];
@@ -260,11 +288,8 @@ const CGFloat kLongPressTimeDurationInSeconds = 0.4;
   containerStack.axis = UILayoutConstraintAxisHorizontal;
   containerStack.spacing = kContainerStackSpacing;
   containerStack.distribution = UIStackViewDistributionFill;
-  containerStack.alignment = UIStackViewAlignmentFill;
+  containerStack.alignment = UIStackViewAlignmentCenter;
   containerStack.translatesAutoresizingMaskIntoConstraints = NO;
-  containerStack.layoutMarginsRelativeArrangement = YES;
-  containerStack.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(
-      kContainerStackVerticalPadding, 0, kContainerStackVerticalPadding, 0);
   containerStack.insetsLayoutMarginsFromSafeArea = NO;
   [self.view addSubview:containerStack];
 
@@ -281,6 +306,9 @@ const CGFloat kLongPressTimeDurationInSeconds = 0.4;
         constraintEqualToAnchor:self.view.bottomAnchor],
     // Button.
     [self.infobarButton.widthAnchor constraintEqualToConstant:kButtonWidth],
+    [self.infobarButton.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+    [self.infobarButton.bottomAnchor
+        constraintEqualToAnchor:self.view.bottomAnchor],
     [buttonSeparator.widthAnchor
         constraintEqualToConstant:kButtonSeparatorWidth],
     [buttonSeparator.leadingAnchor
@@ -288,6 +316,14 @@ const CGFloat kLongPressTimeDurationInSeconds = 0.4;
     [buttonSeparator.topAnchor constraintEqualToAnchor:self.view.topAnchor],
     [buttonSeparator.bottomAnchor
         constraintEqualToAnchor:self.view.bottomAnchor],
+    // Open modal button.
+    [NSLayoutConstraint constraintWithItem:self.openModalButton
+                                 attribute:NSLayoutAttributeHeight
+                                 relatedBy:NSLayoutRelationEqual
+                                    toItem:self.openModalButton
+                                 attribute:NSLayoutAttributeWidth
+                                multiplier:1
+                                  constant:0],
   ]];
 
   // Gestures setup.
@@ -362,7 +398,7 @@ const CGFloat kLongPressTimeDurationInSeconds = 0.4;
   self.shouldDismissAfterTouchesEnded = YES;
 }
 
-#pragma mark - Getters/Setters
+#pragma mark - Setters
 
 - (void)setTitleText:(NSString*)titleText {
   _titleText = titleText;
@@ -395,6 +431,10 @@ const CGFloat kLongPressTimeDurationInSeconds = 0.4;
   // InfobarContainerCoordinator and not Overlays. Once we migrate to Overlays
   // InfobarBannerContainer shouldn't be necessary.
   DCHECK(!IsInfobarOverlayUIEnabled());
+}
+
+- (void)setUseIconBackgroundTint:(BOOL)useIconBackgroundTint {
+  _useIconBackgroundTint = useIconBackgroundTint;
 }
 
 #pragma mark - Private Methods

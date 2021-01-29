@@ -16,12 +16,12 @@
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/logging.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/task_environment.h"
@@ -523,7 +523,7 @@ int MockChromeCleanerProcess::Run() {
   // task to unblock the child process's main thread.
   auto quit_closure = base::BindOnce(
       [](scoped_refptr<base::SequencedTaskRunner> main_runner,
-         base::Closure quit_closure) {
+         base::OnceClosure quit_closure) {
         main_runner->PostTask(FROM_HERE, std::move(quit_closure));
       },
       base::SequencedTaskRunnerHandle::Get(), run_loop.QuitClosure());

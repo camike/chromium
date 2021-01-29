@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "base/strings/string16.h"
+#include "base/strings/string_piece.h"
 #include "base/values.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
@@ -53,11 +54,6 @@ typedef std::map<std::pair<ContentSettingsPattern, std::string>,
 using ChooserExceptionDetails =
     std::map<std::pair<GURL, std::string>, std::set<std::pair<GURL, bool>>>;
 
-constexpr char kAllowAll[] = "allowAll";
-constexpr char kBlockThirdPartyIncognito[] = "blockThirdPartyIncognito";
-constexpr char kBlockThirdParty[] = "blockThirdParty";
-constexpr char kBlockAll[] = "blockAll";
-constexpr char kSessionOnly[] = "sessionOnly";
 constexpr char kChooserType[] = "chooserType";
 constexpr char kDisplayName[] = "displayName";
 constexpr char kEmbeddingOrigin[] = "embeddingOrigin";
@@ -72,9 +68,11 @@ constexpr char kSites[] = "sites";
 constexpr char kPolicyIndicator[] = "indicator";
 constexpr char kSource[] = "source";
 constexpr char kType[] = "type";
+constexpr char kIsEmbargoed[] = "isEmbargoed";
 
 enum class SiteSettingSource {
-  kAdsFilterBlacklist,
+  kAllowlist,
+  kAdsFilterBlocklist,
   kDefault,
   kDrmDisabled,
   kEmbargo,
@@ -108,21 +106,12 @@ struct ManagedState {
   PolicyIndicatorType indicator = PolicyIndicatorType::kNone;
 };
 
-// Represents the manage states for all of the cookie controls.
-struct CookieControlsManagedState {
-  ManagedState allow_all;
-  ManagedState block_third_party_incognito;
-  ManagedState block_third_party;
-  ManagedState block_all;
-  ManagedState session_only;
-};
-
 // Returns whether a group name has been registered for the given type.
 bool HasRegisteredGroupName(ContentSettingsType type);
 
 // Converts a ContentSettingsType to/from its group name identifier.
-ContentSettingsType ContentSettingsTypeFromGroupName(const std::string& name);
-std::string ContentSettingsTypeToGroupName(ContentSettingsType type);
+ContentSettingsType ContentSettingsTypeFromGroupName(base::StringPiece name);
+base::StringPiece ContentSettingsTypeToGroupName(ContentSettingsType type);
 
 // Converts a ListValue of group names to a list of ContentSettingsTypes
 std::vector<ContentSettingsType> ContentSettingsTypesFromGroupNames(
@@ -141,7 +130,8 @@ std::unique_ptr<base::DictionaryValue> GetExceptionForPage(
     const std::string& display_name,
     const ContentSetting& setting,
     const std::string& provider_name,
-    bool incognito);
+    bool incognito,
+    bool is_embargoed = false);
 
 // Helper function to construct a dictionary for a hosted app exception.
 void AddExceptionForHostedApp(const std::string& url_pattern,
@@ -224,9 +214,6 @@ base::Value CreateChooserExceptionObject(
 base::Value GetChooserExceptionListFromProfile(
     Profile* profile,
     const ChooserTypeNameEntry& chooser_type);
-
-// Returns the cookie controls manage state for a given profile.
-CookieControlsManagedState GetCookieControlsManagedState(Profile* profile);
 
 // Concerts a PolicyIndicatorType to its string identifier.
 std::string PolicyIndicatorTypeToString(const PolicyIndicatorType type);

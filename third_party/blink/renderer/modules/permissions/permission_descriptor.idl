@@ -23,6 +23,7 @@ enum PermissionName {
     // "clipboard",
     "screen-wake-lock",
     "nfc",
+    "display-capture",
 
     // Non-standard:
     "accessibility-events",
@@ -33,6 +34,8 @@ enum PermissionName {
     "periodic-background-sync",
     "system-wake-lock",
     "storage-access",
+    "window-placement",
+    "font-access",
 };
 
 // The PermissionDescriptor dictionary is a base to describe permissions. Some

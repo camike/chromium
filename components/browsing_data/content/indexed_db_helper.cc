@@ -11,7 +11,6 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "components/browsing_data/content/browsing_data_helper.h"
 #include "components/services/storage/public/mojom/indexed_db_control.mojom.h"
@@ -49,15 +48,15 @@ void IndexedDBHelper::DeleteIndexedDB(const url::Origin& origin,
 
 void IndexedDBHelper::IndexedDBUsageInfoReceived(
     FetchCallback callback,
-    std::vector<storage::mojom::IndexedDBStorageUsageInfoPtr> origins) {
+    std::vector<storage::mojom::StorageUsageInfoPtr> origins) {
   DCHECK(!callback.is_null());
   std::list<content::StorageUsageInfo> result;
   for (const auto& origin_usage : origins) {
     if (!HasWebScheme(origin_usage->origin.GetURL()))
       continue;  // Non-websafe state is not considered browsing data.
-    result.push_back(StorageUsageInfo(origin_usage->origin,
-                                      origin_usage->size_in_bytes,
-                                      origin_usage->last_modified_time));
+    result.emplace_back(StorageUsageInfo(origin_usage->origin,
+                                         origin_usage->total_size_bytes,
+                                         origin_usage->last_modified));
   }
   std::move(callback).Run(std::move(result));
 }
@@ -99,8 +98,8 @@ void CannedIndexedDBHelper::StartFetching(FetchCallback callback) {
   for (const auto& origin : pending_origins_)
     result.emplace_back(origin, 0, base::Time());
 
-  base::PostTask(FROM_HERE, {BrowserThread::UI},
-                 base::BindOnce(std::move(callback), result));
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), result));
 }
 
 void CannedIndexedDBHelper::DeleteIndexedDB(

@@ -22,7 +22,6 @@
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "net/url_request/url_request.h"
 #include "services/network/public/cpp/request_mode.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -84,8 +83,7 @@ class SubresourceLoader : public network::mojom::URLLoader,
       return;
     }
     handler_ = host_->CreateRequestHandler(
-        std::make_unique<AppCacheRequest>(request_),
-        static_cast<blink::mojom::ResourceType>(request_.resource_type),
+        std::make_unique<AppCacheRequest>(request_), request_.destination,
         request_.should_reset_appcache);
     if (!handler_) {
       CreateAndStartNetworkLoader();
@@ -136,13 +134,12 @@ class SubresourceLoader : public network::mojom::URLLoader,
       const net::HttpRequestHeaders& modified_headers,
       const net::HttpRequestHeaders& modified_cors_exempt_headers,
       const base::Optional<GURL>& new_url) override {
-    DCHECK(removed_headers.empty() && modified_headers.IsEmpty() &&
-           modified_cors_exempt_headers.IsEmpty())
+    DCHECK(modified_headers.IsEmpty() && modified_cors_exempt_headers.IsEmpty())
         << "Redirect with modified headers was not supported yet. "
            "crbug.com/845683";
     if (!handler_) {
       network_loader_->FollowRedirect(
-          {} /* removed_headers */, {} /* modified_headers */,
+          removed_headers, {} /* modified_headers */,
           {} /* modified_cors_exempt_headers */, base::nullopt /* new_url */);
       return;
     }

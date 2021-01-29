@@ -17,11 +17,10 @@ class MODULES_EXPORT AXVirtualObject : public AXObject {
  public:
   AXVirtualObject(AXObjectCacheImpl&, AccessibleNode*);
   ~AXVirtualObject() override;
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   // AXObject overrides.
   void Detach() override;
-  AXObject* ComputeParent() const override { return parent_; }
   bool IsVirtualObject() const override { return true; }
   void AddChildren() override;
   void ChildrenChanged() override;

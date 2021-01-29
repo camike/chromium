@@ -57,6 +57,8 @@ COMPONENT_EXPORT(CHROMEOS_SETTINGS)
 extern const char kAccountsPrefTransferSAMLCookies[];
 COMPONENT_EXPORT(CHROMEOS_SETTINGS)
 extern const char kAccountsPrefLoginScreenDomainAutoComplete[];
+COMPONENT_EXPORT(CHROMEOS_SETTINGS)
+extern const char kAccountsPrefFamilyLinkAccountsAllowed[];
 
 COMPONENT_EXPORT(CHROMEOS_SETTINGS)
 extern const char kSignedDataRoamingEnabled[];
@@ -77,6 +79,9 @@ COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kStatsReportingPref[];
 COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kReleaseChannel[];
 COMPONENT_EXPORT(CHROMEOS_SETTINGS)
 extern const char kReleaseChannelDelegated[];
+COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kReleaseLtsTag[];
+COMPONENT_EXPORT(CHROMEOS_SETTINGS)
+extern const char kDeviceChannelDowngradeBehavior[];
 
 COMPONENT_EXPORT(CHROMEOS_SETTINGS)
 extern const char kReportDeviceVersionInfo[];
@@ -110,6 +115,12 @@ extern const char kReportDeviceCrashReportInfo[];
 COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kReportOsUpdateStatus[];
 COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kReportRunningKioskApp[];
 COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kReportUploadFrequency[];
+COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kReportDeviceAppInfo[];
+COMPONENT_EXPORT(CHROMEOS_SETTINGS)
+extern const char kReportDeviceBluetoothInfo[];
+COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kReportDeviceFanInfo[];
+COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kReportDeviceVpdInfo[];
+COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kReportDeviceSystemInfo[];
 
 COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kHeartbeatEnabled[];
 COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kHeartbeatFrequency[];
@@ -122,7 +133,7 @@ extern const char kPolicyMissingMitigationMode[];
 COMPONENT_EXPORT(CHROMEOS_SETTINGS)
 extern const char kAllowRedeemChromeOsRegistrationOffers[];
 
-COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kStartUpFlags[];
+COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kFeatureFlags[];
 
 COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kKioskAppSettingsPrefix[];
 COMPONENT_EXPORT(CHROMEOS_SETTINGS)
@@ -180,9 +191,6 @@ COMPONENT_EXPORT(CHROMEOS_SETTINGS)
 extern const char kLoginVideoCaptureAllowedUrls[];
 
 COMPONENT_EXPORT(CHROMEOS_SETTINGS)
-extern const char kDeviceLoginScreenExtensions[];
-
-COMPONENT_EXPORT(CHROMEOS_SETTINGS)
 extern const char kDeviceLoginScreenLocales[];
 COMPONENT_EXPORT(CHROMEOS_SETTINGS)
 extern const char kDeviceLoginScreenInputMethods[];
@@ -199,17 +207,20 @@ extern const char kFineGrainedTimeZoneResolveEnabled[];
 COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kDeviceOffHours[];
 
 COMPONENT_EXPORT(CHROMEOS_SETTINGS)
-extern const char kDeviceNativePrintersAccessMode[];
+extern const char kDevicePrintersAccessMode[];
 COMPONENT_EXPORT(CHROMEOS_SETTINGS)
-extern const char kDeviceNativePrintersBlacklist[];
+extern const char kDevicePrintersBlocklist[];
 COMPONENT_EXPORT(CHROMEOS_SETTINGS)
-extern const char kDeviceNativePrintersWhitelist[];
+extern const char kDevicePrintersAllowlist[];
 
 COMPONENT_EXPORT(CHROMEOS_SETTINGS)
 extern const char kTPMFirmwareUpdateSettings[];
 
 COMPONENT_EXPORT(CHROMEOS_SETTINGS)
-extern const char kMinimumChromeVersionEnforced[];
+extern const char kDeviceMinimumVersion[];
+
+COMPONENT_EXPORT(CHROMEOS_SETTINGS)
+extern const char kDeviceMinimumVersionAueMessage[];
 
 COMPONENT_EXPORT(CHROMEOS_SETTINGS) extern const char kCastReceiverName[];
 
@@ -259,7 +270,14 @@ COMPONENT_EXPORT(CHROMEOS_SETTINGS)
 extern const char kSystemProxySettingsKeySystemServicesUsername[];
 COMPONENT_EXPORT(CHROMEOS_SETTINGS)
 extern const char kSystemProxySettingsKeySystemServicesPassword[];
+COMPONENT_EXPORT(CHROMEOS_SETTINGS)
+extern const char kSystemProxySettingsKeyAuthSchemes[];
 
+COMPONENT_EXPORT(CHROMEOS_SETTINGS)
+extern const char kDeviceCrostiniArcAdbSideloadingAllowed[];
+
+COMPONENT_EXPORT(CHROMEOS_SETTINGS)
+extern const char kDeviceShowLowDiskSpaceNotification[];
 }  // namespace chromeos
 
 #endif  // CHROMEOS_SETTINGS_CROS_SETTINGS_NAMES_H_

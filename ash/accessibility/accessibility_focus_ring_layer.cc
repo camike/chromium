@@ -4,6 +4,7 @@
 
 #include "ash/accessibility/accessibility_focus_ring_layer.h"
 
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "third_party/skia/include/core/SkPaint.h"
@@ -12,6 +13,7 @@
 #include "ui/aura/window.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/canvas.h"
+#include "ui/wm/core/coordinate_conversion.h"
 
 namespace ash {
 
@@ -21,8 +23,8 @@ namespace {
 // transparent.
 constexpr int kGradientWidth = 6;
 constexpr int kDefaultStrokeWidth = 2;
-constexpr float kDashLengthDip = 3.f;
-constexpr float kGapLengthDip = 5.f;
+constexpr float kDashLengthDip = 4.f;
+constexpr float kGapLengthDip = 2.f;
 
 int sign(int x) {
   return ((x > 0) ? 1 : (x == 0) ? 0 : -1);
@@ -96,26 +98,44 @@ void AccessibilityFocusRingLayer::Set(const AccessibilityFocusRing& ring) {
   ring_ = ring;
 
   gfx::Rect bounds = ring.GetBounds();
-  int inset = kGradientWidth;
-  bounds.Inset(-inset, -inset, -inset, -inset);
-
   display::Display display =
       display::Screen::GetScreen()->GetDisplayMatching(bounds);
   aura::Window* root_window = Shell::GetRootWindowForDisplayId(display.id());
-  CreateOrUpdateLayer(root_window, "AccessibilityFocusRing", bounds);
+  aura::Window* container = Shell::GetContainer(
+      root_window, kShellWindowId_AccessibilityBubbleContainer);
+
+  if (SkColorGetA(background_color_) > 0) {
+    bounds = display.bounds();
+  } else {
+    int inset = kGradientWidth;
+    bounds.Inset(-inset, -inset, -inset, -inset);
+  }
+  ::wm::ConvertRectFromScreen(container, &bounds);
+  bool stack_at_top =
+      (stacking_order_ == FocusRingStackingOrder::ABOVE_ACCESSIBILITY_BUBBLES);
+  CreateOrUpdateLayer(container, "AccessibilityFocusRing", bounds,
+                      stack_at_top);
 }
 
-void AccessibilityFocusRingLayer::SetAppearance(FocusRingType type,
-                                                SkColor color,
-                                                SkColor secondary_color) {
+void AccessibilityFocusRingLayer::SetAppearance(
+    FocusRingType type,
+    FocusRingStackingOrder stacking_order,
+    SkColor color,
+    SkColor secondary_color,
+    SkColor background_color) {
   SetColor(color);
   type_ = type;
+  stacking_order_ = stacking_order;
   secondary_color_ = secondary_color;
+  background_color_ = background_color;
 }
 
 void AccessibilityFocusRingLayer::OnPaintLayer(
     const ui::PaintContext& context) {
   ui::PaintRecorder recorder(context, layer()->size());
+
+  if (SkColorGetA(background_color_) > 0)
+    DrawFocusBackground(recorder);
 
   cc::PaintFlags flags;
   flags.setAntiAlias(true);
@@ -162,23 +182,20 @@ void AccessibilityFocusRingLayer::DrawDashedFocusRing(
   SkPath path;
   gfx::Vector2d offset = layer()->bounds().OffsetFromOrigin();
 
-  SkScalar intervals[] = {kDashLengthDip, kGapLengthDip};
-  int intervals_length = 2;
-  flags.setPathEffect(SkDashPathEffect::Make(intervals, intervals_length, 0));
-
-  // To keep the dashes properly lined up, we will draw the outside line first,
-  // and cover it with the inner line.
-  flags.setColor(secondary_color_);
-  flags.setStrokeWidth(2 * kDefaultStrokeWidth);
-
-  path = MakePath(ring_, 0, offset);
-  recorder.canvas()->DrawPath(path, flags);
-
   flags.setColor(custom_color());
   flags.setStrokeWidth(kDefaultStrokeWidth);
 
   path = MakePath(ring_, 0, offset);
   recorder.canvas()->DrawPath(path, flags);
+
+  SkScalar intervals[] = {kDashLengthDip, kGapLengthDip};
+  int intervals_length = 2;
+  flags.setPathEffect(SkDashPathEffect::Make(intervals, intervals_length, 0));
+  flags.setColor(secondary_color_);
+
+  path = MakePath(ring_, kDefaultStrokeWidth, offset);
+  recorder.canvas()->DrawPath(path, flags);
+
 }
 
 void AccessibilityFocusRingLayer::DrawGlowFocusRing(ui::PaintRecorder& recorder,
@@ -197,6 +214,19 @@ void AccessibilityFocusRingLayer::DrawGlowFocusRing(ui::PaintRecorder& recorder,
     path = MakePath(ring_, i, offset);
     recorder.canvas()->DrawPath(path, flags);
   }
+}
+
+void AccessibilityFocusRingLayer::DrawFocusBackground(
+    ui::PaintRecorder& recorder) {
+  recorder.canvas()->DrawColor(background_color_);
+
+  gfx::Vector2d offset = layer()->bounds().OffsetFromOrigin();
+  SkPath path = MakePath(ring_, 0, offset);
+  cc::PaintFlags flags;
+  flags.setStyle(cc::PaintFlags::kFill_Style);
+  flags.setBlendMode(SkBlendMode::kClear);
+  flags.setColor(SkColorSetARGB(0, 0, 0, 0));
+  recorder.canvas()->DrawPath(path, flags);
 }
 
 }  // namespace ash

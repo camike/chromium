@@ -45,10 +45,12 @@ ContextualSearchManager::ContextualSearchManager(JNIEnv* env,
   delegate_.reset(new ContextualSearchDelegate(
       profile->GetURLLoaderFactory(),
       TemplateURLServiceFactory::GetForProfile(profile),
-      base::Bind(&ContextualSearchManager::OnSearchTermResolutionResponse,
-                 base::Unretained(this)),
-      base::Bind(&ContextualSearchManager::OnTextSurroundingSelectionAvailable,
-                 base::Unretained(this))));
+      base::BindRepeating(
+          &ContextualSearchManager::OnSearchTermResolutionResponse,
+          base::Unretained(this)),
+      base::BindRepeating(
+          &ContextualSearchManager::OnTextSurroundingSelectionAvailable,
+          base::Unretained(this))));
 }
 
 ContextualSearchManager::~ContextualSearchManager() {
@@ -166,7 +168,7 @@ void ContextualSearchManager::EnableContextualSearchJsApiForWebContents(
       overlay_web_contents, this);
 }
 
-void ContextualSearchManager::WhitelistContextualSearchJsApiUrl(
+void ContextualSearchManager::AllowlistContextualSearchJsApiUrl(
     JNIEnv* env,
     jobject obj,
     const base::android::JavaParamRef<jstring>& j_url) {

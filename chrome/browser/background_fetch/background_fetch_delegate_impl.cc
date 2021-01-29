@@ -22,7 +22,6 @@
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/metrics/ukm_background_recorder_service.h"
 #include "chrome/browser/offline_items_collection/offline_content_aggregator_factory.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_key.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_types.h"
@@ -99,7 +98,7 @@ BackgroundFetchDelegateImpl::JobDetails::JobDetails(
     base::WeakPtr<Client> client,
     std::unique_ptr<content::BackgroundFetchDescription> fetch_description,
     const std::string& provider_namespace,
-    bool is_off_the_record)
+    const Profile* profile)
     : client(std::move(client)),
       offline_item(offline_items_collection::ContentId(
           provider_namespace,
@@ -108,7 +107,11 @@ BackgroundFetchDelegateImpl::JobDetails::JobDetails(
                     ? State::kPendingWillStartPaused
                     : State::kPendingWillStartDownloading),
       fetch_description(std::move(fetch_description)) {
-  offline_item.is_off_the_record = is_off_the_record;
+  offline_item.is_off_the_record = profile->IsOffTheRecord();
+#if defined(OS_ANDROID)
+  if (profile->IsOffTheRecord())
+    offline_item.otr_profile_id = profile->GetOTRProfileID().Serialize();
+#endif
   offline_item.original_url = this->fetch_description->origin.GetURL();
   UpdateOfflineItem();
 }
@@ -287,8 +290,7 @@ void BackgroundFetchDelegateImpl::GetPermissionForOrigin(
   // content setting.
   ContentSetting content_setting = host_content_settings_map->GetContentSetting(
       origin.GetURL(), origin.GetURL(),
-      ContentSettingsType::AUTOMATIC_DOWNLOADS,
-      std::string() /* resource_identifier */);
+      ContentSettingsType::AUTOMATIC_DOWNLOADS);
 
   // The set of valid settings for automatic downloads is set to
   // {CONTENT_SETTING_ALLOW, CONTENT_SETTING_ASK, CONTENT_SETTING_BLOCK}.
@@ -324,9 +326,8 @@ void BackgroundFetchDelegateImpl::CreateDownloadJob(
   std::string job_unique_id = fetch_description->job_unique_id;
   DCHECK(!job_details_map_.count(job_unique_id));
   job_details_map_.emplace(
-      job_unique_id,
-      JobDetails(std::move(client), std::move(fetch_description),
-                 provider_namespace_, profile_->IsOffTheRecord()));
+      job_unique_id, JobDetails(std::move(client), std::move(fetch_description),
+                                provider_namespace_, profile_));
 }
 
 void BackgroundFetchDelegateImpl::DownloadUrl(
@@ -427,9 +428,6 @@ void BackgroundFetchDelegateImpl::DidGetBackgroundSourceId(
   ukm::builders::BackgroundFetchDeletingRegistration(*source_id)
       .SetUserInitiatedAbort(user_initiated_abort)
       .Record(ukm::UkmRecorder::Get());
-
-  if (ukm_event_recorded_for_testing_)
-    std::move(ukm_event_recorded_for_testing_).Run();
 }
 
 void BackgroundFetchDelegateImpl::MarkJobComplete(
@@ -819,6 +817,12 @@ void BackgroundFetchDelegateImpl::RenameItem(
   NOTIMPLEMENTED();
 }
 
+void BackgroundFetchDelegateImpl::ChangeSchedule(
+    const offline_items_collection::ContentId& id,
+    base::Optional<offline_items_collection::OfflineItemSchedule> schedule) {
+  NOTIMPLEMENTED();
+}
+
 void BackgroundFetchDelegateImpl::AddObserver(Observer* observer) {
   DCHECK(!observers_.count(observer));
 
@@ -883,7 +887,14 @@ void BackgroundFetchDelegateImpl::GetUploadData(
     const std::string& download_guid,
     download::GetUploadDataCallback callback) {
   auto job_it = download_job_unique_id_map_.find(download_guid);
-  DCHECK(job_it != download_job_unique_id_map_.end());
+  // TODO(crbug.com/779012): When DownloadService fixes cancelled jobs calling
+  // client methods, then this can be a DCHECK.
+  if (job_it == download_job_unique_id_map_.end()) {
+    base::SequencedTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::BindOnce(std::move(callback), /* request_body= */ nullptr));
+    return;
+  }
 
   JobDetails& job_details = job_details_map_.find(job_it->second)->second;
   if (job_details.current_fetch_guids.at(download_guid).status ==

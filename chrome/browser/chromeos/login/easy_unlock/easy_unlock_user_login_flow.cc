@@ -15,35 +15,21 @@ EasyUnlockUserLoginFlow::EasyUnlockUserLoginFlow(const AccountId& account_id)
 
 EasyUnlockUserLoginFlow::~EasyUnlockUserLoginFlow() {}
 
-bool EasyUnlockUserLoginFlow::CanLockScreen() {
-  return true;
-}
-
-bool EasyUnlockUserLoginFlow::CanStartArc() {
-  return true;
-}
-
-bool EasyUnlockUserLoginFlow::ShouldLaunchBrowser() {
-  return true;
-}
-
-bool EasyUnlockUserLoginFlow::ShouldSkipPostLoginScreens() {
-  return false;
-}
-
 bool EasyUnlockUserLoginFlow::HandleLoginFailure(const AuthFailure& failure) {
-  SmartLockMetricsRecorder::RecordAuthResultSignInFailure(
-      SmartLockMetricsRecorder::SmartLockAuthResultFailureReason::
-          kUserControllerSignInFailure);
-  UMA_HISTOGRAM_ENUMERATION(
-      "SmartLock.AuthResult.SignIn.Failure.UserControllerAuth",
-      failure.reason(), AuthFailure::FailureReason::NUM_FAILURE_REASONS);
   Profile* profile = ProfileHelper::GetSigninProfile();
   EasyUnlockService* service = EasyUnlockService::Get(profile);
   if (!service)
     return false;
   service->HandleAuthFailure(account_id());
   service->RecordEasySignInOutcome(account_id(), false);
+
+  SmartLockMetricsRecorder::RecordAuthResultSignInFailure(
+      SmartLockMetricsRecorder::SmartLockAuthResultFailureReason::
+          kUserControllerSignInFailure);
+  UMA_HISTOGRAM_ENUMERATION(
+      "SmartLock.AuthResult.SignIn.Failure.UserControllerAuth",
+      failure.reason(), AuthFailure::FailureReason::NUM_FAILURE_REASONS);
+
   UnregisterFlowSoon();
   return true;
 }
@@ -54,15 +40,7 @@ void EasyUnlockUserLoginFlow::HandleLoginSuccess(const UserContext& context) {
   if (!service)
     return;
   service->RecordEasySignInOutcome(account_id(), true);
-}
-
-void EasyUnlockUserLoginFlow::HandleOAuthTokenStatusChange(
-    user_manager::User::OAuthTokenStatus status) {}
-
-void EasyUnlockUserLoginFlow::LaunchExtraSteps(Profile* profile) {}
-
-bool EasyUnlockUserLoginFlow::SupportsEarlyRestartToApplyFlags() {
-  return true;
+  SmartLockMetricsRecorder::RecordAuthResultSignInSuccess();
 }
 
 }  // namespace chromeos

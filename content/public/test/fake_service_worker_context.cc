@@ -50,21 +50,21 @@ FakeServiceWorkerContext::FinishedExternalRequest(
   NOTREACHED();
   return ServiceWorkerExternalRequestResult::kWorkerNotFound;
 }
-void FakeServiceWorkerContext::CountExternalRequestsForTest(
-    const GURL& url,
-    CountExternalRequestsCallback callback) {
+size_t FakeServiceWorkerContext::CountExternalRequestsForTest(
+    const url::Origin& origin) {
   NOTREACHED();
+  return 0u;
+}
+bool FakeServiceWorkerContext::MaybeHasRegistrationForOrigin(
+    const url::Origin& origin) {
+  return registered_origins_.find(origin) != registered_origins_.end();
 }
 void FakeServiceWorkerContext::GetAllOriginsInfo(
     GetUsageInfoCallback callback) {
   NOTREACHED();
 }
-void FakeServiceWorkerContext::DeleteForOrigin(const GURL& origin,
+void FakeServiceWorkerContext::DeleteForOrigin(const url::Origin& origin,
                                                ResultCallback callback) {
-  NOTREACHED();
-}
-void FakeServiceWorkerContext::PerformStorageCleanup(
-    base::OnceClosure callback) {
   NOTREACHED();
 }
 void FakeServiceWorkerContext::CheckHasServiceWorker(
@@ -84,7 +84,7 @@ void FakeServiceWorkerContext::ClearAllServiceWorkersForTest(
 void FakeServiceWorkerContext::StartWorkerForScope(
     const GURL& scope,
     ServiceWorkerContext::StartWorkerCallback info_callback,
-    base::OnceClosure failure_callback) {
+    ServiceWorkerContext::StartWorkerFailureCallback failure_callback) {
   NOTREACHED();
 }
 void FakeServiceWorkerContext::StartServiceWorkerForNavigationHint(
@@ -102,7 +102,7 @@ void FakeServiceWorkerContext::StartServiceWorkerAndDispatchMessage(
 }
 
 void FakeServiceWorkerContext::StopAllServiceWorkersForOrigin(
-    const GURL& origin) {
+    const url::Origin& origin) {
   stop_all_service_workers_for_origin_calls_.push_back(origin);
 }
 
@@ -138,6 +138,11 @@ void FakeServiceWorkerContext::NotifyObserversOnNoControllees(
     const GURL& scope) {
   for (auto& observer : observers_)
     observer.OnNoControllees(version_id, scope);
+}
+
+void FakeServiceWorkerContext::AddRegistrationToRegisteredOrigins(
+    const url::Origin& origin) {
+  registered_origins_.insert(origin);
 }
 
 }  // namespace content

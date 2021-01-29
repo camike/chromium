@@ -18,9 +18,9 @@
 #include "chrome/browser/chromeos/printing/test_printer_configurer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/printing/printer_capabilities.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chromeos/printing/ppd_provider.h"
-#include "components/printing/browser/printer_capabilities.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/browser_task_environment.h"
 #include "printing/backend/print_backend.h"
@@ -55,9 +55,11 @@ void RecordPrintersDone(bool* is_done_out) {
   *is_done_out = true;
 }
 
-void RecordGetCapability(std::unique_ptr<base::Value>* capabilities_out,
+void RecordGetCapability(bool& capabilities_set,
+                         base::Value& capabilities_out,
                          base::Value capability) {
-  capabilities_out->reset(capability.DeepCopy());
+  capabilities_out = capability.Clone();
+  capabilities_set = true;
 }
 
 void RecordGetEulaUrl(std::string* fetched_eula_url,
@@ -241,19 +243,21 @@ TEST_F(LocalPrinterHandlerChromeosTest, StartGetCapabilityValidPrinter) {
   // Add printer capabilities to |test_backend_|.
   PrinterSemanticCapsAndDefaults caps;
   test_backend_->AddValidPrinter(
-      "printer1", std::make_unique<PrinterSemanticCapsAndDefaults>(caps));
+      "printer1", std::make_unique<PrinterSemanticCapsAndDefaults>(caps),
+      std::make_unique<printing::PrinterBasicInfo>());
 
-  std::unique_ptr<base::Value> fetched_caps;
+  bool did_fetch_caps = false;
+  base::Value fetched_caps;
   local_printer_handler_->StartGetCapability(
-      "printer1", base::BindOnce(&RecordGetCapability, &fetched_caps));
+      "printer1", base::BindOnce(&RecordGetCapability, std::ref(did_fetch_caps),
+                                 std::ref(fetched_caps)));
 
   task_environment_.RunUntilIdle();
 
-  ASSERT_TRUE(fetched_caps);
-  base::DictionaryValue* dict;
-  ASSERT_TRUE(fetched_caps->GetAsDictionary(&dict));
-  ASSERT_TRUE(dict->HasKey(kSettingCapabilities));
-  ASSERT_TRUE(dict->HasKey(kPrinter));
+  ASSERT_TRUE(did_fetch_caps);
+  ASSERT_TRUE(fetched_caps.is_dict());
+  EXPECT_TRUE(fetched_caps.FindKey(kSettingCapabilities));
+  EXPECT_TRUE(fetched_caps.FindKey(kPrinter));
 }
 
 // Test that printers which have not yet been installed are installed with
@@ -268,32 +272,37 @@ TEST_F(LocalPrinterHandlerChromeosTest, StartGetCapabilityPrinterNotInstalled) {
   // Add printer capabilities to |test_backend_|.
   PrinterSemanticCapsAndDefaults caps;
   test_backend_->AddValidPrinter(
-      "printer1", std::make_unique<PrinterSemanticCapsAndDefaults>(caps));
+      "printer1", std::make_unique<PrinterSemanticCapsAndDefaults>(caps),
+      std::make_unique<printing::PrinterBasicInfo>());
 
-  std::unique_ptr<base::Value> fetched_caps;
+  bool did_fetch_caps = false;
+  base::Value fetched_caps;
   local_printer_handler_->StartGetCapability(
-      "printer1", base::BindOnce(&RecordGetCapability, &fetched_caps));
+      "printer1", base::BindOnce(&RecordGetCapability, std::ref(did_fetch_caps),
+                                 std::ref(fetched_caps)));
 
   task_environment_.RunUntilIdle();
 
-  ASSERT_TRUE(fetched_caps);
-  base::DictionaryValue* dict;
-  ASSERT_TRUE(fetched_caps->GetAsDictionary(&dict));
-  ASSERT_TRUE(dict->HasKey(kSettingCapabilities));
-  ASSERT_TRUE(dict->HasKey(kPrinter));
+  ASSERT_TRUE(did_fetch_caps);
+  ASSERT_TRUE(fetched_caps.is_dict());
+  EXPECT_TRUE(fetched_caps.FindKey(kSettingCapabilities));
+  EXPECT_TRUE(fetched_caps.FindKey(kPrinter));
 }
 
 // In this test we expect the StartGetCapability to bail early because the
 // provided printer can't be found in the CupsPrintersManager.
 TEST_F(LocalPrinterHandlerChromeosTest, StartGetCapabilityInvalidPrinter) {
-  std::unique_ptr<base::Value> fetched_caps;
+  bool did_fetch_caps = false;
+  base::Value fetched_caps;
   local_printer_handler_->StartGetCapability(
-      "invalid printer", base::BindOnce(&RecordGetCapability, &fetched_caps));
+      "invalid printer",
+      base::BindOnce(&RecordGetCapability, std::ref(did_fetch_caps),
+                     std::ref(fetched_caps)));
 
   task_environment_.RunUntilIdle();
 
-  ASSERT_TRUE(fetched_caps);
-  EXPECT_TRUE(fetched_caps->is_none());
+  ASSERT_TRUE(did_fetch_caps);
+  EXPECT_TRUE(fetched_caps.is_none());
 }
 
 TEST_F(LocalPrinterHandlerChromeosTest, GetNativePrinterPolicies) {

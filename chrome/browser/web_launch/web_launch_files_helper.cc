@@ -10,7 +10,7 @@
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
-#include "base/task/post_task.h"
+#include "build/chromeos_buildflags.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
@@ -19,8 +19,9 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
+#include "storage/browser/file_system/external_mount_points.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
-#include "third_party/blink/public/mojom/native_file_system/native_file_system_directory_handle.mojom.h"
+#include "third_party/blink/public/mojom/file_system_access/file_system_access_directory_handle.mojom.h"
 #include "url/origin.h"
 
 namespace web_launch {
@@ -70,35 +71,63 @@ void WebLaunchFilesHelper::DidFinishNavigation(
 
 namespace {
 
+// On Chrome OS paths that exist on an external mount point need to be treated
+// differently to make sure the native file system code accesses these paths via
+// the correct file system backend. This method checks if this is the case, and
+// updates `entry_path` to the path that should be used by the native file
+// system implementation.
+content::FileSystemAccessEntryFactory::PathType MaybeRemapPath(
+    base::FilePath* entry_path) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  base::FilePath virtual_path;
+  auto* external_mount_points =
+      storage::ExternalMountPoints::GetSystemInstance();
+  if (external_mount_points->GetVirtualPath(*entry_path, &virtual_path)) {
+    *entry_path = std::move(virtual_path);
+    return content::FileSystemAccessEntryFactory::PathType::kExternal;
+  }
+#endif
+  return content::FileSystemAccessEntryFactory::PathType::kLocal;
+}
+
 class EntriesBuilder {
  public:
   EntriesBuilder(
-      std::vector<blink::mojom::NativeFileSystemEntryPtr>* entries_ref,
+      std::vector<blink::mojom::FileSystemAccessEntryPtr>* entries_ref,
       content::WebContents* web_contents,
       const GURL& launch_url)
       : entries_ref_(entries_ref),
         entry_factory_(web_contents->GetMainFrame()
                            ->GetProcess()
                            ->GetStoragePartition()
-                           ->GetNativeFileSystemEntryFactory()),
+                           ->GetFileSystemAccessEntryFactory()),
         context_(url::Origin::Create(launch_url),
                  launch_url,
-                 web_contents->GetMainFrame()->GetProcess()->GetID(),
-                 web_contents->GetMainFrame()->GetRoutingID()) {}
+                 content::GlobalFrameRoutingId(
+                     web_contents->GetMainFrame()->GetProcess()->GetID(),
+                     web_contents->GetMainFrame()->GetRoutingID())) {}
 
   void AddFileEntry(const base::FilePath& path) {
-    entries_ref_->push_back(
-        entry_factory_->CreateFileEntryFromPath(context_, path));
+    base::FilePath entry_path = path;
+    content::FileSystemAccessEntryFactory::PathType path_type =
+        MaybeRemapPath(&entry_path);
+    entries_ref_->push_back(entry_factory_->CreateFileEntryFromPath(
+        context_, path_type, entry_path,
+        content::FileSystemAccessEntryFactory::UserAction::kOpen));
   }
   void AddDirectoryEntry(const base::FilePath& path) {
-    entries_ref_->push_back(
-        entry_factory_->CreateDirectoryEntryFromPath(context_, path));
+    base::FilePath entry_path = path;
+    content::FileSystemAccessEntryFactory::PathType path_type =
+        MaybeRemapPath(&entry_path);
+    entries_ref_->push_back(entry_factory_->CreateDirectoryEntryFromPath(
+        context_, path_type, entry_path,
+        content::FileSystemAccessEntryFactory::UserAction::kOpen));
   }
 
  private:
-  std::vector<blink::mojom::NativeFileSystemEntryPtr>* entries_ref_;
-  scoped_refptr<content::NativeFileSystemEntryFactory> entry_factory_;
-  content::NativeFileSystemEntryFactory::BindingContext context_;
+  std::vector<blink::mojom::FileSystemAccessEntryPtr>* entries_ref_;
+  scoped_refptr<content::FileSystemAccessEntryFactory> entry_factory_;
+  content::FileSystemAccessEntryFactory::BindingContext context_;
 };
 
 }  // namespace
@@ -118,8 +147,8 @@ WebLaunchFilesHelper::WebLaunchFilesHelper(
     entries_builder.AddFileEntry(path);
 
   // Asynchronously call MaybeSendLaunchEntries, since it may destroy |this|.
-  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
-                 base::BindOnce(&WebLaunchFilesHelper::MaybeSendLaunchEntries,
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&WebLaunchFilesHelper::MaybeSendLaunchEntries,
                                 weak_ptr_factory_.GetWeakPtr()));
 }
 
@@ -141,8 +170,8 @@ WebLaunchFilesHelper::WebLaunchFilesHelper(
     entries_builder.AddFileEntry(path);
 
   // Asynchronously call MaybeSendLaunchEntries, since it may destroy |this|.
-  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
-                 base::BindOnce(&WebLaunchFilesHelper::MaybeSendLaunchEntries,
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&WebLaunchFilesHelper::MaybeSendLaunchEntries,
                                 weak_ptr_factory_.GetWeakPtr()));
 }
 

@@ -23,19 +23,31 @@ public final class TabSuggestionsClientFetcher implements TabSuggestionsFetcher 
      * heuristics.
      */
     public TabSuggestionsClientFetcher() {
+        // TODO(crbug.com/1085251): Move the if block to some testing relevant file instead.
         if (ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
                     ChromeFeatureList.CLOSE_TAB_SUGGESTIONS, "baseline_tab_suggestions", false)) {
-            mClientSuggestionProviders =
-                    new ArrayList<>(Arrays.asList(new BaselineStaleTabSuggestionProvider()));
+            mClientSuggestionProviders = new ArrayList<>();
+            if (ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
+                        ChromeFeatureList.CLOSE_TAB_SUGGESTIONS, "baseline_group_tab_suggestions",
+                        false)) {
+                mClientSuggestionProviders.add(
+                        new BaselineTabSuggestionProvider(TabSuggestion.TabSuggestionAction.GROUP));
+            }
+            if (ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
+                        ChromeFeatureList.CLOSE_TAB_SUGGESTIONS, "baseline_close_tab_suggestions",
+                        false)) {
+                mClientSuggestionProviders.add(
+                        new BaselineTabSuggestionProvider(TabSuggestion.TabSuggestionAction.CLOSE));
+            }
         } else {
             mClientSuggestionProviders =
                     new ArrayList<>(Arrays.asList(new StaleTabSuggestionProvider()));
         }
     }
 
-    protected void setUseBaselineTabSuggestionsForTesting() {
+    void setUseBaselineTabSuggestionsForTesting() {
         mClientSuggestionProviders =
-                new ArrayList<>(Arrays.asList(new BaselineStaleTabSuggestionProvider()));
+                new ArrayList<>(Arrays.asList(new BaselineTabSuggestionProvider()));
     }
 
     @Override

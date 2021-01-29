@@ -11,6 +11,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -20,6 +21,7 @@
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
@@ -65,7 +67,7 @@ class ConstrainedWebDialogBrowserTest : public InProcessBrowserTest {
   ConstrainedWebDialogBrowserTest() {}
 
   // Runs the current MessageLoop until |condition| is true or timeout.
-  bool RunLoopUntil(const base::Callback<bool()>& condition) {
+  bool RunLoopUntil(base::RepeatingCallback<bool()> condition) {
     const base::TimeTicks start_time = base::TimeTicks::Now();
     while (!condition.Run()) {
       const base::TimeTicks current_time = base::TimeTicks::Now();
@@ -93,7 +95,7 @@ class ConstrainedWebDialogBrowserTest : public InProcessBrowserTest {
 
 // Tests that opening/closing the constrained window won't crash it.
 // Flaky on trusty builder: http://crbug.com/1020490.
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_BasicTest DISABLED_BasicTest
 #else
 #define MAYBE_BasicTest BasicTest
@@ -113,7 +115,7 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWebDialogBrowserTest, MAYBE_BasicTest) {
 }
 
 // TODO(https://crbug.com/1020038): Crashy on Linux
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_ReleaseWebContents DISABLED_ReleaseWebContents
 #else
 #define MAYBE_ReleaseWebContents ReleaseWebContents
@@ -148,7 +150,7 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWebDialogBrowserTest,
 // Tests that dialog autoresizes based on web contents when autoresizing
 // is enabled.
 // Flaky on CrOS: http://crbug.com/928924
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #define MAYBE_ContentResizeInAutoResizingDialog \
   DISABLED_ContentResizeInAutoResizingDialog
 #else
@@ -197,39 +199,31 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWebDialogBrowserTest,
   observer.Wait();
 
   // Wait until the entire WebContents has loaded.
-  WaitForLoadStop(dialog_delegate->GetWebContents());
+  EXPECT_TRUE(WaitForLoadStop(dialog_delegate->GetWebContents()));
 
   ASSERT_TRUE(IsShowingWebContentsModalDialog(web_contents));
 
   // Resize to content's originally set dimensions.
-  ASSERT_TRUE(RunLoopUntil(base::Bind(
-      &IsEqualSizes,
-      gfx::Size(initial_size, initial_size),
-      dialog_delegate)));
+  ASSERT_TRUE(RunLoopUntil(base::BindRepeating(
+      &IsEqualSizes, gfx::Size(initial_size, initial_size), dialog_delegate)));
 
   // Resize to dimensions within expected bounds.
   EXPECT_TRUE(ExecuteScript(dialog_delegate->GetWebContents(),
       GetChangeDimensionsScript(175)));
-  ASSERT_TRUE(RunLoopUntil(base::Bind(
-      &IsEqualSizes,
-      gfx::Size(new_size, new_size),
-      dialog_delegate)));
+  ASSERT_TRUE(RunLoopUntil(base::BindRepeating(
+      &IsEqualSizes, gfx::Size(new_size, new_size), dialog_delegate)));
 
   // Resize to dimensions smaller than the minimum bounds.
   EXPECT_TRUE(ExecuteScript(dialog_delegate->GetWebContents(),
       GetChangeDimensionsScript(50)));
-  ASSERT_TRUE(RunLoopUntil(base::Bind(
-      &IsEqualSizes,
-      min_size,
-      dialog_delegate)));
+  ASSERT_TRUE(RunLoopUntil(
+      base::BindRepeating(&IsEqualSizes, min_size, dialog_delegate)));
 
   // Resize to dimensions greater than the maximum bounds.
   EXPECT_TRUE(ExecuteScript(dialog_delegate->GetWebContents(),
       GetChangeDimensionsScript(250)));
-  ASSERT_TRUE(RunLoopUntil(base::Bind(
-      &IsEqualSizes,
-      max_size,
-      dialog_delegate)));
+  ASSERT_TRUE(RunLoopUntil(
+      base::BindRepeating(&IsEqualSizes, max_size, dialog_delegate)));
 }
 
 // Tests that dialog does not autoresize when autoresizing is not enabled.
@@ -249,7 +243,7 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWebDialogBrowserTest,
   EXPECT_TRUE(IsShowingWebContentsModalDialog(web_contents));
 
   // Wait until the entire WebContents has loaded.
-  WaitForLoadStop(dialog_delegate->GetWebContents());
+  EXPECT_TRUE(WaitForLoadStop(dialog_delegate->GetWebContents()));
 
   gfx::Size initial_dialog_size;
   delegate_ptr->GetDialogSize(&initial_dialog_size);
@@ -261,16 +255,12 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWebDialogBrowserTest,
   // Resize <body> to dimension smaller than dialog.
   EXPECT_TRUE(ExecuteScript(dialog_delegate->GetWebContents(),
       GetChangeDimensionsScript(100)));
-  ASSERT_TRUE(RunLoopUntil(base::Bind(
-      &IsEqualSizes,
-      initial_dialog_size,
-      dialog_delegate)));
+  ASSERT_TRUE(RunLoopUntil(base::BindRepeating(
+      &IsEqualSizes, initial_dialog_size, dialog_delegate)));
 
   // Resize <body> to dimension larger than dialog.
   EXPECT_TRUE(ExecuteScript(dialog_delegate->GetWebContents(),
       GetChangeDimensionsScript(500)));
-  ASSERT_TRUE(RunLoopUntil(base::Bind(
-      &IsEqualSizes,
-      initial_dialog_size,
-      dialog_delegate)));
+  ASSERT_TRUE(RunLoopUntil(base::BindRepeating(
+      &IsEqualSizes, initial_dialog_size, dialog_delegate)));
 }

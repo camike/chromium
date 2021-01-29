@@ -19,11 +19,9 @@
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/driver/sync_user_settings.h"
 #include "google_apis/gaia/gaia_auth_util.h"
-#include "ios/chrome/browser/crash_report/breakpad_helper.h"
+#include "ios/chrome/browser/crash_report/crash_keys_helper.h"
 #include "ios/chrome/browser/pref_names.h"
 #import "ios/chrome/browser/signin/authentication_service_delegate.h"
-#include "ios/chrome/browser/signin/constants.h"
-#include "ios/chrome/browser/signin/signin_util.h"
 #include "ios/chrome/browser/sync/sync_setup_service.h"
 #include "ios/chrome/browser/system_flags.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
@@ -110,7 +108,7 @@ void AuthenticationService::Initialize(
 
   HandleForgottenIdentity(nil, true /* should_prompt */);
 
-  breakpad_helper::SetCurrentlySignedIn(IsAuthenticated());
+  crash_keys::SetCurrentlySignedIn(IsAuthenticated());
 
   identity_service_observer_.Add(
       ios::GetChromeBrowserProvider()->GetChromeIdentityService());
@@ -286,8 +284,9 @@ AuthenticationService::GetLastKnownAccountsFromForeground() {
 ChromeIdentity* AuthenticationService::GetAuthenticatedIdentity() const {
   // There is no authenticated identity if there is no signed in user or if the
   // user signed in via the client login flow.
-  if (!IsAuthenticated())
+  if (!identity_manager_->HasPrimaryAccount()) {
     return nil;
+  }
 
   std::string authenticated_gaia_id =
       identity_manager_->GetPrimaryAccountInfo().gaia;
@@ -307,18 +306,19 @@ void AuthenticationService::SignIn(ChromeIdentity* identity) {
   ResetPromptForSignIn();
   sync_setup_service_->PrepareForFirstSyncSetup();
 
-  const CoreAccountId account_id = identity_manager_->PickAccountIdForAccount(
-      base::SysNSStringToUTF8(identity.gaiaID),
-      GetCanonicalizedEmailForIdentity(identity));
-
   // Load all credentials from SSO library. This must load the credentials
   // for the primary account too.
   identity_manager_->GetDeviceAccountsSynchronizer()
-      ->ReloadAllAccountsFromSystem();
+      ->ReloadAllAccountsFromSystemWithPrimaryAccount(CoreAccountId());
+
+  const CoreAccountId account_id = identity_manager_->PickAccountIdForAccount(
+      base::SysNSStringToUTF8(identity.gaiaID),
+      base::SysNSStringToUTF8(identity.userEmail));
 
   // Ensure that the account the user is trying to sign into has been loaded
   // from the SSO library and that hosted_domain is set (should be the proper
   // hosted domain or kNoHostedDomainFound that are both non-empty strings).
+  CHECK(identity_manager_->HasAccountWithRefreshToken(account_id));
   const base::Optional<AccountInfo> account_info =
       identity_manager_
           ->FindExtendedAccountInfoForAccountWithRefreshTokenByAccountId(
@@ -349,14 +349,14 @@ void AuthenticationService::SignIn(ChromeIdentity* identity) {
   // SigninGlobalError instead of the sync auth error state.
   // crbug.com/289493
   sync_service_->GetUserSettings()->SetSyncRequested(true);
-  breakpad_helper::SetCurrentlySignedIn(true);
+  crash_keys::SetCurrentlySignedIn(true);
 }
 
 void AuthenticationService::SignOut(
     signin_metrics::ProfileSignout signout_source,
     bool force_clear_browsing_data,
     ProceduralBlock completion) {
-  if (!IsAuthenticated()) {
+  if (!identity_manager_->HasPrimaryAccount()) {
     if (completion)
       completion();
     return;
@@ -371,9 +371,8 @@ void AuthenticationService::SignOut(
   // GetPrimaryAccountMutator() returns nullptr on ChromeOS only.
   DCHECK(account_mutator);
   account_mutator->ClearPrimaryAccount(
-      signin::PrimaryAccountMutator::ClearAccountsAction::kDefault,
       signout_source, signin_metrics::SignoutDelete::IGNORE_METRIC);
-  breakpad_helper::SetCurrentlySignedIn(false);
+  crash_keys::SetCurrentlySignedIn(false);
   cached_mdm_infos_.clear();
   if (force_clear_browsing_data || is_managed) {
     delegate_->ClearBrowsingData(completion);
@@ -437,7 +436,7 @@ void AuthenticationService::OnEndBatchOfRefreshTokenStateChanges() {
   StoreKnownAccountsWhileInForeground();
 }
 
-void AuthenticationService::OnIdentityListChanged() {
+void AuthenticationService::OnIdentityListChanged(bool keychainReload) {
   // The list of identities may change while in an authorized call. Signing out
   // the authenticated user at this time may lead to crashes (e.g.
   // http://crbug.com/398431 ).
@@ -464,7 +463,7 @@ bool AuthenticationService::HandleMDMNotification(ChromeIdentity* identity,
   base::WeakPtr<AuthenticationService> weak_ptr = GetWeakPtr();
   ios::MDMStatusCallback callback = ^(bool is_blocked) {
     if (is_blocked && weak_ptr.get()) {
-      // If the identiy is blocked, sign out of the account. As only managed
+      // If the identity is blocked, sign out of the account. As only managed
       // account can be blocked, this will clear the associated browsing data.
       if (identity == weak_ptr->GetAuthenticatedIdentity()) {
         weak_ptr->SignOut(signin_metrics::ABORT_SIGNIN,
@@ -525,7 +524,7 @@ void AuthenticationService::HandleIdentityListChanged() {
 void AuthenticationService::HandleForgottenIdentity(
     ChromeIdentity* invalid_identity,
     bool should_prompt) {
-  if (!IsAuthenticated()) {
+  if (!identity_manager_->HasPrimaryAccount()) {
     // User is not signed in. Nothing to do here.
     return;
   }
@@ -555,12 +554,13 @@ void AuthenticationService::ReloadCredentialsFromIdentities(
   HandleForgottenIdentity(nil, should_prompt);
   if (IsAuthenticated()) {
     identity_manager_->GetDeviceAccountsSynchronizer()
-        ->ReloadAllAccountsFromSystem();
+        ->ReloadAllAccountsFromSystemWithPrimaryAccount(
+            identity_manager_->GetPrimaryAccountId());
   }
 }
 
 bool AuthenticationService::IsAuthenticated() const {
-  return identity_manager_->HasPrimaryAccount();
+  return GetAuthenticatedIdentity() != nil;
 }
 
 bool AuthenticationService::IsAuthenticatedIdentityManaged() const {
@@ -570,6 +570,5 @@ bool AuthenticationService::IsAuthenticatedIdentityManaged() const {
   if (!primary_account_info)
     return false;
 
-  const std::string& hosted_domain = primary_account_info->hosted_domain;
-  return hosted_domain != kNoHostedDomainFound && !hosted_domain.empty();
+  return primary_account_info->IsManaged();
 }

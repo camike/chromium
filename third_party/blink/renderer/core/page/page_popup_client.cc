@@ -166,12 +166,13 @@ void PagePopupClient::AddLocalizedProperty(const char* name,
 
 CSSFontSelector* PagePopupClient::CreateCSSFontSelector(
     Document& popup_document) {
-  return MakeGarbageCollected<CSSFontSelector>(&popup_document);
+  return MakeGarbageCollected<CSSFontSelector>(popup_document);
 }
 
 PagePopupController* PagePopupClient::CreatePagePopupController(
+    Page& page,
     PagePopup& popup) {
-  return MakeGarbageCollected<PagePopupController>(popup, this);
+  return MakeGarbageCollected<PagePopupController>(page, popup, this);
 }
 
 }  // namespace blink

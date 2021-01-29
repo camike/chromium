@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/macros.h"
@@ -41,7 +41,7 @@ const char kUpstreamNotificationSignUpListeningEvents[] =
 
 const char kGcmMessageTypeKey[] = "type";
 const char kHeartbeatTimestampKey[] = "timestamp";
-const char kHeartbeatDomainNameKey[] = "domain_name";
+const char kHeartbeatCustomerIdKey[] = "customer_id";
 const char kHeartbeatDeviceIDKey[] = "device_id";
 const char kHeartbeatTypeValue[] = "hb";
 const char kUpstreamNotificationNotifyKey[] = "notify";
@@ -80,14 +80,14 @@ const char* const HeartbeatScheduler::kHeartbeatSignalHistogram =
 // errors, etc).
 class HeartbeatRegistrationHelper {
  public:
-  typedef base::Callback<void(const std::string& registration_id)>
-      RegistrationHelperCallback;
+  using RegistrationHelperCallback =
+      base::OnceCallback<void(const std::string& registration_id)>;
 
   HeartbeatRegistrationHelper(
       gcm::GCMDriver* gcm_driver,
       const scoped_refptr<base::SequencedTaskRunner>& task_runner);
 
-  void Register(const RegistrationHelperCallback& callback);
+  void Register(RegistrationHelperCallback callback);
 
  private:
   void AttemptRegistration();
@@ -118,10 +118,10 @@ HeartbeatRegistrationHelper::HeartbeatRegistrationHelper(
     : gcm_driver_(gcm_driver), task_runner_(task_runner) {}
 
 void HeartbeatRegistrationHelper::Register(
-    const RegistrationHelperCallback& callback) {
+    RegistrationHelperCallback callback) {
   // Should only call Register() once.
   DCHECK(callback_.is_null());
-  callback_ = callback;
+  callback_ = std::move(callback);
   AttemptRegistration();
 }
 
@@ -140,16 +140,10 @@ void HeartbeatRegistrationHelper::OnRegisterAttemptComplete(
   // TODO(atwilson): Track GCM errors via UMA (http://crbug.com/459238).
   switch (result) {
     case gcm::GCMClient::SUCCESS:
-      {
-        // Copy the callback, because the callback may free this object and
-        // we don't want to free the callback object and any bound variables
-        // until the callback exits.
-        RegistrationHelperCallback callback = callback_;
-        callback.Run(registration_id);
-        // This helper may be freed now, so do not access any member variables
-        // after this point.
-        return;
-      }
+      std::move(callback_).Run(registration_id);
+      // This helper may be freed now, so do not access any member variables
+      // after this point.
+      return;
 
     case gcm::GCMClient::NETWORK_ERROR:
     case gcm::GCMClient::SERVER_ERROR:
@@ -181,32 +175,32 @@ void HeartbeatRegistrationHelper::OnRegisterAttemptComplete(
 HeartbeatScheduler::HeartbeatScheduler(
     gcm::GCMDriver* driver,
     policy::CloudPolicyClient* cloud_policy_client,
-    const std::string& enrollment_domain,
+    policy::CloudPolicyStore* cloud_policy_store,
     const std::string& device_id,
     const scoped_refptr<base::SequencedTaskRunner>& task_runner)
     : task_runner_(task_runner),
-      enrollment_domain_(enrollment_domain),
       device_id_(device_id),
       heartbeat_enabled_(false),
       heartbeat_interval_(kDefaultHeartbeatInterval),
       cloud_policy_client_(cloud_policy_client),
+      cloud_policy_store_(cloud_policy_store),
       gcm_driver_(driver) {
   // If no GCMDriver (e.g. this is loaded as part of an unrelated unit test)
   // do nothing as no heartbeats can be sent.
   if (!gcm_driver_)
     return;
 
-  heartbeat_frequency_observer_ =
+  heartbeat_frequency_subscription_ =
       chromeos::CrosSettings::Get()->AddSettingsObserver(
           chromeos::kHeartbeatFrequency,
-          base::Bind(&HeartbeatScheduler::RefreshHeartbeatSettings,
-                     base::Unretained(this)));
+          base::BindRepeating(&HeartbeatScheduler::RefreshHeartbeatSettings,
+                              base::Unretained(this)));
 
-  heartbeat_enabled_observer_ =
+  heartbeat_enabled_subscription_ =
       chromeos::CrosSettings::Get()->AddSettingsObserver(
           chromeos::kHeartbeatEnabled,
-          base::Bind(&HeartbeatScheduler::RefreshHeartbeatSettings,
-                     base::Unretained(this)));
+          base::BindRepeating(&HeartbeatScheduler::RefreshHeartbeatSettings,
+                              base::Unretained(this)));
 
   // Update the heartbeat frequency from settings. This will trigger a
   // heartbeat as appropriate once the settings have been refreshed.
@@ -301,10 +295,15 @@ void HeartbeatScheduler::ScheduleNextHeartbeat() {
       registration_helper_.reset(new HeartbeatRegistrationHelper(
           gcm_driver_, task_runner_));
       registration_helper_->Register(
-          base::Bind(&HeartbeatScheduler::OnRegistrationComplete,
-                     weak_factory_.GetWeakPtr()));
+          base::BindOnce(&HeartbeatScheduler::OnRegistrationComplete,
+                         weak_factory_.GetWeakPtr()));
     }
     return;
+  }
+
+  // Set the customerId if the policy is fetched.
+  if (cloud_policy_store_->policy()) {
+    customer_id_ = cloud_policy_store_->policy()->obfuscated_customer_id();
   }
 
   // Calculate when to fire off the next update (if it should have already
@@ -313,8 +312,8 @@ void HeartbeatScheduler::ScheduleNextHeartbeat() {
       last_heartbeat_ + heartbeat_interval_ - base::Time::NowFromSystemTime(),
       base::TimeDelta());
 
-  heartbeat_callback_.Reset(base::Bind(&HeartbeatScheduler::SendHeartbeat,
-                                       base::Unretained(this)));
+  heartbeat_callback_.Reset(base::BindOnce(&HeartbeatScheduler::SendHeartbeat,
+                                           base::Unretained(this)));
   task_runner_->PostDelayedTask(
       FROM_HERE, heartbeat_callback_.callback(), delay);
 }
@@ -341,7 +340,7 @@ void HeartbeatScheduler::OnRegistrationComplete(
 
 void HeartbeatScheduler::SendHeartbeat() {
   DCHECK(!registration_id_.empty());
-  if (!gcm_driver_ || !heartbeat_enabled_)
+  if (!gcm_driver_ || !heartbeat_enabled_ || customer_id_.empty())
     return;
 
   gcm::OutgoingMessage message;
@@ -356,7 +355,7 @@ void HeartbeatScheduler::SendHeartbeat() {
   message.data[kGcmMessageTypeKey] = kHeartbeatTypeValue;
   message.data[kHeartbeatTimestampKey] =
       base::NumberToString(base::Time::NowFromSystemTime().ToJavaTime());
-  message.data[kHeartbeatDomainNameKey] = enrollment_domain_;
+  message.data[kHeartbeatCustomerIdKey] = customer_id_;
   message.data[kHeartbeatDeviceIDKey] = device_id_;
   gcm_driver_->Send(kHeartbeatGCMAppID,
                     GetDestinationID() + kHeartbeatGCMSenderSuffix, message,

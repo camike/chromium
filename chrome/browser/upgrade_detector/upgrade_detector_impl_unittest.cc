@@ -14,6 +14,7 @@
 #include "base/time/tick_clock.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/upgrade_detector/installed_version_poller.h"
 #include "chrome/browser/upgrade_detector/upgrade_observer.h"
 #include "chrome/common/pref_names.h"
@@ -23,6 +24,10 @@
 #include "content/public/test/browser_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
+#include "components/enterprise/browser/controller/fake_browser_dm_token_storage.h"
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 #if defined(OS_WIN)
 #include "chrome/install_static/install_modes.h"
@@ -162,6 +167,10 @@ class UpgradeDetectorImplTest : public ::testing::Test {
   ScopedTestingLocalState scoped_local_state_;
   InstalledVersionPoller::ScopedDisableForTesting scoped_poller_disabler_;
 
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
+  policy::FakeBrowserDMTokenStorage dm_token_storage_;
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
+
   DISALLOW_COPY_AND_ASSIGN(UpgradeDetectorImplTest);
 };
 
@@ -195,12 +204,9 @@ TEST_F(UpgradeDetectorImplTest, VariationsCriticalChanges) {
   EXPECT_FALSE(detector.notify_upgrade());
   EXPECT_EQ(0, notifications_listener.notification_count());
 
+  // Users are notified about critical updates immediately.
   detector.OnExperimentChangesDetected(
       variations::VariationsService::Observer::CRITICAL);
-  EXPECT_FALSE(detector.notify_upgrade());
-  EXPECT_EQ(0, notifications_listener.notification_count());
-
-  detector.NotifyOnUpgradeWithTimePassed(base::TimeDelta::FromDays(30));
   EXPECT_TRUE(detector.notify_upgrade());
   EXPECT_EQ(1, notifications_listener.notification_count());
   EXPECT_EQ(1, detector.trigger_critical_update_call_count());
@@ -400,6 +406,10 @@ class UpgradeDetectorImplTimerTest : public UpgradeDetectorImplTest,
   }
 
  private:
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
+  policy::FakeBrowserDMTokenStorage dm_token_storage_;
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
+
   DISALLOW_COPY_AND_ASSIGN(UpgradeDetectorImplTimerTest);
 };
 

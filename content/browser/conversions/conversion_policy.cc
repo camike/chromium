@@ -7,7 +7,7 @@
 #include "base/format_macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/rand_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 
 namespace content {
@@ -40,12 +40,14 @@ std::unique_ptr<ConversionPolicy> ConversionPolicy::CreateForTesting(
       new ConversionPolicy(std::move(noise_provider)));
 }
 
-ConversionPolicy::ConversionPolicy()
-    : noise_provider_(std::make_unique<NoiseProvider>()) {}
+ConversionPolicy::ConversionPolicy(bool debug_mode)
+    : debug_mode_(debug_mode),
+      noise_provider_(debug_mode ? nullptr
+                                 : std::make_unique<NoiseProvider>()) {}
 
 ConversionPolicy::ConversionPolicy(
     std::unique_ptr<ConversionPolicy::NoiseProvider> noise_provider)
-    : noise_provider_(std::move(noise_provider)) {}
+    : debug_mode_(false), noise_provider_(std::move(noise_provider)) {}
 
 ConversionPolicy::~ConversionPolicy() = default;
 
@@ -54,20 +56,17 @@ std::string ConversionPolicy::GetSanitizedConversionData(
   // Add noise to the conversion when the value is first sanitized from a
   // conversion registration event. This noised data will be used for all
   // associated impressions that convert.
-  conversion_data = noise_provider_->GetNoisedConversionData(conversion_data);
+  if (noise_provider_)
+    conversion_data = noise_provider_->GetNoisedConversionData(conversion_data);
 
-  // Allow at most 3 bits of entropy in conversion data. base::StringPrintf() is
-  // used over base::HexEncode() because HexEncode() returns a hex string with
-  // little-endian ordering. Big-endian ordering is expected here because the
-  // API assumes big-endian when parsing attributes.
-  return base::StringPrintf("%" PRIx64,
-                            conversion_data % kMaxAllowedConversionValues);
+  // Allow at most 3 bits of entropy in conversion data.
+  return base::NumberToString(conversion_data % kMaxAllowedConversionValues);
 }
 
 std::string ConversionPolicy::GetSanitizedImpressionData(
     uint64_t impression_data) const {
   // Impression data is allowed the full 64 bits.
-  return base::StringPrintf("%" PRIx64, impression_data);
+  return base::NumberToString(impression_data);
 }
 
 base::Time ConversionPolicy::GetExpiryTimeForImpression(
@@ -85,6 +84,10 @@ base::Time ConversionPolicy::GetExpiryTimeForImpression(
 
 base::Time ConversionPolicy::GetReportTimeForExpiredReportAtStartup(
     base::Time now) const {
+  // Do not use any delay in debug mode.
+  if (debug_mode_)
+    return now;
+
   // Add uniform random noise in the range of [0, 5 minutes] to the report time.
   // TODO(https://crbug.com/1075600): This delay is very conservative. Consider
   // increasing this delay once we can be sure reports are still sent at

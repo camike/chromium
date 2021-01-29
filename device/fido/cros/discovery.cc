@@ -5,16 +5,22 @@
 #include "device/fido/cros/discovery.h"
 
 #include "base/bind.h"
-#include "base/threading/sequenced_task_runner_handle.h"
+#include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 
 namespace device {
 
-FidoChromeOSDiscovery::FidoChromeOSDiscovery()
+FidoChromeOSDiscovery::FidoChromeOSDiscovery(
+    base::RepeatingCallback<uint32_t()> generate_request_id_callback)
     : FidoDiscoveryBase(FidoTransportProtocol::kInternal),
-      authenticator_(std::make_unique<ChromeOSAuthenticator>()),
+      generate_request_id_callback_(generate_request_id_callback),
       weak_factory_(this) {}
 
 FidoChromeOSDiscovery::~FidoChromeOSDiscovery() {}
+
+void FidoChromeOSDiscovery::set_require_power_button_mode(bool require) {
+  require_power_button_mode_ = require;
+}
 
 void FidoChromeOSDiscovery::Start() {
   DCHECK(!authenticator_);
@@ -22,16 +28,29 @@ void FidoChromeOSDiscovery::Start() {
     return;
   }
 
-  // Start() is currently invoked synchronously in the
-  // FidoRequestHandler ctor. Invoke AddAuthenticator() asynchronously
-  // to avoid hairpinning FidoRequestHandler::AuthenticatorAdded()
-  // before the request handler has an observer.
-  base::SequencedTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(&FidoChromeOSDiscovery::AddAuthenticator,
-                                weak_factory_.GetWeakPtr()));
+  if (require_power_button_mode_) {
+    ChromeOSAuthenticator::IsPowerButtonModeEnabled(
+        base::BindOnce(&FidoChromeOSDiscovery::MaybeAddAuthenticator,
+                       weak_factory_.GetWeakPtr()));
+    return;
+  }
+
+  base::ThreadPool::PostTaskAndReplyWithResult(
+      FROM_HERE, {base::TaskPriority::USER_BLOCKING, base::MayBlock()},
+      base::BindOnce(
+          &ChromeOSAuthenticator::IsUVPlatformAuthenticatorAvailableBlocking),
+      base::BindOnce(&FidoChromeOSDiscovery::MaybeAddAuthenticator,
+                     weak_factory_.GetWeakPtr()));
 }
 
-void FidoChromeOSDiscovery::AddAuthenticator() {
+void FidoChromeOSDiscovery::MaybeAddAuthenticator(bool is_available) {
+  if (!is_available) {
+    observer()->DiscoveryStarted(this, /*success=*/false);
+    return;
+  }
+
+  authenticator_ =
+      std::make_unique<ChromeOSAuthenticator>(generate_request_id_callback_);
   observer()->DiscoveryStarted(this, /*success=*/true, {authenticator_.get()});
 }
 

@@ -27,7 +27,7 @@ namespace favicon {
 
 // static
 void WebFaviconDriver::CreateForWebState(web::WebState* web_state,
-                                         FaviconService* favicon_service) {
+                                         CoreFaviconService* favicon_service) {
   if (FromWebState(web_state))
     return;
 
@@ -71,7 +71,7 @@ int WebFaviconDriver::DownloadImage(const GURL& url,
         std::vector<SkBitmap> frames;
         std::vector<gfx::Size> sizes;
         if (data) {
-          frames = skia::ImageDataToSkBitmaps(data);
+          frames = skia::ImageDataToSkBitmapsWithMaxSize(data, max_image_size);
           for (const auto& frame : frames) {
             sizes.push_back(gfx::Size(frame.width(), frame.height()));
           }
@@ -139,7 +139,7 @@ void WebFaviconDriver::OnFaviconDeleted(
 }
 
 WebFaviconDriver::WebFaviconDriver(web::WebState* web_state,
-                                   FaviconService* favicon_service)
+                                   CoreFaviconService* favicon_service)
     : FaviconDriverImpl(favicon_service),
       image_fetcher_(web_state->GetBrowserState()->GetSharedURLLoaderFactory()),
       web_state_(web_state) {

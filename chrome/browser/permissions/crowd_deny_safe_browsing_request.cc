@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "base/task_runner.h"
 #include "base/threading/sequenced_task_runner_handle.h"
@@ -57,7 +56,7 @@ class CrowdDenySafeBrowsingRequest::SafeBrowsingClient
                    &SafeBrowsingClient::OnTimeout);
 
     if (!database_manager_->IsSupported() ||
-        database_manager_->CheckApiBlacklistUrl(origin.GetURL(), this)) {
+        database_manager_->CheckApiBlocklistUrl(origin.GetURL(), this)) {
       timeout_.AbandonAndStop();
       SendResultToHandler(Verdict::kAcceptable);
     }
@@ -71,7 +70,7 @@ class CrowdDenySafeBrowsingRequest::SafeBrowsingClient
       const safe_browsing::ThreatMetadata& metadata) {
     return metadata.api_permissions.count(
                kSafeBrowsingNotificationPermissionName)
-               ? Verdict::kKnownToShowUnsolicitedNotificationPermissionRequests
+               ? Verdict::kUnacceptable
                : Verdict::kAcceptable;
   }
 
@@ -88,7 +87,7 @@ class CrowdDenySafeBrowsingRequest::SafeBrowsingClient
   }
 
   // SafeBrowsingDatabaseManager::Client:
-  void OnCheckApiBlacklistUrlResult(
+  void OnCheckApiBlocklistUrlResult(
       const GURL& url,
       const safe_browsing::ThreatMetadata& metadata) override {
     timeout_.AbandonAndStop();
@@ -114,8 +113,8 @@ CrowdDenySafeBrowsingRequest::CrowdDenySafeBrowsingRequest(
   client_ = std::make_unique<SafeBrowsingClient>(
       database_manager, weak_factory_.GetWeakPtr(),
       base::SequencedTaskRunnerHandle::Get());
-  base::PostTask(FROM_HERE, {content::BrowserThread::IO},
-                 base::BindOnce(&SafeBrowsingClient::CheckOrigin,
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&SafeBrowsingClient::CheckOrigin,
                                 base::Unretained(client_.get()), origin));
 }
 

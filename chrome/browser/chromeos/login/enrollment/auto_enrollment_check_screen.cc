@@ -5,7 +5,7 @@
 #include "chrome/browser/chromeos/login/enrollment/auto_enrollment_check_screen.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/notreached.h"
@@ -25,22 +25,10 @@ namespace chromeos {
 namespace {
 
 NetworkPortalDetector::CaptivePortalStatus GetCaptivePortalStatus() {
-  const NetworkState* default_network =
-      NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
-  return default_network ? network_portal_detector::GetInstance()
-                               ->GetCaptivePortalState(default_network->guid())
-                               .status
-                         : NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN;
+  return network_portal_detector::GetInstance()->GetCaptivePortalStatus();
 }
 
 }  // namespace
-
-// static
-AutoEnrollmentCheckScreen* AutoEnrollmentCheckScreen::Get(
-    ScreenManager* manager) {
-  return static_cast<AutoEnrollmentCheckScreen*>(
-      manager->GetScreen(AutoEnrollmentCheckScreenView::kScreenId));
-}
 
 AutoEnrollmentCheckScreen::AutoEnrollmentCheckScreen(
     AutoEnrollmentCheckScreenView* view,
@@ -67,8 +55,8 @@ AutoEnrollmentCheckScreen::~AutoEnrollmentCheckScreen() {
 }
 
 void AutoEnrollmentCheckScreen::ClearState() {
-  auto_enrollment_progress_subscription_.reset();
-  connect_request_subscription_.reset();
+  auto_enrollment_progress_subscription_ = {};
+  connect_request_subscription_ = {};
   network_portal_detector::GetInstance()->RemoveObserver(this);
 
   auto_enrollment_state_ = policy::AUTO_ENROLLMENT_STATE_IDLE;
@@ -93,7 +81,7 @@ void AutoEnrollmentCheckScreen::ShowImpl() {
 
   // Set up state change observers.
   auto_enrollment_progress_subscription_ =
-      auto_enrollment_controller_->RegisterProgressCallback(base::Bind(
+      auto_enrollment_controller_->RegisterProgressCallback(base::BindRepeating(
           &AutoEnrollmentCheckScreen::OnAutoEnrollmentCheckProgressed,
           base::Unretained(this)));
   network_portal_detector::GetInstance()->AddObserver(this);
@@ -118,12 +106,13 @@ void AutoEnrollmentCheckScreen::ShowImpl() {
           policy::AUTO_ENROLLMENT_STATE_CONNECTION_ERROR ||
       auto_enrollment_controller_->state() ==
           policy::AUTO_ENROLLMENT_STATE_SERVER_ERROR) {
+    VLOG(1) << "AutoEnrollmentCheckScreen::ShowImpl() retrying enrollment"
+            << " check due to failure.";
     auto_enrollment_controller_->Retry();
   } else {
     auto_enrollment_controller_->Start();
   }
-  network_portal_detector::GetInstance()->StartPortalDetection(
-      false /* force */);
+  network_portal_detector::GetInstance()->StartPortalDetection();
 }
 
 void AutoEnrollmentCheckScreen::HideImpl() {}
@@ -136,7 +125,7 @@ void AutoEnrollmentCheckScreen::OnViewDestroyed(
 
 void AutoEnrollmentCheckScreen::OnPortalDetectionCompleted(
     const NetworkState* /* network */,
-    const NetworkPortalDetector::CaptivePortalState& /* state */) {
+    const NetworkPortalDetector::CaptivePortalStatus /* status */) {
   UpdateState();
 }
 
@@ -178,6 +167,8 @@ void AutoEnrollmentCheckScreen::UpdateState() {
   // state.
   if (retry)
     auto_enrollment_controller_->Retry();
+
+  VLOG(1) << "AutoEnrollmentCheckScreen::UpdateState() retry = " << retry;
 }
 
 bool AutoEnrollmentCheckScreen::UpdateCaptivePortalStatus(
@@ -245,27 +236,31 @@ void AutoEnrollmentCheckScreen::ShowErrorScreen(
   error_screen_->SetErrorState(error_state,
                                network ? network->name() : std::string());
   connect_request_subscription_ = error_screen_->RegisterConnectRequestCallback(
-      base::Bind(&AutoEnrollmentCheckScreen::OnConnectRequested,
-                 base::Unretained(this)));
+      base::BindRepeating(&AutoEnrollmentCheckScreen::OnConnectRequested,
+                          base::Unretained(this)));
   error_screen_->SetHideCallback(
       base::BindOnce(&AutoEnrollmentCheckScreen::OnErrorScreenHidden,
                      weak_ptr_factory_.GetWeakPtr()));
   error_screen_->SetParentScreen(AutoEnrollmentCheckScreenView::kScreenId);
-  error_screen_->Show();
+  error_screen_->Show(context());
   histogram_helper_->OnErrorShow(error_state);
 }
 
 void AutoEnrollmentCheckScreen::OnErrorScreenHidden() {
   error_screen_->SetParentScreen(OobeScreen::SCREEN_UNKNOWN);
-  Show();
+  Show(context());
 }
 
 void AutoEnrollmentCheckScreen::SignalCompletion() {
-  network_portal_detector::GetInstance()->RemoveObserver(this);
-  auto_enrollment_progress_subscription_.reset();
-  connect_request_subscription_.reset();
+  VLOG(1) << "AutoEnrollmentCheckScreen::SignalCompletion()";
 
-  // Running exit callback can cause |this| destruction, so let other methods
+  network_portal_detector::GetInstance()->RemoveObserver(this);
+  error_screen_->SetHideCallback(base::OnceClosure());
+  error_screen_->SetParentScreen(OobeScreen::SCREEN_UNKNOWN);
+  auto_enrollment_progress_subscription_ = {};
+  connect_request_subscription_ = {};
+
+  // Running exit callback can cause `this` destruction, so let other methods
   // finish their work before.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(&AutoEnrollmentCheckScreen::RunExitCallback,
@@ -298,12 +293,13 @@ void AutoEnrollmentCheckScreen::OnConnectRequested() {
 
 bool AutoEnrollmentCheckScreen::ShouldBlockOnServerError() const {
   switch (auto_enrollment_controller_->auto_enrollment_check_type()) {
-    case AutoEnrollmentController::AutoEnrollmentCheckType::kFRE:
+    case AutoEnrollmentController::AutoEnrollmentCheckType::kForcedReEnrollment:
       // Only block on errors in FRE if FRE is expliclty required (i.e. the
       // device was enrolled before).
       return auto_enrollment_controller_->GetFRERequirement() ==
              AutoEnrollmentController::FRERequirement::kExplicitlyRequired;
-    case AutoEnrollmentController::AutoEnrollmentCheckType::kInitialEnrollment:
+    case AutoEnrollmentController::AutoEnrollmentCheckType::
+        kInitialStateDetermination:
       return true;
     case AutoEnrollmentController::AutoEnrollmentCheckType::kNone:
       NOTREACHED();

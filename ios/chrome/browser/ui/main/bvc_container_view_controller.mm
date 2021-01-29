@@ -4,13 +4,19 @@
 
 #import "ios/chrome/browser/ui/main/bvc_container_view_controller.h"
 
-#include "base/logging.h"
+#include <ostream>
+
+#include "base/check_op.h"
+#import "ios/chrome/browser/ui/gestures/view_revealing_vertical_pan_handler.h"
+#import "ios/chrome/browser/ui/thumb_strip/thumb_strip_feature.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
 @implementation BVCContainerViewController
+
+@synthesize thumbStripPanHandler = _thumbStripPanHandler;
 
 #pragma mark - public property implementation
 
@@ -19,7 +25,10 @@
 }
 
 - (void)setCurrentBVC:(UIViewController*)bvc {
-  DCHECK(bvc);
+  // When the thumb strip is enabled, the BVC container stays around all the
+  // time. When on a tab grid page with no tabs or the recent tab page, the
+  // currentBVC will be set to nil.
+  DCHECK(bvc || IsThumbStripEnabled());
   if (self.currentBVC == bvc) {
     return;
   }
@@ -35,14 +44,23 @@
   DCHECK_EQ(0U, self.view.subviews.count);
 
   // Add the new active view controller.
-  [self addChildViewController:bvc];
-  bvc.view.frame = self.view.bounds;
-  [self.view addSubview:bvc.view];
-  [bvc didMoveToParentViewController:self];
+  if (bvc) {
+    [self addChildViewController:bvc];
+    // If the BVC's view has a transform, then its frame isn't accurate.
+    // Instead, remove the transform, set the frame, then reapply the transform.
+    CGAffineTransform oldTransform = bvc.view.transform;
+    bvc.view.transform = CGAffineTransformIdentity;
+    bvc.view.frame = self.view.bounds;
+    bvc.view.transform = oldTransform;
+    [self.view addSubview:bvc.view];
+    [bvc didMoveToParentViewController:self];
 
-  // Let the system know that the child has changed so appearance updates can
-  // be made.
-  [self setNeedsStatusBarAppearanceUpdate];
+    if (IsThumbStripEnabled()) {
+      // The background needs to be clear to allow the thumb strip to be seen
+      // during the enter/exit thumb strip animation.
+      self.currentBVC.view.backgroundColor = [UIColor clearColor];
+    }
+  }
 
   DCHECK(self.currentBVC == bvc);
 }
@@ -79,6 +97,32 @@
 - (BOOL)shouldAutorotate {
   return self.currentBVC ? [self.currentBVC shouldAutorotate]
                          : [super shouldAutorotate];
+}
+
+#pragma mark - ViewRevealingAnimatee
+
+- (void)willAnimateViewReveal:(ViewRevealState)currentViewRevealState {
+  // No-op.
+}
+
+- (void)animateViewReveal:(ViewRevealState)nextViewRevealState {
+  switch (nextViewRevealState) {
+    case ViewRevealState::Hidden:
+      self.view.transform = CGAffineTransformIdentity;
+      break;
+    case ViewRevealState::Peeked:
+      self.view.transform = CGAffineTransformMakeTranslation(
+          0, self.thumbStripPanHandler.peekedHeight);
+      break;
+    case ViewRevealState::Revealed:
+      self.view.transform = CGAffineTransformMakeTranslation(
+          0, self.thumbStripPanHandler.revealedHeight);
+      break;
+  }
+}
+
+- (void)didAnimateViewReveal:(ViewRevealState)viewRevealState {
+  // No-op.
 }
 
 @end

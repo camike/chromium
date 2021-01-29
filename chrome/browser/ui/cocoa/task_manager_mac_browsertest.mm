@@ -27,6 +27,7 @@
 #include "components/sessions/content/session_tab_helper.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/no_renderer_crashes_assertion.h"
 #include "content/public/test/test_utils.h"
@@ -105,7 +106,7 @@ class TaskManagerMacTest : public InProcessBrowserTest {
   int FindRowForTab(content::WebContents* tab) {
     SessionID tab_id = sessions::SessionTabHelper::IdForTab(tab);
     std::unique_ptr<TaskManagerTester> tester =
-        TaskManagerTester::Create(base::Closure());
+        TaskManagerTester::Create(base::RepeatingClosure());
     for (int i = 0; i < tester->GetRowCount(); ++i) {
       if (tester->GetTabId(i) == tab_id)
         return i;
@@ -229,7 +230,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerMacTest, SelectionConsistency) {
   // Find the three tabs we set up, in TaskManager model order. Because we have
   // not sorted the table yet, this should also be their UI display order.
   std::unique_ptr<TaskManagerTester> tester =
-      TaskManagerTester::Create(base::Closure());
+      TaskManagerTester::Create(base::RepeatingClosure());
   std::vector<content::WebContents*> tabs;
   for (int i = 0; i < tester->GetRowCount(); ++i) {
     // Filter based on our title.

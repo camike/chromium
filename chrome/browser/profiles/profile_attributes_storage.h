@@ -12,12 +12,13 @@
 #include <unordered_map>
 #include <vector>
 
+#include "base/callback_forward.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
+#include "build/build_config.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_info_cache_observer.h"
 
@@ -40,6 +41,8 @@ class ProfileAttributesStorage
   using Observer = ProfileInfoCacheObserver;
 
   explicit ProfileAttributesStorage(PrefService* prefs);
+  ProfileAttributesStorage(const ProfileAttributesStorage&) = delete;
+  ProfileAttributesStorage& operator=(const ProfileAttributesStorage&) = delete;
   virtual ~ProfileAttributesStorage();
 
   // If the |supervised_user_id| is non-empty, the profile will be marked to be
@@ -66,8 +69,15 @@ class ProfileAttributesStorage
 
   // Returns a vector containing one attributes entry per known profile. They
   // are not sorted in any particular order.
-  std::vector<ProfileAttributesEntry*> GetAllProfilesAttributes();
+  std::vector<ProfileAttributesEntry*> GetAllProfilesAttributes(
+      bool include_guest_profile = false);
+
+  // Returns all non-Guest profile attributes sorted by name.
   std::vector<ProfileAttributesEntry*> GetAllProfilesAttributesSortedByName();
+
+  // Returns all non-Guest profile attributes sorted by local profile name.
+  std::vector<ProfileAttributesEntry*>
+  GetAllProfilesAttributesSortedByLocalProfilName();
 
   // Populates |entry| with the data for the profile at |path| and returns true
   // if the operation is successful and |entry| can be used. Returns false
@@ -78,7 +88,8 @@ class ProfileAttributesStorage
       const base::FilePath& path, ProfileAttributesEntry** entry) = 0;
 
   // Returns the count of known profiles.
-  virtual size_t GetNumberOfProfiles() const = 0;
+  virtual size_t GetNumberOfProfiles(
+      bool include_guest_profile = false) const = 0;
 
   // Returns a unique name that can be assigned to a newly created profile.
   base::string16 ChooseNameForNewProfile(size_t icon_index) const;
@@ -93,6 +104,13 @@ class ProfileAttributesStorage
   // is not used.
   bool IsDefaultProfileName(const base::string16& name,
                             bool include_check_for_legacy_profile_name) const;
+
+#if !defined(OS_ANDROID)
+  // Records statistics about a profile `entry` that is being deleted. If the
+  // profile has opened browser window(s) in the moment of deletion, this
+  // function must be called before these windows get closed.
+  void RecordDeletedProfileState(ProfileAttributesEntry* entry);
+#endif
 
   // Records statistics about profiles as would be visible in the profile picker
   // (if we would display it in this moment).
@@ -187,6 +205,9 @@ class ProfileAttributesStorage
   scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
 
  private:
+  std::vector<ProfileAttributesEntry*> GetAllProfilesAttributesSorted(
+      bool use_local_profile_name);
+
   // Called when the picture given by |key| has been loaded from disk and
   // decoded into |image|.
   void OnAvatarPictureLoaded(const base::FilePath& profile_path,
@@ -209,8 +230,6 @@ class ProfileAttributesStorage
   // Notifies observers.
   void NotifyOnProfileHighResAvatarLoaded(
       const base::FilePath& profile_path) const;
-
-  DISALLOW_COPY_AND_ASSIGN(ProfileAttributesStorage);
 };
 
 #endif  // CHROME_BROWSER_PROFILES_PROFILE_ATTRIBUTES_STORAGE_H_

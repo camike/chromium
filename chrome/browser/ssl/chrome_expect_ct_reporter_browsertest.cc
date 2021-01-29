@@ -15,6 +15,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/test/browser_test.h"
 #include "net/cert/mock_cert_verifier.h"
 #include "net/http/transport_security_state.h"
 #include "net/test/cert_test_util.h"
@@ -128,15 +129,15 @@ class ExpectCTBrowserTest : public CertVerifierBrowserTest {
 // of Expect-CT HTTP headers.
 IN_PROC_BROWSER_TEST_F(ExpectCTBrowserTest, TestDynamicExpectCTReporting) {
   net::EmbeddedTestServer report_server;
-  report_server.RegisterRequestHandler(base::Bind(
+  report_server.RegisterRequestHandler(base::BindRepeating(
       &ExpectCTBrowserTest::ReportRequestHandler, base::Unretained(this)));
   ASSERT_TRUE(report_server.Start());
   GURL report_url = report_server.GetURL("/");
 
   net::EmbeddedTestServer test_server(net::EmbeddedTestServer::TYPE_HTTPS);
   test_server.RegisterRequestHandler(
-      base::Bind(&ExpectCTBrowserTest::TestRequestHandler,
-                 base::Unretained(this), report_url));
+      base::BindRepeating(&ExpectCTBrowserTest::TestRequestHandler,
+                          base::Unretained(this), report_url));
   ASSERT_TRUE(test_server.Start());
 
   // Set up the mock cert verifier to accept |test_server|'s certificate as
@@ -171,12 +172,12 @@ IN_PROC_BROWSER_TEST_F(ExpectCTBrowserTest,
                        TestDynamicExpectCTHeaderProcessing) {
   net::EmbeddedTestServer test_server(net::EmbeddedTestServer::TYPE_HTTPS);
   test_server.RegisterRequestHandler(
-      base::Bind(&ExpectCTBrowserTest::ExpectCTHeaderRequestHandler,
-                 base::Unretained(this)));
+      base::BindRepeating(&ExpectCTBrowserTest::ExpectCTHeaderRequestHandler,
+                          base::Unretained(this)));
   ASSERT_TRUE(test_server.Start());
 
   net::EmbeddedTestServer report_server;
-  report_server.RegisterRequestHandler(base::Bind(
+  report_server.RegisterRequestHandler(base::BindRepeating(
       &ExpectCTBrowserTest::ReportRequestHandler, base::Unretained(this)));
   ASSERT_TRUE(report_server.Start());
 

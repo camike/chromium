@@ -293,20 +293,10 @@ bool LoopbackServer::CreateDefaultPermanentItems() {
     if (!top_level_entity) {
       return false;
     }
-    top_level_permanent_item_ids_[model_type] = top_level_entity->GetId();
     SaveEntity(std::move(top_level_entity));
   }
 
   return true;
-}
-
-std::string LoopbackServer::GetTopLevelPermanentItemId(
-    syncer::ModelType model_type) {
-  auto it = top_level_permanent_item_ids_.find(model_type);
-  if (it == top_level_permanent_item_ids_.end()) {
-    return std::string();
-  }
-  return it->second;
 }
 
 void LoopbackServer::UpdateEntityVersion(LoopbackServerEntity* entity) {
@@ -336,6 +326,7 @@ net::HttpStatusCode LoopbackServer::HandleCommand(
   } else {
     bool success = false;
     std::vector<ModelType> datatypes_to_migrate;
+    ModelTypeSet throttled_datatypes_in_request;
     switch (message.message_contents()) {
       case sync_pb::ClientToServerMessage::GET_UPDATES:
         success = HandleGetUpdatesRequest(
@@ -344,9 +335,9 @@ net::HttpStatusCode LoopbackServer::HandleCommand(
             &datatypes_to_migrate);
         break;
       case sync_pb::ClientToServerMessage::COMMIT:
-        success = HandleCommitRequest(message.commit(),
-                                      message.invalidator_client_id(),
-                                      response->mutable_commit());
+        success = HandleCommitRequest(
+            message.commit(), message.invalidator_client_id(),
+            response->mutable_commit(), &throttled_datatypes_in_request);
         break;
       case sync_pb::ClientToServerMessage::CLEAR_SERVER_DATA:
         ClearServerData();
@@ -360,19 +351,30 @@ net::HttpStatusCode LoopbackServer::HandleCommand(
 
     if (success) {
       response->set_error_code(sync_pb::SyncEnums::SUCCESS);
-    } else if (datatypes_to_migrate.empty()) {
-      UMA_HISTOGRAM_ENUMERATION(
-          "Sync.Local.RequestTypeOnError", message.message_contents(),
-          sync_pb::ClientToServerMessage_Contents_Contents_MAX);
-      return net::HTTP_INTERNAL_SERVER_ERROR;
-    } else {
+    } else if (!datatypes_to_migrate.empty()) {
       DLOG(WARNING) << "Migration required for " << datatypes_to_migrate.size()
                     << " datatypes";
+      response->set_error_code(sync_pb::SyncEnums::MIGRATION_DONE);
       for (ModelType type : datatypes_to_migrate) {
         response->add_migrated_data_type_id(
             GetSpecificsFieldNumberFromModelType(type));
       }
-      response->set_error_code(sync_pb::SyncEnums::MIGRATION_DONE);
+    } else if (!throttled_datatypes_in_request.Empty()) {
+      DLOG(WARNING) << "Throttled datatypes: "
+                    << ModelTypeSetToString(throttled_datatypes_in_request);
+      response->set_error_code(sync_pb::SyncEnums::THROTTLED);
+      response->mutable_error()->set_error_type(sync_pb::SyncEnums::THROTTLED);
+      for (ModelType type : throttled_datatypes_in_request) {
+        response->mutable_error()->add_error_data_type_ids(
+            syncer::GetSpecificsFieldNumberFromModelType(type));
+      }
+      // Avoid tests waiting too long after throttling is disabled.
+      response->mutable_client_command()->set_throttle_delay_seconds(1);
+    } else {
+      UMA_HISTOGRAM_ENUMERATION(
+          "Sync.Local.RequestTypeOnError", message.message_contents(),
+          sync_pb::ClientToServerMessage_Contents_Contents_MAX);
+      return net::HTTP_INTERNAL_SERVER_ERROR;
     }
   }
 
@@ -620,7 +622,8 @@ void LoopbackServer::DeleteChildren(const string& parent_id) {
 bool LoopbackServer::HandleCommitRequest(
     const sync_pb::CommitMessage& commit,
     const std::string& invalidator_client_id,
-    sync_pb::CommitResponse* response) {
+    sync_pb::CommitResponse* response,
+    ModelTypeSet* throttled_datatypes_in_request) {
   std::map<string, string> client_to_server_ids;
   string guid = commit.cache_guid();
   ModelTypeSet committed_model_types;
@@ -638,6 +641,13 @@ bool LoopbackServer::HandleCommitRequest(
     string parent_id = client_entity.parent_id_string();
     if (client_to_server_ids.find(parent_id) != client_to_server_ids.end()) {
       parent_id = client_to_server_ids[parent_id];
+    }
+
+    const ModelType entity_model_type = GetModelType(client_entity);
+    if (throttled_types_.Has(entity_model_type)) {
+      entry_response->set_response_type(sync_pb::CommitResponse::OVER_QUOTA);
+      throttled_datatypes_in_request->Put(entity_model_type);
+      continue;
     }
 
     const string entity_id =
@@ -673,7 +683,7 @@ bool LoopbackServer::HandleCommitRequest(
   if (observer_for_tests_)
     observer_for_tests_->OnCommit(invalidator_client_id, committed_model_types);
 
-  return true;
+  return throttled_datatypes_in_request->Empty();
 }
 
 void LoopbackServer::ClearServerData() {
@@ -681,7 +691,7 @@ void LoopbackServer::ClearServerData() {
   entities_.clear();
   keystore_keys_.clear();
   store_birthday_ = base::Time::Now().ToJavaTime();
-  base::DeleteFile(persistent_file_, false);
+  base::DeleteFile(persistent_file_);
   Init();
 }
 
@@ -861,24 +871,33 @@ bool LoopbackServer::ScheduleSaveStateToFile() {
 
 bool LoopbackServer::LoadStateFromFile() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (!base::PathExists(persistent_file_)) {
-    LOG(WARNING) << "Loopback sync persistent state file does not exist.";
+
+  // Ensures local sync file can be opened, read, and is not being written to.
+  // Also makes sure file will not be written to during serialization.
+  base::File state_file(persistent_file_, base::File::FLAG_OPEN |
+                                              base::File::FLAG_READ |
+                                              base::File::FLAG_EXCLUSIVE_WRITE);
+  base::File::Error state_file_error = state_file.error_details();
+
+  if (state_file_error != base::File::FILE_OK) {
+    UMA_HISTOGRAM_ENUMERATION("Sync.Local.ReadPlatformFileError",
+                              -state_file_error, -base::File::FILE_ERROR_MAX);
+    LOG(ERROR)
+        << "Loopback sync cannot read the persistent state file with error "
+        << base::File::ErrorToString(state_file_error);
     return false;
   }
+
   std::string serialized;
   if (base::ReadFileToString(persistent_file_, &serialized)) {
     sync_pb::LoopbackServerProto proto;
     if (serialized.length() > 0 && proto.ParseFromString(serialized)) {
       return DeSerializeState(proto);
     }
-    LOG(ERROR) << "Loopback sync can not parse the persistent state file.";
+    LOG(ERROR) << "Loopback sync cannot parse the persistent state file.";
     return false;
   }
-  // TODO(pastarmovj): Try to understand what is the issue e.g. file already
-  // open, no access rights etc. and decide if better course of action is
-  // available instead of giving up and wiping the global state on the next
-  // write.
-  LOG(ERROR) << "Loopback sync can not read the persistent state file.";
+  LOG(ERROR) << "Loopback sync cannot read the persistent state file.";
   return false;
 }
 

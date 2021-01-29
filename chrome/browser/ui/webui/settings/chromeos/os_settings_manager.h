@@ -6,13 +6,9 @@
 #define CHROME_BROWSER_UI_WEBUI_SETTINGS_CHROMEOS_OS_SETTINGS_MANAGER_H_
 
 #include <memory>
-#include <unordered_map>
-#include <vector>
 
-#include "chrome/browser/chromeos/local_search_service/index.h"
-#include "chrome/browser/ui/webui/settings/chromeos/os_settings_section.h"
+#include "base/gtest_prod_util.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "mojo/public/cpp/bindings/remote.h"
 
 class ArcAppListPrefs;
 class Profile;
@@ -23,9 +19,9 @@ class WebUI;
 class WebUIDataSource;
 }  // namespace content
 
-namespace local_search_service {
-class LocalSearchService;
-}  // namespace local_search_service
+namespace signin {
+class IdentityManager;
+}  // namespace signin
 
 namespace syncer {
 class SyncService;
@@ -33,15 +29,32 @@ class SyncService;
 
 namespace chromeos {
 
+class CupsPrintersManager;
 class KerberosCredentialsManager;
+
+namespace android_sms {
+class AndroidSmsService;
+}  // namespace android_sms
+
+namespace local_search_service {
+class LocalSearchServiceProxy;
+}  // namespace local_search_service
 
 namespace multidevice_setup {
 class MultiDeviceSetupClient;
 }  // namespace multidevice_setup
 
+namespace phonehub {
+class PhoneHubManager;
+}  // namespace phonehub
+
 namespace settings {
 
-struct SearchConcept;
+class Hierarchy;
+class OsSettingsSections;
+class SearchHandler;
+class SearchTagRegistry;
+class SettingsUserActionTracker;
 
 // Manager for the Chrome OS settings page. This class is implemented as a
 // KeyedService, so one instance of the class is intended to be active for the
@@ -50,7 +63,8 @@ struct SearchConcept;
 // Main responsibilities:
 //
 // (1) Support search queries for settings content. OsSettingsManager is
-//     responsible for updating the kCroSettings index of the LocalSearchService
+//     responsible for updating the kCroSettings index of the
+//     LocalSearchService
 //     with search tags corresponding to all settings which are available.
 //
 //     The availability of settings depends on the user's account (e.g.,
@@ -68,17 +82,20 @@ struct SearchConcept;
 //
 // (3) Add logic supporting message-passing between the browser process (C++)
 //     and the settings app (JS), via SettingsPageUIHandler objects.
-class OsSettingsManager : public KeyedService,
-                          public OsSettingsSection::Delegate {
+class OsSettingsManager : public KeyedService {
  public:
   OsSettingsManager(
       Profile* profile,
-      local_search_service::LocalSearchService* local_search_service,
+      local_search_service::LocalSearchServiceProxy* local_search_service_proxy,
       multidevice_setup::MultiDeviceSetupClient* multidevice_setup_client,
+      phonehub::PhoneHubManager* phone_hub_manager,
       syncer::SyncService* sync_service,
       SupervisedUserService* supervised_user_service,
       KerberosCredentialsManager* kerberos_credentials_manager,
-      ArcAppListPrefs* arc_app_list_prefs);
+      ArcAppListPrefs* arc_app_list_prefs,
+      signin::IdentityManager* identity_manager,
+      android_sms::AndroidSmsService* android_sms_service,
+      CupsPrintersManager* printers_manager);
   OsSettingsManager(const OsSettingsManager& other) = delete;
   OsSettingsManager& operator=(const OsSettingsManager& other) = delete;
   ~OsSettingsManager() override;
@@ -92,23 +109,25 @@ class OsSettingsManager : public KeyedService,
   // Adds SettingsPageUIHandlers to an OS settings instance.
   void AddHandlers(content::WebUI* web_ui);
 
-  // Returns the tag metadata associated with |canonical_message_id|, which must
-  // be one of the canonical IDS_SETTINGS_TAG_* identifiers used for a search
-  // tag. If no metadata is available or if |canonical_message_id| instead
-  // refers to an alternate tag's ID, null is returned.
-  const SearchConcept* GetCanonicalTagMetadata(int canonical_message_id) const;
+  SearchHandler* search_handler() { return search_handler_.get(); }
+
+  SettingsUserActionTracker* settings_user_action_tracker() {
+    return settings_user_action_tracker_.get();
+  }
+
+  const Hierarchy* hierarchy() const { return hierarchy_.get(); }
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(OsSettingsManagerTest, Initialization);
+
   // KeyedService:
   void Shutdown() override;
 
-  // OsSettingsSection::Delegate:
-  void AddSearchTags(const std::vector<SearchConcept>& tags_group) override;
-  void RemoveSearchTags(const std::vector<SearchConcept>& tags_group) override;
-
-  std::vector<std::unique_ptr<OsSettingsSection>> sections_;
-  local_search_service::Index* index_;
-  std::unordered_map<int, const SearchConcept*> canonical_id_to_metadata_map_;
+  std::unique_ptr<SearchTagRegistry> search_tag_registry_;
+  std::unique_ptr<OsSettingsSections> sections_;
+  std::unique_ptr<Hierarchy> hierarchy_;
+  std::unique_ptr<SettingsUserActionTracker> settings_user_action_tracker_;
+  std::unique_ptr<SearchHandler> search_handler_;
 };
 
 }  // namespace settings

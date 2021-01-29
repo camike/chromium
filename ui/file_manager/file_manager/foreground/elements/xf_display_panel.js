@@ -2,11 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// #import {PanelItem} from './xf_panel_item.m.js';
+// #import {util} from '../../common/js/util.m.js';
+
 /**
  * A panel to display a collection of PanelItem.
  * @extends HTMLElement
  */
-class DisplayPanel extends HTMLElement {
+/* #export */ class DisplayPanel extends HTMLElement {
   constructor() {
     super();
     this.createElement_();
@@ -195,7 +198,7 @@ class DisplayPanel extends HTMLElement {
    * @private
    */
   toggleSummary(event) {
-    const panel = event.target.parent;
+    const panel = event.currentTarget.parent;
     const summaryPanel = panel.summary_.querySelector('xf-panel-item');
     const expandButton =
         summaryPanel.shadowRoot.querySelector('#primary-action');
@@ -205,6 +208,7 @@ class DisplayPanel extends HTMLElement {
       panel.panels_.listener_ = panel.panelExpandFinished;
       panel.panels_.addEventListener('animationend', panel.panelExpandFinished);
       panel.panels_.setAttribute('class', 'expanded expanding');
+      summaryPanel.setAttribute('data-category', 'expanded');
     } else {
       panel.collapsed_ = true;
       expandButton.setAttribute('data-category', 'expand');
@@ -215,6 +219,7 @@ class DisplayPanel extends HTMLElement {
       panel.panels_.addEventListener(
           'animationend', panel.panelCollapseFinished);
       panel.panels_.setAttribute('class', 'collapsed expanding');
+      summaryPanel.setAttribute('data-category', 'collapsed');
     }
   }
 
@@ -306,6 +311,11 @@ class DisplayPanel extends HTMLElement {
       if (button) {
         button.removeEventListener('click', this.toggleSummary);
       }
+      // For transfer summary details.
+      const textDiv = summaryPanel.textDiv;
+      if (textDiv) {
+        textDiv.removeEventListener('click', this.toggleSummary);
+      }
       summaryPanel.remove();
       this.panels_.hidden = false;
       this.separator_.hidden = true;
@@ -317,18 +327,26 @@ class DisplayPanel extends HTMLElement {
       summaryPanel = document.createElement('xf-panel-item');
       summaryPanel.setAttribute('panel-type', 1);
       summaryPanel.id = 'summary-panel';
+      summaryPanel.setAttribute('detailed-summary', '');
       const button = summaryPanel.primaryButton;
       if (button) {
         button.parent = this;
         button.addEventListener('click', this.toggleSummary);
       }
+      const textDiv = summaryPanel.textDiv;
+      if (textDiv) {
+        textDiv.parent = this;
+        textDiv.addEventListener('click', this.toggleSummary);
+      }
       summaryHost.appendChild(summaryPanel);
       // Setup the panels based on expand/collapse state of the summary panel.
       if (this.collapsed_) {
         this.panels_.hidden = true;
+        summaryPanel.setAttribute('data-category', 'collapsed');
       } else {
         this.setSummaryExpandedState(button);
         this.panels_.classList.add('expandfinished');
+        summaryPanel.setAttribute('data-category', 'expanded');
       }
     }
     if (summaryPanel) {
@@ -351,6 +369,7 @@ class DisplayPanel extends HTMLElement {
     panel.setAttribute('indicator', 'progress');
     this.items_.push(/** @type {!PanelItem} */ (panel));
     this.setAriaHidden_();
+    this.setAttribute('detailed-panel', 'detailed-panel');
     return /** @type {!PanelItem} */ (panel);
   }
 
@@ -443,3 +462,5 @@ class DisplayPanel extends HTMLElement {
 }
 
 window.customElements.define('xf-display-panel', DisplayPanel);
+
+//# sourceURL=//ui/file_manager/file_manager/foreground/elements/xf_display_panel.js

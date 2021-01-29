@@ -7,17 +7,22 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/command_line.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/default_tick_clock.h"
+#include "chrome/browser/chromeos/login/configuration_keys.h"
+#include "chrome/browser/chromeos/login/startup_utils.h"
+#include "chrome/browser/chromeos/login/wizard_context.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/ui/webui/chromeos/login/hid_detection_screen_handler.h"
 #include "chrome/grit/generated_resources.h"
+#include "chromeos/constants/chromeos_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/device_service.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
@@ -61,15 +66,24 @@ GetInputDeviceManagerBinderOverride() {
 
 namespace chromeos {
 
-HIDDetectionScreen::HIDDetectionScreen(
-    HIDDetectionView* view,
-    CoreOobeView* core_oobe_view,
-    const base::RepeatingClosure& exit_callback)
+// static
+std::string HIDDetectionScreen::GetResultString(Result result) {
+  switch (result) {
+    case Result::NEXT:
+      return "Next";
+    case Result::START_DEMO:
+      return "StartDemo";
+    case Result::SKIP:
+    case Result::SKIPPED_FOR_TESTS:
+      return BaseScreen::kNotApplicable;
+  }
+}
+
+HIDDetectionScreen::HIDDetectionScreen(HIDDetectionView* view,
+                                       const ScreenExitCallback& exit_callback)
     : BaseScreen(HIDDetectionView::kScreenId, OobeScreenPriority::DEFAULT),
       view_(view),
-      core_oobe_view_(core_oobe_view),
       exit_callback_(exit_callback) {
-  DCHECK(core_oobe_view_);
   if (view_)
     view_->Bind(this);
 
@@ -95,7 +109,6 @@ void HIDDetectionScreen::OverrideInputDeviceManagerBinderForTesting(
 }
 
 void HIDDetectionScreen::OnContinueButtonClicked() {
-  core_oobe_view_->StopDemoModeDetection();
   ContinueScenarioType scenario_type;
   if (!pointing_device_id_.empty() && !keyboard_device_id_.empty())
     scenario_type = All_DEVICES_DETECTED;
@@ -107,6 +120,16 @@ void HIDDetectionScreen::OnContinueButtonClicked() {
   UMA_HISTOGRAM_ENUMERATION("HIDDetection.OOBEDevicesDetectedOnContinuePressed",
                             scenario_type, CONTINUE_SCENARIO_TYPE_SIZE);
 
+  CleanupOnExit();
+  Exit(Result::NEXT);
+}
+
+void HIDDetectionScreen::OnShouldStartDemoMode() {
+  CleanupOnExit();
+  Exit(Result::START_DEMO);
+}
+
+void HIDDetectionScreen::CleanupOnExit() {
   // Switch off BT adapter if it was off before the screen and no BT device
   // connected.
   const bool adapter_is_powered =
@@ -116,7 +139,7 @@ void HIDDetectionScreen::OnContinueButtonClicked() {
   if (adapter_is_powered && need_switching_off)
     PowerOff();
 
-  exit_callback_.Run();
+  demo_mode_detector_.reset();
 }
 
 void HIDDetectionScreen::OnViewDestroyed(HIDDetectionView* view) {
@@ -125,16 +148,39 @@ void HIDDetectionScreen::OnViewDestroyed(HIDDetectionView* view) {
 }
 
 void HIDDetectionScreen::CheckIsScreenRequired(
-    const base::Callback<void(bool)>& on_check_done) {
+    base::OnceCallback<void(bool)> on_check_done) {
   DCHECK(input_device_manager_);
   input_device_manager_->GetDevices(
       base::BindOnce(&HIDDetectionScreen::OnGetInputDevicesListForCheck,
-                     weak_ptr_factory_.GetWeakPtr(), on_check_done));
+                     weak_ptr_factory_.GetWeakPtr(), std::move(on_check_done)));
+}
+
+bool HIDDetectionScreen::MaybeSkip(WizardContext* context) {
+  const auto* skip_screen_key = context->configuration.FindKeyOfType(
+      configuration::kSkipHIDDetection, base::Value::Type::BOOLEAN);
+  const bool skip_screen = skip_screen_key && skip_screen_key->GetBool();
+
+  if (skip_screen) {
+    Exit(Result::SKIP);
+    return true;
+  }
+
+  if (chromeos::StartupUtils::IsHIDDetectionScreenDisabledForTests() ||
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kDisableHIDDetectionOnOOBEForTesting)) {
+    Exit(Result::SKIPPED_FOR_TESTS);
+    return true;
+  }
+
+  return false;
 }
 
 void HIDDetectionScreen::ShowImpl() {
   if (!is_hidden())
     return;
+
+  if (adapter_)
+    adapter_->AddObserver(this);
 
   if (view_)
     view_->SetPinDialogVisible(false);
@@ -145,19 +191,23 @@ void HIDDetectionScreen::ShowImpl() {
     GetInputDevicesList();
   else
     UpdateDevices();
-
+  demo_mode_detector_ = std::make_unique<DemoModeDetector>(
+      base::DefaultTickClock::GetInstance(), this);
   if (view_) {
     view_->Show();
-    core_oobe_view_->InitDemoModeDetection();
   }
 }
 
 void HIDDetectionScreen::HideImpl() {
   if (is_hidden())
     return;
+  demo_mode_detector_.reset();
 
   if (discovery_session_.get())
     discovery_session_->Stop();
+
+  if (adapter_)
+    adapter_->RemoveObserver(this);
 
   if (view_)
     view_->Hide();
@@ -238,10 +288,10 @@ void HIDDetectionScreen::AdapterPresentChanged(
     adapter_initially_powered_.reset(new bool(adapter_->IsPowered()));
     adapter_->SetPowered(
         true,
-        base::Bind(&HIDDetectionScreen::StartBTDiscoverySession,
-                   weak_ptr_factory_.GetWeakPtr()),
-        base::Bind(&HIDDetectionScreen::SetPoweredError,
-                   weak_ptr_factory_.GetWeakPtr()));
+        base::BindOnce(&HIDDetectionScreen::StartBTDiscoverySession,
+                       weak_ptr_factory_.GetWeakPtr()),
+        base::BindOnce(&HIDDetectionScreen::SetPoweredError,
+                       weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -377,6 +427,11 @@ void HIDDetectionScreen::SetPointingDeviceName(const std::string& name) {
   pointing_device_name_ = name;
 }
 
+void HIDDetectionScreen::Exit(Result result) {
+  exit_result_for_testing_ = result;
+  exit_callback_.Run(result);
+}
+
 void HIDDetectionScreen::DeviceAdded(device::BluetoothAdapter* adapter,
                                      device::BluetoothDevice* device) {
   VLOG(1) << "BT input device added id = " << device->GetDeviceID()
@@ -446,8 +501,6 @@ void HIDDetectionScreen::InitializeAdapter(
     scoped_refptr<device::BluetoothAdapter> adapter) {
   adapter_ = adapter;
   CHECK(adapter_.get());
-
-  adapter_->AddObserver(this);
 }
 
 void HIDDetectionScreen::StartBTDiscoverySession() {
@@ -490,10 +543,12 @@ void HIDDetectionScreen::TryInitiateBTDevicesUpdate() {
       adapter_initially_powered_.reset(new bool(false));
       adapter_->SetPowered(
           true,
-          base::Bind(&HIDDetectionScreen::StartBTDiscoverySession,
-                     weak_ptr_factory_.GetWeakPtr()),
-          base::Bind(&HIDDetectionScreen::SetPoweredError,
-                     weak_ptr_factory_.GetWeakPtr()));
+          base::BindOnce(&HIDDetectionScreen::StartBTDiscoverySession,
+                         weak_ptr_factory_.GetWeakPtr()),
+          base::BindOnce(&HIDDetectionScreen::SetPoweredError,
+                         weak_ptr_factory_.GetWeakPtr()));
+    } else if (!discovery_session_ || !discovery_session_->IsActive()) {
+      StartBTDiscoverySession();
     } else {
       UpdateBTDevices();
     }
@@ -511,7 +566,7 @@ void HIDDetectionScreen::ConnectToInputDeviceManager() {
 }
 
 void HIDDetectionScreen::OnGetInputDevicesListForCheck(
-    const base::Callback<void(bool)>& on_check_done,
+    base::OnceCallback<void(bool)> on_check_done,
     std::vector<InputDeviceInfoPtr> devices) {
   std::string pointing_device_id;
   std::string keyboard_device_id;
@@ -531,7 +586,7 @@ void HIDDetectionScreen::OnGetInputDevicesListForCheck(
   UMA_HISTOGRAM_BOOLEAN("HIDDetection.OOBEDialogShown",
                         !all_devices_autodetected);
 
-  on_check_done.Run(!all_devices_autodetected);
+  std::move(on_check_done).Run(!all_devices_autodetected);
 }
 
 void HIDDetectionScreen::OnGetInputDevicesList(
@@ -592,8 +647,8 @@ void HIDDetectionScreen::PowerOff() {
   if (!use_bluetooth) {
     VLOG(1) << "Switching off BT adapter after HID OOBE screen as unused.";
     adapter_->SetPowered(false, base::DoNothing(),
-                         base::Bind(&HIDDetectionScreen::SetPoweredOffError,
-                                    weak_ptr_factory_.GetWeakPtr()));
+                         base::BindOnce(&HIDDetectionScreen::SetPoweredOffError,
+                                        weak_ptr_factory_.GetWeakPtr()));
   }
 }
 

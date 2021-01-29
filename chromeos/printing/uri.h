@@ -50,7 +50,7 @@ namespace chromeos {
 //
 // 1. The grammar is simplified:
 //
-//    uri = Scheme ":" [ authority ] [ Path ] [ "?" Query ] [ "#" Fragment ]
+//    uri = [ Scheme ":" ] [ authority ] [ Path ] [ "?" Query ] [ "#" Fragment ]
 //
 //    authority = "//" [ Userinfo "@" ] Host [ ":" Port ]
 //
@@ -215,8 +215,9 @@ class CHROMEOS_EXPORT Uri {
     kInvalidPercentEncoding,    // cannot parse hex number after % sign
     kDisallowedASCIICharacter,  // non-printable ASCII character
     kInvalidUTF8Character,      // error when tried to parse UTF-8 character
-    kInvalidScheme,             // invalid Scheme format or no ':' in input
+    kInvalidScheme,             // invalid Scheme format
     kInvalidPortNumber,
+    kRelativePathsNotAllowed,  // non-empty Path that does not start with '/'
     kEmptySegmentInPath,
     kEmptyParameterNameInQuery
   };
@@ -278,12 +279,12 @@ class CHROMEOS_EXPORT Uri {
   // - Set*Encoded(...) methods
   const ParserError& GetLastParsingError() const;
 
-  // Returns the URL in the normalized form. It never returns empty string!
-  // When all components are empty, this method returns ":" (see the grammar).
+  // Returns the URL in the normalized form. It returns empty string if and only
+  // if all components are empty (see the grammar).
   // If the Port is specified (GetPort() != -1) and |always_print_port| is set
   // to true, a Port number is always included in the returned URI (even when
   // it equals to a Scheme's default port number).
-  std::string GetNormalized(bool always_print_port = false) const;
+  std::string GetNormalized(bool always_print_port = true) const;
 
   // Returns true <=> whole URL has no UTF-8 characters.
   bool IsASCII() const;
@@ -307,6 +308,9 @@ class CHROMEOS_EXPORT Uri {
   // Returns false when |port| is invalid. In this case, the current port is
   // not modified.
   bool SetPort(int port);
+  // A version of the method above for a string parameter. Empty string means
+  // "not-specified" and has the same effect as passing -1 to the method above.
+  bool SetPort(const std::string& port);
 
   // These methods return values of components. There is no %-escaped sequences
   // and returned string may contain UTF-8 characters.
@@ -366,6 +370,9 @@ class CHROMEOS_EXPORT Uri {
 
  private:
   class Pim;
+
+  bool ShouldPrintPort(bool always_print_port) const;
+
   std::unique_ptr<Pim> pim_;
 };
 

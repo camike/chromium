@@ -17,9 +17,8 @@
 #include "ipc/ipc_channel_proxy.h"
 #include "third_party/blink/public/platform/web_string.h"
 
-class GURL;
-
 namespace base {
+class UnguessableToken;
 class WaitableEvent;
 }
 
@@ -35,14 +34,13 @@ namespace IPC {
 class MessageFilter;
 class SyncChannel;
 class SyncMessageFilter;
-}
+}  // namespace IPC
 
 namespace v8 {
 class Extension;
-}
+}  // namespace v8
 
 namespace content {
-
 class RenderThreadObserver;
 class ResourceDispatcherDelegate;
 
@@ -65,8 +63,19 @@ class CONTENT_EXPORT RenderThread : virtual public ChildThread {
   // Called to add or remove a listener for a particular message routing ID.
   // These methods normally get delegated to a MessageRouter.
   virtual void AddRoute(int32_t routing_id, IPC::Listener* listener) = 0;
+  // Attach a task runner to run received IPC tasks on for the given routing ID.
+  // This must be called after the route has already been added via AddRoute(),
+  // but it is optional. The default main thread task runner would be used if
+  // this method is not called.
+  virtual void AttachTaskRunnerToRoute(
+      int32_t routing_id,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) = 0;
   virtual void RemoveRoute(int32_t routing_id) = 0;
   virtual int GenerateRoutingID() = 0;
+  virtual bool GenerateFrameRoutingID(
+      int32_t& routing_id,
+      base::UnguessableToken& frame_token,
+      base::UnguessableToken& devtools_frame_token) = 0;
 
   // These map to IPC::ChannelProxy methods.
   virtual void AddFilter(IPC::MessageFilter* filter) = 0;
@@ -85,11 +94,6 @@ class CONTENT_EXPORT RenderThread : virtual public ChildThread {
 
   // Post task to all worker threads. Returns number of workers.
   virtual int PostTaskToAllWebWorkers(base::RepeatingClosure closure) = 0;
-
-  // Resolve the proxy servers to use for a given url. On success true is
-  // returned and |proxy_list| is set to a PAC string containing a list of
-  // proxy servers.
-  virtual bool ResolveProxy(const GURL& url, std::string* proxy_list) = 0;
 
   // Gets the shutdown event for the process.
   virtual base::WaitableEvent* GetShutdownEvent() = 0;

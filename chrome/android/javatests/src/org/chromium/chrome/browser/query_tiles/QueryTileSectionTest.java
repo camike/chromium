@@ -4,20 +4,27 @@
 
 package org.chromium.chrome.browser.query_tiles;
 
-import static android.support.test.espresso.Espresso.onView;
-import static android.support.test.espresso.assertion.ViewAssertions.doesNotExist;
-import static android.support.test.espresso.assertion.ViewAssertions.matches;
-import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
-import static android.support.test.espresso.matcher.ViewMatchers.withId;
-import static android.support.test.espresso.matcher.ViewMatchers.withText;
+import static androidx.test.espresso.Espresso.onView;
+import static androidx.test.espresso.action.ViewActions.click;
+import static androidx.test.espresso.assertion.ViewAssertions.matches;
+import static androidx.test.espresso.matcher.ViewMatchers.isDisplayed;
+import static androidx.test.espresso.matcher.ViewMatchers.withId;
+import static androidx.test.espresso.matcher.ViewMatchers.withParent;
+import static androidx.test.espresso.matcher.ViewMatchers.withText;
 
 import static org.hamcrest.Matchers.not;
 
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.support.test.espresso.action.ViewActions;
-import android.support.test.filters.SmallTest;
+import static org.chromium.chrome.browser.query_tiles.ListMatchers.matchList;
+import static org.chromium.chrome.browser.query_tiles.TileMatchers.withChip;
+import static org.chromium.chrome.browser.query_tiles.ViewActions.scrollTo;
 
+import android.view.View;
+import android.widget.TextView;
+
+import androidx.test.filters.SmallTest;
+
+import org.hamcrest.Matcher;
+import org.hamcrest.Matchers;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -25,36 +32,31 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.Callback;
-import org.chromium.base.ContextUtils;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.DisabledTest;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
-import org.chromium.chrome.browser.omnibox.LocationBarLayout;
 import org.chromium.chrome.browser.omnibox.UrlBar;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
+import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.NewTabPageTestUtils;
 import org.chromium.chrome.test.util.OmniboxTestUtils;
 import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.query_tiles.QueryTile;
-import org.chromium.components.query_tiles.TileProvider;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
-
-import java.util.ArrayList;
-import java.util.List;
+import org.chromium.components.query_tiles.TestTileProvider;
+import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 /**
  * Tests for the query tiles section on new tab page.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
-@Features.EnableFeatures(ChromeFeatureList.QUERY_TILES)
+@Features.EnableFeatures({ChromeFeatureList.QUERY_TILES, ChromeFeatureList.QUERY_TILES_IN_NTP})
 public class QueryTileSectionTest {
     private static final String SEARCH_URL_PATTERN = "https://www.google.com/search?q=";
 
@@ -66,7 +68,7 @@ public class QueryTileSectionTest {
 
     @Before
     public void setUp() {
-        mTileProvider = new TestTileProvider();
+        mTileProvider = new TestTileProvider(2 /* levels */, 8 /* count */);
         TileProviderFactory.setTileProviderForTesting(mTileProvider);
         mActivityTestRule.startMainActivityOnBlankPage();
         mActivityTestRule.loadUrl(UrlConstants.NTP_URL);
@@ -80,27 +82,26 @@ public class QueryTileSectionTest {
     @Test
     @SmallTest
     public void testShowQueryTileSection() throws Exception {
-        // Verify top level tiles show up on init.
-        onView(withId(R.id.query_tiles)).check(matches(isDisplayed()));
-        onView(withText(mTileProvider.getTileAt(0).displayTitle)).check(matches(isDisplayed()));
+        matchList(withParent(withId(R.id.query_tiles)), mTileProvider.getChildrenOf());
         onView(withId(R.id.query_tiles_chip)).check(matches(not(isDisplayed())));
     }
 
     @Test
     @SmallTest
     public void testSearchWithLastLevelTile() throws Exception {
-        QueryTile tile = mTileProvider.getTileAt(0);
-        QueryTile subtile = mTileProvider.getTileAt(0, 0);
+        Matcher<View> recyclerViewMatcher = withParent(withId(R.id.query_tiles));
+        matchList(recyclerViewMatcher, mTileProvider.getChildrenOf());
 
         // Click on first level tile.
-        onView(withText(tile.displayTitle))
-                .check(matches(isDisplayed()))
-                .perform(ViewActions.click());
+        QueryTile tile = mTileProvider.getTileAt(0);
+        onView(recyclerViewMatcher).perform(scrollTo(0));
+        onView(withText(tile.displayTitle)).perform(click());
+        matchList(recyclerViewMatcher, mTileProvider.getChildrenOf(0));
 
         // Click on last level tile. We should navigate to SRP with the query text.
-        onView(withText(subtile.displayTitle))
-                .check(matches(isDisplayed()))
-                .perform(ViewActions.click());
+        onView(recyclerViewMatcher).perform(scrollTo(0));
+        QueryTile subtile = mTileProvider.getTileAt(0, 0);
+        onView(withText(subtile.displayTitle)).perform(click());
         waitForSearchResultsPage();
         Assert.assertTrue(getTabUrl().contains(subtile.queryText));
     }
@@ -108,17 +109,14 @@ public class QueryTileSectionTest {
     @Test
     @SmallTest
     public void testSearchWithFirstLevelTile() throws Exception {
-        QueryTile tile = mTileProvider.getTileAt(0);
-        QueryTile subtile = mTileProvider.getTileAt(0, 0);
-
         // Click first level tile. Chip should show up.
-        onView(withText(tile.displayTitle))
-                .check(matches(isDisplayed()))
-                .perform(ViewActions.click());
-        onView(withText(subtile.displayTitle)).check(matches(isDisplayed()));
+        QueryTile tile = mTileProvider.getTileAt(0);
+        onView(withText(tile.displayTitle)).perform(click());
+        matchList(withParent(withId(R.id.query_tiles)), mTileProvider.getChildrenOf(0));
 
         // Click on the chip. SRP should show up with first level query text.
-        onView(withId(R.id.query_tiles_chip)).perform(ViewActions.click());
+        onView(withId(R.id.query_tiles_chip)).check(matches(isDisplayed()));
+        onView(withId(R.id.query_tiles_chip)).perform(click());
         waitForSearchResultsPage();
         Assert.assertTrue(getTabUrl().contains(tile.queryText));
     }
@@ -126,133 +124,101 @@ public class QueryTileSectionTest {
     @Test
     @SmallTest
     public void testChipVisibilityOnFakeBox() throws Exception {
-        QueryTile tile = mTileProvider.getTileAt(0);
+        Matcher<View> recyclerViewMatcher = withParent(withId(R.id.query_tiles));
+        matchList(recyclerViewMatcher, mTileProvider.getChildrenOf());
 
         // No chip should be shown by default.
         onView(withId(R.id.query_tiles_chip)).check(matches(not(isDisplayed())));
 
         // Chip shows up when first level tile clicked.
-        onView(withText(tile.displayTitle))
-                .check(matches(isDisplayed()))
-                .perform(ViewActions.click());
-        onView(withId(R.id.query_tiles_chip)).check(matches(isDisplayed()));
+        QueryTile tile = mTileProvider.getTileAt(0);
+        onView(recyclerViewMatcher).perform(scrollTo(0));
+        onView(withText(tile.displayTitle)).perform(click());
+        onView(withId(R.id.query_tiles_chip)).check(matches(withChip(tile)));
 
         // Chip disappears on hitting clear button.
-        clearSelectedChip();
+        onView(withId(R.id.chip_cancel_btn)).perform(click());
         onView(withId(R.id.query_tiles_chip)).check(matches(not(isDisplayed())));
     }
 
     @Test
     @SmallTest
     public void testClearingSelectedTileBringsBackTopLevelTiles() throws Exception {
-        QueryTile tile = mTileProvider.getTileAt(0);
-        QueryTile subtile = mTileProvider.getTileAt(0, 0);
+        Matcher<View> recyclerViewMatcher = withParent(withId(R.id.query_tiles));
+        matchList(recyclerViewMatcher, mTileProvider.getChildrenOf());
 
         // Navigate to second level tile.
-        onView(withText(tile.displayTitle))
-                .check(matches(isDisplayed()))
-                .perform(ViewActions.click());
+        QueryTile tile = mTileProvider.getTileAt(0);
+        QueryTile subtile = mTileProvider.getTileAt(0, 0);
+        onView(recyclerViewMatcher).perform(scrollTo(0));
+        onView(withText(tile.displayTitle)).perform(click());
+        onView(withId(R.id.query_tiles_chip)).check(matches(withChip(tile)));
         onView(withText(subtile.displayTitle)).check(matches(isDisplayed()));
+        matchList(recyclerViewMatcher, mTileProvider.getChildrenOf(0));
 
         // Clear selected chip. We should be back at top level tiles.
-        clearSelectedChip();
+        onView(withId(R.id.chip_cancel_btn)).perform(click());
         onView(withId(R.id.query_tiles_chip)).check(matches(not(isDisplayed())));
-        onView(withText(tile.displayTitle)).check(matches(isDisplayed()));
-        onView(withText(subtile.displayTitle)).check(doesNotExist());
+        matchList(recyclerViewMatcher, mTileProvider.getChildrenOf());
     }
 
     @Test
     @SmallTest
     public void testFocusOmniboxWithZeroSuggest() throws Exception {
-        UrlBar urlBar = (UrlBar) mActivityTestRule.getActivity().findViewById(R.id.url_bar);
-        LocationBarLayout locationBar =
-                (LocationBarLayout) mActivityTestRule.getActivity().findViewById(R.id.location_bar);
-
-        onView(withId(R.id.query_tiles)).check(matches(isDisplayed()));
-        onView(withText(mTileProvider.getTileAt(0).displayTitle)).check(matches(isDisplayed()));
+        Matcher<View> recyclerViewMatcher = withParent(withId(R.id.query_tiles));
+        matchList(recyclerViewMatcher, mTileProvider.getChildrenOf());
+        onView(withId(R.id.query_tiles_chip)).check(matches(not(isDisplayed())));
 
         // Click on the search box. Omnibox should show up.
-        onView(withId(R.id.search_box_text)).perform(ViewActions.click());
+        onView(withId(R.id.search_box_text)).perform(click());
+        UrlBar urlBar = (UrlBar) mActivityTestRule.getActivity().findViewById(R.id.url_bar);
         OmniboxTestUtils.waitForFocusAndKeyboardActive(urlBar, true);
-        // OmniboxTestUtils.waitForOmniboxSuggestions(locationBar);
         Assert.assertTrue(urlBar.getText().toString().isEmpty());
     }
 
     @Test
     @SmallTest
-    @DisabledTest(message = "See https://crbug.com/1075471")
     public void testFocusOmniboxWithFirstLevelQueryText() throws Exception {
-        UrlBar urlBar = (UrlBar) mActivityTestRule.getActivity().findViewById(R.id.url_bar);
-        LocationBarLayout locationBar =
-                (LocationBarLayout) mActivityTestRule.getActivity().findViewById(R.id.location_bar);
-        QueryTile tile = mTileProvider.getTileAt(0);
-        QueryTile subtile = mTileProvider.getTileAt(0, 0);
+        Matcher<View> recyclerViewMatcher = withParent(withId(R.id.query_tiles));
+        matchList(recyclerViewMatcher, mTileProvider.getChildrenOf());
 
-        // Navigate to second level tiles.
-        onView(withText(tile.displayTitle))
-                .check(matches(isDisplayed()))
-                .perform(ViewActions.click());
-        onView(withText(subtile.displayTitle)).check(matches(isDisplayed()));
-        onView(withId(R.id.query_tiles_chip)).check(matches(isDisplayed()));
+        // No chip should be shown by default.
+        onView(withId(R.id.query_tiles_chip)).check(matches(not(isDisplayed())));
+
+        // Chip shows up when first level tile clicked.
+        QueryTile tile = mTileProvider.getTileAt(0);
+        onView(recyclerViewMatcher).perform(scrollTo(0));
+        onView(withText(tile.displayTitle)).perform(click());
+        onView(withId(R.id.query_tiles_chip)).check(matches(withChip(tile)));
+        matchList(recyclerViewMatcher, mTileProvider.getChildrenOf(0));
 
         // Click on the search box. Omnibox should show up with first level query text.
-        onView(withId(R.id.search_box_text)).perform(ViewActions.click());
+        clickSearchBox();
+        UrlBar urlBar = (UrlBar) mActivityTestRule.getActivity().findViewById(R.id.url_bar);
         OmniboxTestUtils.waitForFocusAndKeyboardActive(urlBar, true);
-        // OmniboxTestUtils.waitForOmniboxSuggestions(locationBar);
         Assert.assertTrue(urlBar.getText().toString().contains(tile.queryText));
     }
 
-    private void clearSelectedChip() {
-        onView(withId(R.id.chip_cancel_btn)).perform(ViewActions.click());
+    private void clickSearchBox() {
+        // Directly clicking search box using espresso doesn't work and seems to forward the click
+        // event to the chip cancel button instead.
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            TextView searchBox =
+                    (TextView) mActivityTestRule.getActivity().findViewById(R.id.search_box_text);
+            searchBox.performClick();
+        });
     }
 
     private String getTabUrl() {
-        return mActivityTestRule.getActivity().getActivityTab().getUrl().getValidSpecOrEmpty();
+        return ChromeTabUtils.getUrlOnUiThread(mActivityTestRule.getActivity().getActivityTab())
+                .getValidSpecOrEmpty();
     }
 
     private void waitForSearchResultsPage() {
-        CriteriaHelper.pollUiThread(
-                new Criteria("The SRP was never loaded. " + mTab.getUrl().getValidSpecOrEmpty()) {
-                    @Override
-                    public boolean isSatisfied() {
-                        return mTab.getUrl().getValidSpecOrEmpty().contains(SEARCH_URL_PATTERN);
-                    }
-                });
-    }
-
-    private static class TestTileProvider implements TileProvider {
-        private List<QueryTile> mTiles = new ArrayList<>();
-
-        private TestTileProvider() {
-            List<QueryTile> children = new ArrayList<>();
-            children.add(new QueryTile("tile1_1", "Tile 1_1", "Tile 1_1", "Tile_1_1_Query", null));
-            QueryTile tile = new QueryTile("1", "Tile 1", "Tile 1", "Tile_1_Query", children);
-            mTiles.add(tile);
-        }
-
-        @Override
-        public void getQueryTiles(Callback<List<QueryTile>> callback) {
-            callback.onResult(mTiles);
-        }
-
-        @Override
-        public void getVisuals(String id, Callback<List<Bitmap>> callback) {
-            List<Bitmap> bitmapList = new ArrayList<>();
-            Bitmap bitmap = BitmapFactory.decodeResource(
-                    ContextUtils.getApplicationContext().getResources(),
-                    R.drawable.chrome_sync_logo);
-            bitmapList.add(bitmap);
-            callback.onResult(bitmapList);
-        }
-
-        public QueryTile getTileAt(int index) {
-            assert index < mTiles.size();
-            return mTiles.get(index);
-        }
-
-        public QueryTile getTileAt(int index, int childIndex) {
-            assert index < mTiles.size() && childIndex < mTiles.get(index).children.size();
-            return mTiles.get(index).children.get(childIndex);
-        }
+        CriteriaHelper.pollUiThread(() -> {
+            Criteria.checkThat("The SRP was never loaded.",
+                    ChromeTabUtils.getUrlOnUiThread(mTab).getValidSpecOrEmpty(),
+                    Matchers.containsString(SEARCH_URL_PATTERN));
+        });
     }
 }

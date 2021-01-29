@@ -4,10 +4,6 @@
 
 package org.chromium.components.query_tiles.bridges;
 
-import android.graphics.Bitmap;
-
-import androidx.annotation.Nullable;
-
 import org.chromium.base.Callback;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
@@ -15,13 +11,12 @@ import org.chromium.base.annotations.NativeMethods;
 import org.chromium.components.query_tiles.QueryTile;
 import org.chromium.components.query_tiles.TileProvider;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Bridge to the native query tile service for the given {@link Profile}.
  */
-@JNINamespace("upboarding")
+@JNINamespace("query_tiles")
 public class TileProviderBridge implements TileProvider {
     private long mNativeTileProviderBridge;
 
@@ -40,37 +35,22 @@ public class TileProviderBridge implements TileProvider {
     }
 
     @Override
-    public void getQueryTiles(Callback<List<QueryTile>> callback) {
+    public void getQueryTiles(String tileId, Callback<List<QueryTile>> callback) {
         if (mNativeTileProviderBridge == 0) return;
-        TileProviderBridgeJni.get().getQueryTiles(mNativeTileProviderBridge, this, callback);
+        TileProviderBridgeJni.get().getQueryTiles(
+                mNativeTileProviderBridge, this, tileId, callback);
     }
 
     @Override
-    public void getVisuals(String id, Callback<List<Bitmap>> callback) {
+    public void onTileClicked(String tildId) {
         if (mNativeTileProviderBridge == 0) return;
-        TileProviderBridgeJni.get().getVisuals(mNativeTileProviderBridge, this, id, callback);
-    }
-
-    @CalledByNative
-    private static List<QueryTile> createList() {
-        return new ArrayList<>();
-    }
-
-    @CalledByNative
-    private static QueryTile createTileAndMaybeAddToList(@Nullable List<QueryTile> list,
-            String tileId, String displayTitle, String accessibilityText, String queryText,
-            List<QueryTile> children) {
-        QueryTile tile =
-                new QueryTile(tileId, displayTitle, accessibilityText, queryText, children);
-        if (list != null) list.add(tile);
-        return tile;
+        TileProviderBridgeJni.get().onTileClicked(mNativeTileProviderBridge, tildId);
     }
 
     @NativeMethods
     interface Natives {
-        void getQueryTiles(long nativeTileProviderBridge, TileProviderBridge caller,
+        void getQueryTiles(long nativeTileProviderBridge, TileProviderBridge caller, String tileId,
                 Callback<List<QueryTile>> callback);
-        void getVisuals(long nativeTileProviderBridge, TileProviderBridge caller, String id,
-                Callback<List<Bitmap>> callback);
+        void onTileClicked(long nativeTileProviderBridge, String tileId);
     }
 }

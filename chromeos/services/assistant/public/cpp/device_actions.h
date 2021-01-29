@@ -10,8 +10,8 @@
 
 #include "base/callback_forward.h"
 #include "base/component_export.h"
-#include "chromeos/services/assistant/public/mojom/assistant.mojom.h"
-#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "base/observer_list_types.h"
+#include "chromeos/services/assistant/public/cpp/assistant_service.h"
 
 namespace chromeos {
 namespace assistant {
@@ -22,7 +22,7 @@ class COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) AppListEventSubscriber
  public:
   // Called when the android app list changed.
   virtual void OnAndroidAppListRefreshed(
-      std::vector<mojom::AndroidAppInfoPtr> apps_info) = 0;
+      const std::vector<AndroidAppInfo>& apps_info) = 0;
 };
 
 // Main interface for |chromeos::assistant::Service| to execute device related
@@ -60,19 +60,19 @@ class COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) DeviceActions {
   virtual void SetSwitchAccessEnabled(bool enabled) = 0;
 
   // Open the Android app if the app is available. Returns true if app is
-  // successfully openned, false otherwise.
-  virtual bool OpenAndroidApp(mojom::AndroidAppInfoPtr app_info) = 0;
+  // successfully opened, false otherwise.
+  virtual bool OpenAndroidApp(const AndroidAppInfo& app_info) = 0;
 
   // Get the status of the Android app.
-  virtual mojom::AppStatus GetAndroidAppStatus(
-      const mojom::AndroidAppInfo& app_info) = 0;
+  virtual AppStatus GetAndroidAppStatus(const AndroidAppInfo& app_info) = 0;
 
   // Launch Android intent. The intent is encoded as a URI string.
   // See Intent.toUri().
   virtual void LaunchAndroidIntent(const std::string& intent) = 0;
 
-  // Register App list event subscriber.
-  virtual void AddAppListEventSubscriber(
+  // Register App list event subscriber. The subscriber will be immediately
+  // called with the current App list, and then for every change.
+  virtual void AddAndFireAppListEventSubscriber(
       AppListEventSubscriber* subscriber) = 0;
   virtual void RemoveAppListEventSubscriber(
       AppListEventSubscriber* subscriber) = 0;

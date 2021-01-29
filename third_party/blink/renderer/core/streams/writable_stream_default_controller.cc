@@ -16,7 +16,6 @@
 #include "third_party/blink/renderer/platform/bindings/to_v8.h"
 #include "third_party/blink/renderer/platform/bindings/v8_binding.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
@@ -166,7 +165,7 @@ void WritableStreamDefaultController::SetUp(
                                                             controller);
     }
 
-    void Trace(Visitor* visitor) override {
+    void Trace(Visitor* visitor) const override {
       visitor->Trace(stream_);
       PromiseHandler::Trace(visitor);
     }
@@ -195,7 +194,7 @@ void WritableStreamDefaultController::SetUp(
       WritableStream::DealWithRejection(GetScriptState(), stream_, r);
     }
 
-    void Trace(Visitor* visitor) override {
+    void Trace(Visitor* visitor) const override {
       visitor->Trace(stream_);
       PromiseHandler::Trace(visitor);
     }
@@ -392,7 +391,7 @@ void WritableStreamDefaultController::ErrorIfNeeded(
   }
 }
 
-void WritableStreamDefaultController::Trace(Visitor* visitor) {
+void WritableStreamDefaultController::Trace(Visitor* visitor) const {
   visitor->Trace(abort_algorithm_);
   visitor->Trace(close_algorithm_);
   visitor->Trace(controlled_writable_stream_);
@@ -511,7 +510,7 @@ void WritableStreamDefaultController::ProcessClose(
       WritableStream::FinishInFlightClose(GetScriptState(), stream_);
     }
 
-    void Trace(Visitor* visitor) override {
+    void Trace(Visitor* visitor) const override {
       visitor->Trace(stream_);
       PromiseHandler::Trace(visitor);
     }
@@ -533,7 +532,7 @@ void WritableStreamDefaultController::ProcessClose(
                                                    reason);
     }
 
-    void Trace(Visitor* visitor) override {
+    void Trace(Visitor* visitor) const override {
       visitor->Trace(stream_);
       PromiseHandler::Trace(visitor);
     }
@@ -608,7 +607,7 @@ void WritableStreamDefaultController::ProcessWrite(
                                                             controller_);
     }
 
-    void Trace(Visitor* visitor) override {
+    void Trace(Visitor* visitor) const override {
       visitor->Trace(stream_);
       visitor->Trace(controller_);
       PromiseHandler::Trace(visitor);
@@ -643,7 +642,7 @@ void WritableStreamDefaultController::ProcessWrite(
                                                    reason);
     }
 
-    void Trace(Visitor* visitor) override {
+    void Trace(Visitor* visitor) const override {
       visitor->Trace(stream_);
       visitor->Trace(controller_);
       PromiseHandler::Trace(visitor);

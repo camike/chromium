@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/ui/autofill/autofill_ui_type_util.h"
 
-#include "base/logging.h"
+#include "base/notreached.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -22,6 +22,8 @@ AutofillUIType AutofillUITypeFromAutofillType(autofill::ServerFieldType type) {
       return AutofillUITypeCreditCardExpMonth;
     case autofill::CREDIT_CARD_EXP_4_DIGIT_YEAR:
       return AutofillUITypeCreditCardExpYear;
+    case autofill::NAME_HONORIFIC_PREFIX:
+      return AutofillUITypeProfileHonorificPrefix;
     case autofill::NAME_FULL:
       return AutofillUITypeProfileFullName;
     case autofill::COMPANY_NAME:
@@ -66,6 +68,8 @@ autofill::ServerFieldType AutofillTypeFromAutofillUIType(AutofillUIType type) {
       return autofill::CREDIT_CARD_EXP_MONTH;
     case AutofillUITypeCreditCardExpYear:
       return autofill::CREDIT_CARD_EXP_4_DIGIT_YEAR;
+    case AutofillUITypeProfileHonorificPrefix:
+      return autofill::NAME_HONORIFIC_PREFIX;
     case AutofillUITypeProfileFullName:
       return autofill::NAME_FULL;
     case AutofillUITypeProfileCompanyName:

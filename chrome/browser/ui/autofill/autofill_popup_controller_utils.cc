@@ -30,6 +30,7 @@ const struct {
     {kJCBCard, IDR_AUTOFILL_CC_JCB},
     {kMasterCard, IDR_AUTOFILL_CC_MASTERCARD},
     {kMirCard, IDR_AUTOFILL_CC_MIR},
+    {kTroyCard, IDR_AUTOFILL_CC_TROY},
     {kUnionPay, IDR_AUTOFILL_CC_UNIONPAY},
     {kVisaCard, IDR_AUTOFILL_CC_VISA},
     {kGoogleIssuedCard, IDR_AUTOFILL_GOOGLE_ISSUED_CARD},
@@ -39,6 +40,7 @@ const struct {
     {"scanCreditCardIcon", IDR_ANDROID_AUTOFILL_CC_SCAN_NEW},
     {"settings", IDR_ANDROID_AUTOFILL_SETTINGS},
     {"create", IDR_ANDROID_AUTOFILL_CREATE},
+    {"offerTag", IDR_ANDROID_AUTOFILL_OFFER_TAG_GREEN},
 #endif  // OS_ANDROID
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
     {"googlePay", IDR_AUTOFILL_GOOGLE_PAY},

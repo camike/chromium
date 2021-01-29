@@ -14,9 +14,12 @@
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "base/component_export.h"
 #include "base/containers/flat_map.h"
+#include "base/containers/flat_set.h"
 #include "base/sequence_checker.h"
 #include "base/strings/string_piece.h"
+#include "components/ukm/ukm_entry_filter.h"
 #include "services/metrics/public/cpp/ukm_decode.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
@@ -37,7 +40,7 @@ namespace debug {
 class UkmDebugDataExtractor;
 }
 
-class UkmRecorderImpl : public UkmRecorder {
+class COMPONENT_EXPORT(UKM_RECORDER) UkmRecorderImpl : public UkmRecorder {
   using IsWebstoreExtensionCallback =
       base::RepeatingCallback<bool(base::StringPiece id)>;
 
@@ -79,6 +82,13 @@ class UkmRecorderImpl : public UkmRecorder {
   // Sets a callback for determining if an extension URL can be recorded.
   void SetIsWebstoreExtensionCallback(
       const IsWebstoreExtensionCallback& callback);
+
+  // Sets the UkmEntryFilter that will be applied to all subsequent entries
+  // reported via AddEntry(). Does not apply the filter to any entries that are
+  // already recorded.
+  //
+  // Currently only accommodates one entry filter.
+  void SetEntryFilter(std::unique_ptr<UkmEntryFilter> entry_filter);
 
   // Sets the sampling seed for testing purposes.
   void SetSamplingSeedForTesting(uint32_t seed) {
@@ -150,6 +160,7 @@ class UkmRecorderImpl : public UkmRecorder {
     uint64_t dropped_due_to_limits = 0;
     uint64_t dropped_due_to_sampling = 0;
     uint64_t dropped_due_to_whitelist = 0;
+    uint64_t dropped_due_to_filter = 0;
   };
 
   struct EventAggregate {
@@ -161,6 +172,7 @@ class UkmRecorderImpl : public UkmRecorder {
     uint64_t dropped_due_to_limits = 0;
     uint64_t dropped_due_to_sampling = 0;
     uint64_t dropped_due_to_whitelist = 0;
+    uint64_t dropped_due_to_filter = 0;
   };
 
   using MetricAggregateMap = std::map<uint64_t, MetricAggregate>;
@@ -169,6 +181,9 @@ class UkmRecorderImpl : public UkmRecorder {
   bool ShouldRecordUrl(SourceId source_id, const GURL& sanitized_url) const;
 
   void RecordSource(std::unique_ptr<UkmSource> source);
+
+  // Applies UkmEntryFilter if there is one registered.
+  bool ApplyEntryFilter(mojom::UkmEntry* entry);
 
   // Loads sampling configurations from field-trial information.
   void LoadExperimentSamplingInfo();
@@ -197,6 +212,9 @@ class UkmRecorderImpl : public UkmRecorder {
 
   // Callback for checking extension IDs.
   IsWebstoreExtensionCallback is_webstore_extension_callback_;
+
+  // Filter applied to AddEntry().
+  std::unique_ptr<UkmEntryFilter> entry_filter_;
 
   // Map from hashes to entry and metric names.
   ukm::builders::DecodeMap decode_map_;
@@ -255,6 +273,19 @@ class UkmRecorderImpl : public UkmRecorder {
     void Reset();
   };
   Recordings recordings_;
+
+  // The maximum number of Sources we'll keep in memory before discarding any
+  // new ones being added.
+  size_t max_sources_ = 500;
+
+  // The maximum number of Sources we can keep in memory at the end of the
+  // current reporting cycle that will stay accessible in the next reporting
+  // interval.
+  size_t max_kept_sources_ = 100;
+
+  // The maximum number of Entries we'll keep in memory before discarding any
+  // new ones being added.
+  size_t max_entries_ = 5000;
 
   SEQUENCE_CHECKER(sequence_checker_);
 };

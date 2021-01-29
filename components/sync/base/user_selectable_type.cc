@@ -8,10 +8,11 @@
 
 #include "base/notreached.h"
 #include "base/optional.h"
+#include "build/chromeos_buildflags.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/base/pref_names.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chromeos/constants/chromeos_features.h"
 #endif
 
@@ -35,6 +36,7 @@ constexpr char kExtensionsTypeName[] = "extensions";
 constexpr char kAppsTypeName[] = "apps";
 constexpr char kReadingListTypeName[] = "readingList";
 constexpr char kTabsTypeName[] = "tabs";
+constexpr char kWifiConfigurationsTypeName[] = "wifiConfigurations";
 
 UserSelectableTypeInfo GetUserSelectableTypeInfo(UserSelectableType type) {
   // UserSelectableTypeInfo::type_name is used in js code and shouldn't be
@@ -45,7 +47,7 @@ UserSelectableTypeInfo GetUserSelectableTypeInfo(UserSelectableType type) {
     case UserSelectableType::kPreferences: {
       ModelTypeSet model_types = {PREFERENCES, DICTIONARY, PRIORITY_PREFERENCES,
                                   SEARCH_ENGINES};
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
       // SplitSettingsSync makes Printers a separate OS setting.
       if (!chromeos::features::IsSplitSettingsSyncEnabled())
         model_types.Put(PRINTERS);
@@ -58,20 +60,19 @@ UserSelectableTypeInfo GetUserSelectableTypeInfo(UserSelectableType type) {
       return {kAutofillTypeName,
               AUTOFILL,
               {AUTOFILL, AUTOFILL_PROFILE, AUTOFILL_WALLET_DATA,
-               AUTOFILL_WALLET_METADATA}};
+               AUTOFILL_WALLET_METADATA, AUTOFILL_WALLET_OFFER}};
     case UserSelectableType::kThemes:
       return {kThemesTypeName, THEMES, {THEMES}};
     case UserSelectableType::kHistory:
       return {kTypedUrlsTypeName,
               TYPED_URLS,
               {TYPED_URLS, HISTORY_DELETE_DIRECTIVES, SESSIONS,
-               DEPRECATED_FAVICON_IMAGES, DEPRECATED_FAVICON_TRACKING,
                USER_EVENTS}};
     case UserSelectableType::kExtensions:
       return {
           kExtensionsTypeName, EXTENSIONS, {EXTENSIONS, EXTENSION_SETTINGS}};
     case UserSelectableType::kApps: {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
       // SplitSettingsSync moves apps to Chrome OS settings.
       if (chromeos::features::IsSplitSettingsSyncEnabled()) {
         return {kAppsTypeName, UNSPECIFIED};
@@ -87,19 +88,27 @@ UserSelectableTypeInfo GetUserSelectableTypeInfo(UserSelectableType type) {
     case UserSelectableType::kReadingList:
       return {kReadingListTypeName, READING_LIST, {READING_LIST}};
     case UserSelectableType::kTabs:
-      return {kTabsTypeName,
-              PROXY_TABS,
-              {PROXY_TABS, SESSIONS, DEPRECATED_FAVICON_IMAGES,
-               DEPRECATED_FAVICON_TRACKING, SEND_TAB_TO_SELF}};
+      return {
+          kTabsTypeName, PROXY_TABS, {PROXY_TABS, SESSIONS, SEND_TAB_TO_SELF}};
+    case UserSelectableType::kWifiConfigurations: {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+      // SplitSettingsSync moves Wi-Fi configurations to Chrome OS settings.
+      if (chromeos::features::IsSplitSettingsSyncEnabled())
+        return {kWifiConfigurationsTypeName, UNSPECIFIED};
+#endif
+      return {kWifiConfigurationsTypeName,
+              WIFI_CONFIGURATIONS,
+              {WIFI_CONFIGURATIONS}};
+    }
   }
   NOTREACHED();
   return {nullptr, UNSPECIFIED};
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 constexpr char kOsAppsTypeName[] = "osApps";
 constexpr char kOsPreferencesTypeName[] = "osPreferences";
-constexpr char kWifiConfigurationsTypeName[] = "wifiConfigurations";
+constexpr char kOsWifiConfigurationsTypeName[] = "osWifiConfigurations";
 
 UserSelectableTypeInfo GetUserSelectableOsTypeInfo(UserSelectableOsType type) {
   // UserSelectableTypeInfo::type_name is used in js code and shouldn't be
@@ -113,13 +122,13 @@ UserSelectableTypeInfo GetUserSelectableOsTypeInfo(UserSelectableOsType type) {
       return {kOsPreferencesTypeName,
               OS_PREFERENCES,
               {OS_PREFERENCES, OS_PRIORITY_PREFERENCES, PRINTERS}};
-    case UserSelectableOsType::kWifiConfigurations:
-      return {kWifiConfigurationsTypeName,
+    case UserSelectableOsType::kOsWifiConfigurations:
+      return {kOsWifiConfigurationsTypeName,
               WIFI_CONFIGURATIONS,
               {WIFI_CONFIGURATIONS}};
   }
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace
 
@@ -159,6 +168,9 @@ base::Optional<UserSelectableType> GetUserSelectableTypeFromString(
   if (type == kTabsTypeName) {
     return UserSelectableType::kTabs;
   }
+  if (type == kWifiConfigurationsTypeName) {
+    return UserSelectableType::kWifiConfigurations;
+  }
   return base::nullopt;
 }
 
@@ -181,14 +193,7 @@ ModelType UserSelectableTypeToCanonicalModelType(UserSelectableType type) {
   return GetUserSelectableTypeInfo(type).canonical_model_type;
 }
 
-int UserSelectableTypeToHistogramInt(UserSelectableType type) {
-  // TODO(crbug.com/1007293): Use ModelTypeHistogramValue instead of casting to
-  // int.
-  return static_cast<int>(
-      ModelTypeHistogramValue(UserSelectableTypeToCanonicalModelType(type)));
-}
-
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 const char* GetUserSelectableOsTypeName(UserSelectableOsType type) {
   return GetUserSelectableOsTypeInfo(type).type_name;
 }
@@ -201,17 +206,21 @@ base::Optional<UserSelectableOsType> GetUserSelectableOsTypeFromString(
   if (type == kOsPreferencesTypeName) {
     return UserSelectableOsType::kOsPreferences;
   }
-  if (type == kWifiConfigurationsTypeName) {
-    return UserSelectableOsType::kWifiConfigurations;
+  if (type == kOsWifiConfigurationsTypeName) {
+    return UserSelectableOsType::kOsWifiConfigurations;
   }
 
   // Some pref types migrated from browser prefs to OS prefs. Map the browser
   // type name to the OS type so that enterprise policy SyncTypesListDisabled
   // still applies to the migrated names during SplitSettingsSync roll-out.
-  // TODO(https://crbug.com/1059309): Rename "osApps" to "apps" after
-  // SplitSettingsSync is the default, and remove the mapping for "preferences".
+  // TODO(https://crbug.com/1059309): Rename "osApps" to "apps" and
+  // "osWifiConfigurations" to "wifiConfigurations" after SplitSettingsSync is
+  // the default, and remove the mapping for "preferences".
   if (type == kAppsTypeName) {
     return UserSelectableOsType::kOsApps;
+  }
+  if (type == kWifiConfigurationsTypeName) {
+    return UserSelectableOsType::kOsWifiConfigurations;
   }
   if (type == kPreferencesTypeName) {
     return UserSelectableOsType::kOsPreferences;
@@ -226,6 +235,6 @@ ModelTypeSet UserSelectableOsTypeToAllModelTypes(UserSelectableOsType type) {
 ModelType UserSelectableOsTypeToCanonicalModelType(UserSelectableOsType type) {
   return GetUserSelectableOsTypeInfo(type).canonical_model_type;
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace syncer

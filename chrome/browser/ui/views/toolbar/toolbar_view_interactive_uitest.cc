@@ -12,6 +12,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
@@ -38,6 +39,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "content/public/test/browser_test.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/test/widget_test.h"
 #include "ui/views/view.h"
@@ -151,7 +153,8 @@ void ToolbarViewInteractiveUITest::SetUpOnMainThread() {
 }
 
 // TODO(pkasting): https://crbug.com/939621 Fails on Mac.
-#if defined(OS_MACOSX)
+// Also flaky on linux-chromeos-chrome crbug.com/1076875.
+#if defined(OS_MAC) || defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_TestAppMenuOpensOnDrag DISABLED_TestAppMenuOpensOnDrag
 #else
 #define MAYBE_TestAppMenuOpensOnDrag TestAppMenuOpensOnDrag
@@ -166,11 +169,13 @@ IN_PROC_BROWSER_TEST_F(ToolbarViewInteractiveUITest,
   // Set up observers that will drive the test along.
   AppMenuButton* const app_menu_button = GetAppMenuButton();
   EXPECT_FALSE(app_menu_button->IsMenuShowing());
-  ScopedObserver<views::Widget, views::WidgetObserver> widget_observer(this);
-  widget_observer.Add(
+  base::ScopedObservation<views::Widget, views::WidgetObserver>
+      widget_observation(this);
+  widget_observation.Observe(
       BrowserView::GetBrowserViewForBrowser(browser())->GetWidget());
-  ScopedObserver<AppMenuButton, AppMenuButtonObserver> button_observer(this);
-  button_observer.Add(app_menu_button);
+  base::ScopedObservation<AppMenuButton, AppMenuButtonObserver>
+      button_observation(this);
+  button_observation.Observe(app_menu_button);
 
   // Set up the task runner to use for posting drag actions.
   // TODO(devlin): This is basically ViewEventTestBase::GetDragTaskRunner().  In
@@ -193,7 +198,7 @@ IN_PROC_BROWSER_TEST_F(ToolbarViewInteractiveUITest,
 
   // Click on the toolbar action.
   BrowserActionsContainer* const browser_actions = GetBrowserActions();
-  ASSERT_EQ(1u, browser_actions->VisibleBrowserActions());
+  ASSERT_EQ(1u, browser_actions->GetVisibleBrowserActions());
   ToolbarActionView* toolbar_action =
       browser_actions->GetToolbarActionViewAt(0);
   ASSERT_TRUE(toolbar_action);
@@ -325,16 +330,14 @@ IN_PROC_BROWSER_TEST_F(ToolbarViewTest, BackButtonUpdate) {
 
 class ToolbarViewWithExtensionsToolbarMenuTest : public ToolbarViewTest {
  public:
-  ToolbarViewWithExtensionsToolbarMenuTest() = default;
+  ToolbarViewWithExtensionsToolbarMenuTest() {
+    scoped_feature_list_.InitAndEnableFeature(features::kExtensionsToolbarMenu);
+  }
+
   ToolbarViewWithExtensionsToolbarMenuTest(
       const ToolbarViewWithExtensionsToolbarMenuTest&) = delete;
   ToolbarViewWithExtensionsToolbarMenuTest& operator=(
       const ToolbarViewWithExtensionsToolbarMenuTest&) = delete;
-
-  void SetUp() override {
-    scoped_feature_list_.InitAndEnableFeature(features::kExtensionsToolbarMenu);
-    ToolbarViewTest::SetUp();
-  }
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
@@ -350,16 +353,35 @@ IN_PROC_BROWSER_TEST_F(ToolbarViewWithExtensionsToolbarMenuTest,
   EXPECT_NE(nullptr, extensions_container);
 }
 
+class GuestToolbarViewWithExtensionsToolbarMenuTest
+    : public ToolbarViewWithExtensionsToolbarMenuTest,
+      public ::testing::WithParamInterface<bool> {
+ public:
+  GuestToolbarViewWithExtensionsToolbarMenuTest() : is_ephemeral_(GetParam()) {
+    // Update for platforms which don't support ephemeral Guest profiles.
+    if (!TestingProfile::SetScopedFeatureListForEphemeralGuestProfiles(
+            scoped_feature_list_, is_ephemeral_)) {
+      is_ephemeral_ = false;
+    }
+  }
+
+ protected:
+  bool is_ephemeral_;
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
 // TODO(crbug.com/991596): Setup test profiles properly for CrOS.
-#if defined(OS_CHROMEOS)
-#define MAYBE_ToolbarForGuestHasNoExtensionsToolbarContainer \
-  DISABLED_ToolbarForGuestHasNoExtensionsToolbarContainer
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#define MAYBE_ExtensionsToolbarContainerForGuest \
+  DISABLED_ExtensionsToolbarContainerForGuest
 #else
-#define MAYBE_ToolbarForGuestHasNoExtensionsToolbarContainer \
-  ToolbarForGuestHasNoExtensionsToolbarContainer
+#define MAYBE_ExtensionsToolbarContainerForGuest \
+  ExtensionsToolbarContainerForGuest
 #endif
-IN_PROC_BROWSER_TEST_F(ToolbarViewWithExtensionsToolbarMenuTest,
-                       MAYBE_ToolbarForGuestHasNoExtensionsToolbarContainer) {
+IN_PROC_BROWSER_TEST_P(GuestToolbarViewWithExtensionsToolbarMenuTest,
+                       MAYBE_ExtensionsToolbarContainerForGuest) {
   // Verify guest browser does not have an extensions toolbar container.
   profiles::SwitchToGuestProfile(ProfileManager::CreateCallback());
   ui_test_utils::WaitForBrowserToOpen();
@@ -372,5 +394,13 @@ IN_PROC_BROWSER_TEST_F(ToolbarViewWithExtensionsToolbarMenuTest,
       BrowserView::GetBrowserViewForBrowser(target_browser)
           ->toolbar()
           ->extensions_container();
-  EXPECT_EQ(nullptr, extensions_container);
+  // Ephemeral Guest profiles support extensions and OTR Guest profiles don't.
+  if (is_ephemeral_)
+    EXPECT_NE(nullptr, extensions_container);
+  else
+    EXPECT_EQ(nullptr, extensions_container);
 }
+
+INSTANTIATE_TEST_SUITE_P(AllGuestProfileTypes,
+                         GuestToolbarViewWithExtensionsToolbarMenuTest,
+                         /*is_ephemeral=*/testing::Bool());

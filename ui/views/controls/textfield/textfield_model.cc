@@ -7,12 +7,13 @@
 #include <algorithm>
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/current_thread.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/gfx/range/range.h"
@@ -345,7 +346,7 @@ gfx::Range GetFirstEmphasizedRange(const ui::CompositionText& composition) {
 // the default kill ring size of 1 (i.e. a single buffer) is assumed.
 base::string16* GetKillBuffer() {
   static base::NoDestructor<base::string16> kill_buffer;
-  DCHECK(base::MessageLoopCurrentForUI::IsSet());
+  DCHECK(base::CurrentUIThread::IsSet());
   return kill_buffer.get();
 }
 
@@ -362,7 +363,7 @@ void SelectRangeInCompositionText(gfx::RenderText* render_text,
   DCHECK(range.IsValid());
   uint32_t start = range.GetMin();
   uint32_t end = range.GetMax();
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Swap |start| and |end| so that GetCaretBounds() can always return the same
   // value during conversion.
   // TODO(yusukes): Check if this works for other platforms. If it is, use this
@@ -621,9 +622,14 @@ bool TextfieldModel::Copy() {
 bool TextfieldModel::Paste() {
   base::string16 text;
   ui::Clipboard::GetForCurrentThread()->ReadText(
-      ui::ClipboardBuffer::kCopyPaste, &text);
+      ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr, &text);
   if (text.empty())
     return false;
+
+  if (render_text()->multiline()) {
+    InsertTextInternal(text, false);
+    return true;
+  }
 
   // Leading/trailing whitespace is often selected accidentally, and is rarely
   // critical to include (e.g. when pasting into a find bar).  Trim it.  By
@@ -753,6 +759,17 @@ void TextfieldModel::SetCompositionText(
   }
 }
 
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+bool TextfieldModel::SetAutocorrectRange(const gfx::Range& range) {
+  // TODO(crbug.com/1108170): Add an underline to |range|.
+  if (range.GetMax() > render_text()->text().length()) {
+    return false;
+  }
+  autocorrect_range_ = range;
+  return true;
+}
+#endif
+
 void TextfieldModel::SetCompositionFromExistingText(const gfx::Range& range) {
   if (range.is_empty() || !gfx::Range(0, text().length()).Contains(range)) {
     ClearComposition();
@@ -763,10 +780,11 @@ void TextfieldModel::SetCompositionFromExistingText(const gfx::Range& range) {
   render_text_->SetCompositionRange(range);
 }
 
-void TextfieldModel::ConfirmCompositionText() {
+uint32_t TextfieldModel::ConfirmCompositionText() {
   DCHECK(HasCompositionText());
   base::string16 composition =
       text().substr(composition_range_.start(), composition_range_.length());
+  uint32_t composition_length = composition_range_.length();
   // TODO(oshima): current behavior on ChromeOS is a bit weird and not
   // sure exactly how this should work. Find out and fix if necessary.
   AddOrMergeEditHistory(std::make_unique<internal::InsertEdit>(
@@ -775,6 +793,7 @@ void TextfieldModel::ConfirmCompositionText() {
   ClearComposition();
   if (delegate_)
     delegate_->OnCompositionTextConfirmedOrCleared();
+  return composition_length;
 }
 
 void TextfieldModel::CancelCompositionText() {

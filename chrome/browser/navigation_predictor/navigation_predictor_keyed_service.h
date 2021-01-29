@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_NAVIGATION_PREDICTOR_NAVIGATION_PREDICTOR_KEYED_SERVICE_H_
 #define CHROME_BROWSER_NAVIGATION_PREDICTOR_NAVIGATION_PREDICTOR_KEYED_SERVICE_H_
 
+#include <memory>
 #include <vector>
 
 #include "base/macros.h"
@@ -19,6 +20,8 @@ namespace content {
 class BrowserContext;
 class WebContents;
 }  // namespace content
+
+class NavigationPredictorRendererWarmupClient;
 
 // Keyed service that can be used to receive notifications about the URLs for
 // the next predicted navigation.
@@ -37,7 +40,7 @@ class NavigationPredictorKeyedService : public KeyedService {
   // Stores the next set of URLs that the user is expected to navigate to.
   class Prediction {
    public:
-    Prediction(const content::WebContents* web_contents,
+    Prediction(content::WebContents* web_contents,
                const base::Optional<GURL>& source_document_url,
                const base::Optional<std::vector<std::string>>&
                    external_app_packages_name,
@@ -53,13 +56,13 @@ class NavigationPredictorKeyedService : public KeyedService {
     const std::vector<GURL>& sorted_predicted_urls() const;
 
     // Null if the prediction source is kExternalAndroidApp.
-    const content::WebContents* web_contents() const;
+    content::WebContents* web_contents() const;
 
    private:
     // The WebContents from where the navigation may happen. Do not use this
     // pointer outside the observer's call stack unless its destruction is also
     // observed.
-    const content::WebContents* web_contents_;
+    content::WebContents* web_contents_;
 
     // Current URL of the document from where the navigtion may happen.
     base::Optional<GURL> source_document_url_;
@@ -110,7 +113,7 @@ class NavigationPredictorKeyedService : public KeyedService {
   SearchEnginePreconnector* search_engine_preconnector();
 
   // |document_url| may be invalid. Called by navigation predictor.
-  void OnPredictionUpdated(const content::WebContents* web_contents,
+  void OnPredictionUpdated(content::WebContents* web_contents,
                            const GURL& document_url,
                            PredictionSource prediction_source,
                            const std::vector<GURL>& sorted_predicted_urls);
@@ -133,6 +136,25 @@ class NavigationPredictorKeyedService : public KeyedService {
   // Removes |observer| as the observer for next predicted navigation.
   void RemoveObserver(Observer* observer);
 
+  // Notifies |this| that the visibility of web contents tracked by |client| has
+  // changed or if user starts a new navigation corresponding to |web_contents|.
+  // Might be called more than once with the same |is_in_foreground| and
+  // |web_contents| in case user starts a new navigation with same
+  // |web_contents|.
+  void OnWebContentsVisibilityChanged(content::WebContents* web_contents,
+                                      bool is_in_foreground);
+
+  // Notifies |this| that the web contents tracked by |client| has destroyed.
+  void OnWebContentsDestroyed(content::WebContents* web_contents);
+
+  // Overrides the tick clock used by |this| for testing.
+  void SetTickClockForTesting(const base::TickClock* tick_clock);
+
+  // Returns true if the browser app is likely to be in foreground and being
+  // interacted by the user. This is heuristically computed by observing loading
+  // and visibility of web contents.
+  bool IsBrowserAppLikelyInForeground() const;
+
  private:
   // List of observers are currently registered to receive notifications for the
   // next predicted navigations.
@@ -143,6 +165,16 @@ class NavigationPredictorKeyedService : public KeyedService {
 
   // Manages preconnecting to the user's default search engine.
   SearchEnginePreconnector search_engine_preconnector_;
+
+  // Manages warming up a spare renderer based on predictions.
+  std::unique_ptr<NavigationPredictorRendererWarmupClient>
+      renderer_warmup_client_;
+
+  std::unordered_set<content::WebContents*> visible_web_contents_;
+
+  base::TimeTicks last_web_contents_state_change_time_;
+
+  const base::TickClock* tick_clock_;
 
   DISALLOW_COPY_AND_ASSIGN(NavigationPredictorKeyedService);
 };

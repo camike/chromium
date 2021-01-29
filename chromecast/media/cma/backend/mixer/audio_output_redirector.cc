@@ -16,6 +16,7 @@
 #include "base/strings/pattern.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "chromecast/media/audio/audio_fader.h"
+#include "chromecast/media/audio/audio_log.h"
 #include "chromecast/media/audio/mixer_service/conversions.h"
 #include "chromecast/media/audio/mixer_service/mixer_service.pb.h"
 #include "chromecast/media/audio/mixer_service/mixer_socket.h"
@@ -50,6 +51,10 @@ constexpr int kAudioMessageHeaderSize =
   return DecoderConfigAdapter::ToMediaChannelLayout(layout);
 }
 
+enum MessageTypes : int {
+  kStreamConfig = 1,
+};
+
 }  // namespace
 
 class AudioOutputRedirector::RedirectionConnection
@@ -57,7 +62,7 @@ class AudioOutputRedirector::RedirectionConnection
  public:
   explicit RedirectionConnection(
       std::unique_ptr<mixer_service::MixerSocket> socket,
-      scoped_refptr<base::SequencedTaskRunner> mixer_task_runner,
+      scoped_refptr<base::TaskRunner> mixer_task_runner,
       base::WeakPtr<AudioOutputRedirector> redirector)
       : socket_(std::move(socket)),
         mixer_task_runner_(std::move(mixer_task_runner)),
@@ -81,7 +86,7 @@ class AudioOutputRedirector::RedirectionConnection
     config->set_sample_rate(sample_rate);
     config->set_num_channels(num_channels);
     config->set_data_size(data_size);
-    socket_->SendProto(message);
+    socket_->SendProto(kStreamConfig, message);
 
     sent_stream_config_ = true;
   }
@@ -130,7 +135,7 @@ class AudioOutputRedirector::RedirectionConnection
   }
 
   const std::unique_ptr<mixer_service::MixerSocket> socket_;
-  const scoped_refptr<base::SequencedTaskRunner> mixer_task_runner_;
+  const scoped_refptr<base::TaskRunner> mixer_task_runner_;
   const base::WeakPtr<AudioOutputRedirector> redirector_;
 
   bool error_ = false;
@@ -183,8 +188,9 @@ AudioOutputRedirector::InputImpl::InputImpl(
   DCHECK(mixer_input_);
 
   if (mixer_input_->num_channels() != num_output_channels_) {
-    LOG(INFO) << "Remixing channels for " << mixer_input_->source() << " from "
-              << mixer_input_->num_channels() << " to " << num_output_channels_;
+    AUDIO_LOG(INFO) << "Remixing channels for " << mixer_input_->source()
+                    << " from " << mixer_input_->num_channels() << " to "
+                    << num_output_channels_;
     channel_mixer_ = std::make_unique<::media::ChannelMixer>(
         mixer::CreateAudioParametersForChannelMixer(
             mixer_input_->channel_layout(), mixer_input_->num_channels()),

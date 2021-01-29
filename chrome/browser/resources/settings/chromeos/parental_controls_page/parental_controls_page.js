@@ -30,11 +30,23 @@ Polymer({
         return navigator.onLine;
       }
     },
+
+    /**
+     * True if redesign of account management flows is enabled.
+     * @private
+     */
+    isAccountManagementFlowsV2Enabled_: {
+      type: Boolean,
+      value() {
+        return loadTimeData.getBoolean('isAccountManagementFlowsV2Enabled');
+      },
+      readOnly: true,
+    },
   },
 
   /** @override */
   created() {
-    this.browserProxy_ = parental_controls.BrowserProxyImpl.getInstance();
+    this.browserProxy_ = parental_controls.ParentalControlsBrowserProxyImpl.getInstance();
   },
 
   /** @override */
@@ -42,6 +54,14 @@ Polymer({
     // Set up online/offline listeners.
     window.addEventListener('offline', this.onOffline_.bind(this));
     window.addEventListener('online', this.onOnline_.bind(this));
+  },
+
+  /**
+   * Returns the setup parental controls CrButtonElement.
+   * @return {?CrButtonElement}
+   */
+  getSetupButton() {
+    return /** @type {?CrButtonElement} */ (this.$$('#setupButton'));
   },
 
   /**
@@ -71,6 +91,16 @@ Polymer({
     } else {
       return this.i18n('parentalControlsPageConnectToInternetLabel');
     }
+  },
+
+  /**
+   * @return {string}
+   * @private
+   */
+  getLabelClassList_() {
+    return this.isAccountManagementFlowsV2Enabled_ ?
+        'middle settings-box-text' :
+        'start settings-box-text';
   },
 
   /** @private */

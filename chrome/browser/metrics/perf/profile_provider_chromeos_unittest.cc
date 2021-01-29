@@ -12,8 +12,7 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/task/post_task.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/time/time.h"
@@ -110,9 +109,9 @@ class TestProfileProvider : public ProfileProvider {
 
     collectors_.clear();
     collectors_.push_back(std::make_unique<MetricProvider>(
-        std::make_unique<TestMetricCollector<100>>(test_params)));
+        std::make_unique<TestMetricCollector<100>>(test_params), nullptr));
     collectors_.push_back(std::make_unique<MetricProvider>(
-        std::make_unique<TestMetricCollector<200>>(test_params)));
+        std::make_unique<TestMetricCollector<200>>(test_params), nullptr));
   }
 
   using ProfileProvider::collectors_;
@@ -404,9 +403,8 @@ class ProfileProviderJankinessTest : public ProfileProviderTest {
 TEST_F(ProfileProviderJankinessTest, JankMonitor_UI) {
   EXPECT_TRUE(profile_provider_->jank_monitor());
   // Post a janky task to the UI thread.
-  base::PostTask(
-      FROM_HERE, {content::BrowserThread::UI},
-      base::BindLambdaForTesting([&]() {
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindLambdaForTesting([&]() {
         // This is a janky task that runs for 2 seconds.
         task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(2));
       }));
@@ -423,9 +421,8 @@ TEST_F(ProfileProviderJankinessTest, JankMonitor_UI) {
 TEST_F(ProfileProviderJankinessTest, JankMonitor_IO) {
   EXPECT_TRUE(profile_provider_->jank_monitor());
   // Post a janky task to the IO thread.
-  base::PostTask(
-      FROM_HERE, {content::BrowserThread::IO},
-      base::BindLambdaForTesting([&]() {
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindLambdaForTesting([&]() {
         // This is a janky task that runs for 2 seconds.
         task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(2));
       }));

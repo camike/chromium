@@ -6,9 +6,10 @@
 #define ASH_AMBIENT_UI_AMBIENT_ASSISTANT_CONTAINER_VIEW_H_
 
 #include "ash/assistant/model/assistant_ui_model_observer.h"
-#include "ash/public/cpp/assistant/controller/assistant_ui_controller.h"
+#include "ash/public/cpp/assistant/controller/assistant_controller.h"
+#include "ash/public/cpp/assistant/controller/assistant_controller_observer.h"
 #include "base/macros.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "ui/views/view.h"
 
 namespace views {
@@ -23,13 +24,16 @@ class AssistantViewDelegate;
 class AmbientAssistantDialogPlate;
 
 class AmbientAssistantContainerView : public views::View,
+                                      public AssistantControllerObserver,
                                       public AssistantUiModelObserver {
  public:
+  METADATA_HEADER(AmbientAssistantContainerView);
+
   AmbientAssistantContainerView();
   ~AmbientAssistantContainerView() override;
 
-  // views::View:
-  const char* GetClassName() const override;
+  // AssistantControllerObserver:
+  void OnAssistantControllerDestroying() override;
 
   // AssistantUiModelObserver:
   void OnUiVisibilityChanged(
@@ -50,13 +54,8 @@ class AmbientAssistantContainerView : public views::View,
   views::ImageView* avatar_view_ = nullptr;
   views::Label* greeting_label_ = nullptr;
 
-  ScopedObserver<AssistantUiController,
-                 AssistantUiModelObserver,
-                 &AssistantUiController::AddModelObserver,
-                 &AssistantUiController::RemoveModelObserver>
-      assistant_ui_model_observer_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(AmbientAssistantContainerView);
+  base::ScopedObservation<AssistantController, AssistantControllerObserver>
+      assistant_controller_observation_{this};
 };
 
 }  // namespace ash

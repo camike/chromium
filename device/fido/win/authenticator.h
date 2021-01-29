@@ -52,17 +52,18 @@ class COMPONENT_EXPORT(DEVICE_FIDO) WinWebAuthnApiAuthenticator
   void MakeCredential(CtapMakeCredentialRequest request,
                       MakeCredentialCallback callback) override;
   void GetAssertion(CtapGetAssertionRequest request,
+                    CtapGetAssertionOptions options,
                     GetAssertionCallback callback) override;
   void GetTouch(base::OnceClosure callback) override;
   void Cancel() override;
   std::string GetId() const override;
-  base::string16 GetDisplayName() const override;
   bool IsInPairingMode() const override;
   bool IsPaired() const override;
   bool RequiresBlePairingPin() const override;
   // SupportsCredProtectExtension returns whether the native API supports the
   // credProtect CTAP extension.
   bool SupportsCredProtectExtension() const override;
+  bool SupportsHMACSecretExtension() const override;
   const base::Optional<AuthenticatorSupportedOptions>& Options() const override;
   base::Optional<FidoTransportProtocol> AuthenticatorTransport() const override;
   bool IsWinNativeApiAuthenticator() const override;

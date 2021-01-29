@@ -4,7 +4,7 @@ Initial state:
 Application
   Manifest (selected)
   Service Workers
-  Clear storage
+  Storage
 Storage
   Local Storage
     http://127.0.0.1:8000
@@ -14,6 +14,7 @@ Storage
   Web SQL
   Cookies
     http://127.0.0.1:8000
+  Trust Tokens
 Cache
   Cache Storage
   Application Cache
@@ -26,12 +27,15 @@ Background Services
   Push Messaging
 Frames
   top
+    Scripts
+      json-value.js
+    inspected-page.html
 Found: true
 Database created state:
 Application
   Manifest
   Service Workers
-  Clear storage
+  Storage
 Storage
   Local Storage
     http://127.0.0.1:8000
@@ -42,6 +46,7 @@ Storage
     inspector-test-db (selected)
   Cookies
     http://127.0.0.1:8000
+  Trust Tokens
 Cache
   Cache Storage
   Application Cache
@@ -54,11 +59,14 @@ Background Services
   Push Messaging
 Frames
   top
+    Scripts
+      json-value.js
+    inspected-page.html
 Table added:
 Application
   Manifest
   Service Workers
-  Clear storage
+  Storage
 Storage
   Local Storage
     http://127.0.0.1:8000
@@ -70,6 +78,7 @@ Storage
       table1
   Cookies
     http://127.0.0.1:8000
+  Trust Tokens
 Cache
   Cache Storage
   Application Cache
@@ -82,4 +91,7 @@ Background Services
   Push Messaging
 Frames
   top
+    Scripts
+      json-value.js
+    inspected-page.html
 

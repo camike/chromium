@@ -13,9 +13,9 @@ import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.components.optimization_guide.OptimizationGuideDecision;
 import org.chromium.components.optimization_guide.proto.HintsProto.OptimizationType;
-import org.chromium.components.optimization_guide.proto.ModelsProto.OptimizationTarget;
 import org.chromium.components.optimization_guide.proto.PerformanceHintsMetadataProto.PerformanceHintsMetadata;
 import org.chromium.content_public.browser.NavigationHandle;
+import org.chromium.url.GURL;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -41,6 +41,7 @@ public class OptimizationGuideBridge {
      * Initializes the C++ side of this class, using the Optimization Guide Decider for the last
      * used Profile.
      */
+    @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)
     public OptimizationGuideBridge() {
         ThreadUtils.assertOnUiThread();
 
@@ -65,16 +66,11 @@ public class OptimizationGuideBridge {
     }
 
     /**
-     * Registers the optimization types and targets that intend to be queried
-     * during the session. It is expected for this to be called after the
-     * browser has been initialized.
+     * Registers the optimization types that intend to be queried during the session. It is expected
+     * for this to be called after the browser has been initialized.
      */
-    public void registerOptimizationTypesAndTargets(
-            @Nullable List<OptimizationType> optimizationTypes,
-            @Nullable List<OptimizationTarget> optimizationTargets) {
+    public void registerOptimizationTypes(@Nullable List<OptimizationType> optimizationTypes) {
         ThreadUtils.assertOnUiThread();
-        assert optimizationTypes != null || optimizationTargets != null;
-
         if (mNativeOptimizationGuideBridge == 0) return;
 
         if (optimizationTypes == null) {
@@ -85,15 +81,8 @@ public class OptimizationGuideBridge {
             intOptimizationTypes[i] = optimizationTypes.get(i).getNumber();
         }
 
-        if (optimizationTargets == null) {
-            optimizationTargets = new ArrayList<>();
-        }
-        int[] intOptimizationTargets = new int[optimizationTargets.size()];
-        for (int i = 0; i < optimizationTargets.size(); i++) {
-            intOptimizationTargets[i] = optimizationTargets.get(i).getNumber();
-        }
-        OptimizationGuideBridgeJni.get().registerOptimizationTypesAndTargets(
-                mNativeOptimizationGuideBridge, intOptimizationTypes, intOptimizationTargets);
+        OptimizationGuideBridgeJni.get().registerOptimizationTypes(
+                mNativeOptimizationGuideBridge, intOptimizationTypes);
     }
 
     /**
@@ -103,16 +92,27 @@ public class OptimizationGuideBridge {
      */
     public void canApplyOptimization(NavigationHandle navigationHandle,
             OptimizationType optimizationType, OptimizationGuideCallback callback) {
-        ThreadUtils.assertOnUiThread();
         assert navigationHandle.isInMainFrame();
 
+        canApplyOptimization(navigationHandle.getUrl(), optimizationType, callback);
+    }
+
+    /**
+     * @param url main frame navigation URL an optimization decision is being made for.
+     * @param optimizationType {@link OptimizationType} decision is being made for
+     * @param callback {@link OptimizationGuideCallback} optimization decision is passed in
+     */
+    public void canApplyOptimization(
+            GURL url, OptimizationType optimizationType, OptimizationGuideCallback callback) {
+        ThreadUtils.assertOnUiThread();
+
         if (mNativeOptimizationGuideBridge == 0) {
-            callback.onOptimizationGuideDecision(OptimizationGuideDecision.FALSE, null);
+            callback.onOptimizationGuideDecision(OptimizationGuideDecision.UNKNOWN, null);
             return;
         }
 
-        OptimizationGuideBridgeJni.get().canApplyOptimization(mNativeOptimizationGuideBridge,
-                navigationHandle.getUrl(), optimizationType.getNumber(), callback);
+        OptimizationGuideBridgeJni.get().canApplyOptimization(
+                mNativeOptimizationGuideBridge, url, optimizationType.getNumber(), callback);
     }
 
     @CalledByNative
@@ -135,13 +135,13 @@ public class OptimizationGuideBridge {
         return optimizationMetadata;
     }
 
+    @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
     @NativeMethods
-    interface Natives {
+    public interface Natives {
         long init();
         void destroy(long nativeOptimizationGuideBridge);
-        void registerOptimizationTypesAndTargets(long nativeOptimizationGuideBridge,
-                int[] optimizationTypes, int[] optimizationTargets);
-        void canApplyOptimization(long nativeOptimizationGuideBridge, String url,
+        void registerOptimizationTypes(long nativeOptimizationGuideBridge, int[] optimizationTypes);
+        void canApplyOptimization(long nativeOptimizationGuideBridge, GURL url,
                 int optimizationType, OptimizationGuideCallback callback);
     }
 }

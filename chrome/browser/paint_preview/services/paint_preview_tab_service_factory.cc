@@ -4,15 +4,18 @@
 
 #include "chrome/browser/paint_preview/services/paint_preview_tab_service_factory.h"
 
+#include <utility>
+
 #include "build/build_config.h"
 #include "chrome/browser/paint_preview/services/paint_preview_tab_service.h"
+#include "chrome/browser/paint_preview/services/paint_preview_tab_service_file_mixin.h"
 #include "components/keyed_service/core/simple_dependency_manager.h"
 #include "components/keyed_service/core/simple_factory_key.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/jni_android.h"
 #include "base/android/scoped_java_ref.h"
-#include "chrome/android/chrome_jni_headers/PaintPreviewTabServiceFactory_jni.h"
+#include "chrome/browser/paint_preview/android/jni_headers/PaintPreviewTabServiceFactory_jni.h"
 #include "chrome/browser/profiles/profile_key.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #endif  // defined(OS_ANDROID)
@@ -52,7 +55,9 @@ PaintPreviewTabServiceFactory::BuildServiceInstanceFor(
 
   // TODO(crbug/1060556): Inject a useful policy.
   return std::make_unique<paint_preview::PaintPreviewTabService>(
-      key->GetPath(), kFeatureDirname, nullptr, key->IsOffTheRecord());
+      std::make_unique<PaintPreviewTabServiceFileMixin>(key->GetPath(),
+                                                        kFeatureDirname),
+      nullptr, key->IsOffTheRecord());
 }
 
 SimpleFactoryKey* PaintPreviewTabServiceFactory::GetKeyToUse(

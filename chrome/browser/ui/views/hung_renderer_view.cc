@@ -106,6 +106,10 @@ void HungPagesTableModel::Reset() {
   widget_observer_.RemoveAll();
   tab_observers_.clear();
   render_widget_host_ = nullptr;
+
+  // Inform the table model observers that we cleared the model.
+  if (observer_)
+    observer_->OnModelChanged();
 }
 
 void HungPagesTableModel::RestartHangMonitorTimeout() {
@@ -154,6 +158,10 @@ void HungPagesTableModel::RenderProcessExited(
 
 void HungPagesTableModel::RenderWidgetHostDestroyed(
     content::RenderWidgetHost* widget_host) {
+  DCHECK(widget_observer_.IsObserving(render_widget_host_));
+  widget_observer_.Remove(widget_host);
+  render_widget_host_ = nullptr;
+
   // Notify the delegate.
   delegate_->TabDestroyed();
   // WARNING: we've likely been deleted.
@@ -272,12 +280,13 @@ HungRendererDialogView::HungRendererDialogView() {
 #if defined(OS_WIN)
   // Never use the custom frame when Aero Glass is disabled. See
   // https://crbug.com/323278
-  DialogDelegate::set_use_custom_frame(ui::win::IsAeroGlassEnabled());
+  set_use_custom_frame(ui::win::IsAeroGlassEnabled());
 #endif
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::CONTROL));
   auto info_label = std::make_unique<views::Label>(
-      base::string16(), CONTEXT_BODY_TEXT_LARGE, views::style::STYLE_SECONDARY);
+      base::string16(), views::style::CONTEXT_DIALOG_BODY_TEXT,
+      views::style::STYLE_SECONDARY);
   info_label->SetMultiLine(true);
   info_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 
@@ -287,20 +296,16 @@ HungRendererDialogView::HungRendererDialogView() {
       hung_pages_table_model_.get(), columns, views::ICON_AND_TEXT, true);
   hung_pages_table_ = hung_pages_table.get();
 
-  DialogDelegate::SetButtonLabel(
-      ui::DIALOG_BUTTON_CANCEL,
-      l10n_util::GetPluralStringFUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_END,
-                                       hung_pages_table_model_->RowCount()));
-  DialogDelegate::SetButtonLabel(
+  SetButtonLabel(
       ui::DIALOG_BUTTON_OK,
       l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_WAIT));
 
-  DialogDelegate::SetAcceptCallback(base::BindOnce(
-      &HungRendererDialogView::RestartHangTimer, base::Unretained(this)));
-  DialogDelegate::SetCancelCallback(base::BindOnce(
+  SetAcceptCallback(base::BindOnce(&HungRendererDialogView::RestartHangTimer,
+                                   base::Unretained(this)));
+  SetCancelCallback(base::BindOnce(
       &HungRendererDialogView::ForceCrashHungRenderer, base::Unretained(this)));
-  DialogDelegate::SetCloseCallback(base::BindOnce(
-      &HungRendererDialogView::RestartHangTimer, base::Unretained(this)));
+  SetCloseCallback(base::BindOnce(&HungRendererDialogView::RestartHangTimer,
+                                  base::Unretained(this)));
 
   DialogModelChanged();
 
@@ -311,7 +316,7 @@ HungRendererDialogView::HungRendererDialogView() {
   constexpr int kColumnSetId = 0;
   views::ColumnSet* column_set = layout->AddColumnSet(kColumnSetId);
   column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1.0,
-                        views::GridLayout::USE_PREF, 0, 0);
+                        views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
 
   layout->StartRow(views::GridLayout::kFixedSize, kColumnSetId);
   info_label_ = layout->AddView(std::move(info_label));
@@ -367,8 +372,7 @@ void HungRendererDialogView::ShowForWebContents(
     Profile* profile =
         Profile::FromBrowserContext(contents->GetBrowserContext());
     ui::win::SetAppIdForWindow(
-        shell_integration::win::GetChromiumModelIdForProfile(
-            profile->GetPath()),
+        shell_integration::win::GetAppUserModelIdForBrowser(profile->GetPath()),
         views::HWNDForWidget(GetWidget()));
 #endif
 
@@ -416,16 +420,10 @@ void HungRendererDialogView::WindowClosing() {
 }
 
 void HungRendererDialogView::ForceCrashHungRenderer() {
-  auto* render_widget_host = hung_pages_table_model_->GetRenderWidgetHost();
-  bool currently_unresponsive =
-      render_widget_host && render_widget_host->IsCurrentlyUnresponsive();
-  UMA_HISTOGRAM_BOOLEAN("Stability.RendererUnresponsiveBeforeTermination",
-                        currently_unresponsive);
-
   content::RenderProcessHost* rph =
       hung_pages_table_model_->GetRenderWidgetHost()->GetProcess();
   if (rph) {
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
     // A generic |CrashDumpHungChildProcess()| is not implemented for Linux.
     // Instead we send an explicit IPC to crash on the renderer's IO thread.
     rph->ForceCrash();
@@ -463,8 +461,10 @@ void HungRendererDialogView::UpdateLabels() {
   GetWidget()->UpdateWindowTitle();
   info_label_->SetText(l10n_util::GetPluralStringFUTF16(
       IDS_BROWSER_HANGMONITOR_RENDERER, hung_pages_table_model_->RowCount()));
-  // Update the "Exit" button.
-  DialogModelChanged();
+  SetButtonLabel(
+      ui::DIALOG_BUTTON_CANCEL,
+      l10n_util::GetPluralStringFUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_END,
+                                       hung_pages_table_model_->RowCount()));
 }
 
 void HungRendererDialogView::CloseDialogWithNoAction() {

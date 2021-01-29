@@ -25,8 +25,11 @@ namespace offline_items_collection {
 class OfflineContentAggregator;
 }  // namespace offline_items_collection
 
-class Profile;
+namespace site_engagement {
 class SiteEngagementService;
+}
+
+class Profile;
 
 class ContentIndexProviderImpl
     : public KeyedService,
@@ -66,6 +69,10 @@ class ContentIndexProviderImpl
   void RenameItem(const offline_items_collection::ContentId& id,
                   const std::string& name,
                   RenameCallback callback) override;
+  void ChangeSchedule(
+      const offline_items_collection::ContentId& id,
+      base::Optional<offline_items_collection::OfflineItemSchedule> schedule)
+      override;
   void AddObserver(Observer* observer) override;
   void RemoveObserver(Observer* observer) override;
 
@@ -95,7 +102,7 @@ class ContentIndexProviderImpl
   Profile* profile_;
   ContentIndexMetrics metrics_;
   offline_items_collection::OfflineContentAggregator* aggregator_;
-  SiteEngagementService* site_engagement_service_;
+  site_engagement::SiteEngagementService* site_engagement_service_;
   base::ObserverList<Observer>::Unchecked observers_;
   base::Optional<std::vector<gfx::Size>> icon_sizes_for_testing_;
   base::WeakPtrFactory<ContentIndexProviderImpl> weak_ptr_factory_{this};

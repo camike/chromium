@@ -19,7 +19,6 @@
 #include "base/task_runner_util.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/profile_resetter/profile_reset_report.pb.h"
 #include "chrome/browser/profile_resetter/reset_report_uploader.h"
 #include "chrome/browser/profile_resetter/reset_report_uploader_factory.h"
@@ -29,6 +28,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/embedder_support/user_agent_utils.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/strings/grit/components_strings.h"
@@ -130,8 +130,7 @@ int ResettableSettingsSnapshot::FindDifferentFields(
   return bit_mask;
 }
 
-void ResettableSettingsSnapshot::RequestShortcuts(
-    const base::Closure& callback) {
+void ResettableSettingsSnapshot::RequestShortcuts(base::OnceClosure callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(!cancellation_flag_.get() && !shortcuts_determined());
 
@@ -143,20 +142,20 @@ void ResettableSettingsSnapshot::RequestShortcuts(
           .get(),
       FROM_HERE, base::BindOnce(&GetChromeLaunchShortcuts, cancellation_flag_),
       base::BindOnce(&ResettableSettingsSnapshot::SetShortcutsAndReport,
-                     weak_ptr_factory_.GetWeakPtr(), callback));
+                     weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
 #else   // defined(OS_WIN)
   // Shortcuts are only supported on Windows.
   std::vector<ShortcutCommand> no_shortcuts;
   base::SequencedTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::BindOnce(&ResettableSettingsSnapshot::SetShortcutsAndReport,
-                     weak_ptr_factory_.GetWeakPtr(), callback,
+                     weak_ptr_factory_.GetWeakPtr(), std::move(callback),
                      std::move(no_shortcuts)));
 #endif  // defined(OS_WIN)
 }
 
 void ResettableSettingsSnapshot::SetShortcutsAndReport(
-    const base::Closure& callback,
+    base::OnceClosure callback,
     const std::vector<ShortcutCommand>& shortcuts) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   shortcuts_ = shortcuts;
@@ -164,7 +163,7 @@ void ResettableSettingsSnapshot::SetShortcutsAndReport(
   cancellation_flag_.reset();
 
   if (!callback.is_null())
-    callback.Run();
+    std::move(callback).Run();
 }
 
 std::unique_ptr<reset_report::ChromeResetReport> SerializeSettingsReportToProto(
@@ -238,9 +237,8 @@ std::unique_ptr<base::ListValue> GetReadableFeedbackForSnapshot(
   AddPair(list.get(),
           l10n_util::GetStringUTF16(IDS_RESET_PROFILE_SETTINGS_LOCALE),
           g_browser_process->GetApplicationLocale());
-  AddPair(list.get(),
-          l10n_util::GetStringUTF16(IDS_VERSION_UI_USER_AGENT),
-          GetUserAgent());
+  AddPair(list.get(), l10n_util::GetStringUTF16(IDS_VERSION_UI_USER_AGENT),
+          embedder_support::GetUserAgent());
   std::string version = version_info::GetVersionNumber();
   version += chrome::GetChannelName();
   AddPair(list.get(),

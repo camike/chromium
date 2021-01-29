@@ -8,7 +8,9 @@
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "third_party/blink/renderer/platform/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/mojo/features.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
+#include "third_party/blink/renderer/platform/mojo_binding_context.h"
 
 namespace blink {
 
@@ -41,8 +43,17 @@ class HeapMojoReceiver {
   // Methods to redirect to mojo::Receiver:
   bool is_bound() const { return wrapper_->receiver().is_bound(); }
   void reset() { wrapper_->receiver().reset(); }
+  void ResetWithReason(uint32_t custom_reason_code,
+                       const std::string& description) {
+    wrapper_->receiver().ResetWithReason(custom_reason_code, description);
+  }
   void set_disconnect_handler(base::OnceClosure handler) {
     wrapper_->receiver().set_disconnect_handler(std::move(handler));
+  }
+  void set_disconnect_with_reason_handler(
+      mojo::ConnectionErrorWithReasonCallback error_handler) {
+    wrapper_->receiver().set_disconnect_with_reason_handler(
+        std::move(error_handler));
   }
   mojo::PendingRemote<Interface> BindNewPipeAndPassRemote(
       scoped_refptr<base::SequencedTaskRunner> task_runner) WARN_UNUSED_RESULT {
@@ -59,8 +70,11 @@ class HeapMojoReceiver {
   bool WaitForIncomingCall() {
     return wrapper_->receiver().WaitForIncomingCall();
   }
+  void SetFilter(std::unique_ptr<mojo::MessageFilter> filter) {
+    wrapper_->receiver().SetFilter(std::move(filter));
+  }
 
-  void Trace(Visitor* visitor) { visitor->Trace(wrapper_); }
+  void Trace(Visitor* visitor) const { visitor->Trace(wrapper_); }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(HeapMojoReceiverGCWithContextObserverTest,
@@ -70,7 +84,6 @@ class HeapMojoReceiver {
   class Wrapper final : public GarbageCollected<Wrapper>,
                         public ContextLifecycleObserver {
     USING_PRE_FINALIZER(Wrapper, Dispose);
-    USING_GARBAGE_COLLECTED_MIXIN(Wrapper);
 
    public:
     Wrapper(Owner* owner, ContextLifecycleNotifier* notifier)
@@ -78,7 +91,7 @@ class HeapMojoReceiver {
       SetContextLifecycleNotifier(notifier);
     }
 
-    void Trace(Visitor* visitor) override {
+    void Trace(Visitor* visitor) const override {
       visitor->Trace(owner_);
       ContextLifecycleObserver::Trace(visitor);
     }
@@ -89,7 +102,9 @@ class HeapMojoReceiver {
 
     // ContextLifecycleObserver methods
     void ContextDestroyed() override {
-      if (Mode == HeapMojoWrapperMode::kWithContextObserver)
+      if (Mode == HeapMojoWrapperMode::kWithContextObserver ||
+          (Mode == HeapMojoWrapperMode::kWithoutContextObserver &&
+           base::FeatureList::IsEnabled(kHeapMojoUseContextObserver)))
         receiver_.reset();
     }
 

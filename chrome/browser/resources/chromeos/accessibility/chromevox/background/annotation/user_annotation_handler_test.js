@@ -6,7 +6,6 @@
 GEN_INCLUDE(['../../testing/chromevox_next_e2e_test_base.js']);
 
 GEN_INCLUDE(['../../testing/fake_objects.js']);
-GEN_INCLUDE(['../../testing/mock_feedback.js']);
 
 /**
  * Test fixture for UserAnnotationHandler.
@@ -43,38 +42,11 @@ ChromeVoxAnnotationTest = class extends ChromeVoxNextE2ETest {
   }
 
   /**
-   * @return{!MockFeedback}
-   */
-  createMockFeedback() {
-    const mockFeedback =
-        new MockFeedback(this.newCallback(), this.newCallback.bind(this));
-    mockFeedback.install();
-    return mockFeedback;
-  }
-
-  /**
-   * Create a function which performs the command |cmd|.
-   * @param {string} cmd
-   * @return {function(): void}
-   */
-  doCmd(cmd) {
-    return function() {
-      CommandHandler.onCommand(cmd);
-    };
-  }
-
-  /**
    * Returns the start node of the current ChromeVox range.
    * @return {AutomationNode}
    */
   getRangeStart() {
     return ChromeVoxState.instance.getCurrentRange().start.node;
-  }
-
-  /** @override */
-  setUp() {
-    window.doCmd = this.doCmd;
-    window.RoleType = chrome.automation.RoleType;
   }
 
   // Test documents //

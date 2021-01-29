@@ -9,13 +9,15 @@
 
 #include "ash/app_list/views/assistant/assistant_dialog_plate.h"
 #include "ash/app_list/views/assistant/assistant_main_stage.h"
+#include "ash/assistant/model/assistant_ui_model.h"
 #include "ash/assistant/ui/assistant_ui_constants.h"
 #include "ash/assistant/ui/assistant_view_delegate.h"
 #include "ash/assistant/ui/assistant_view_ids.h"
 #include "ash/assistant/util/animation_util.h"
 #include "ash/assistant/util/assistant_util.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
-#include "ui/chromeos/search_box/search_box_constants.h"
+#include "ash/public/cpp/assistant/controller/assistant_ui_controller.h"
+#include "ash/search_box/search_box_constants.h"
 #include "ui/views/layout/box_layout.h"
 
 namespace ash {
@@ -35,11 +37,14 @@ AssistantMainView::AssistantMainView(AssistantViewDelegate* delegate)
   SetID(AssistantViewID::kMainView);
   InitLayout();
 
-  assistant_controller_observer_.Add(AssistantController::Get());
-  assistant_ui_model_observer_.Add(AssistantUiController::Get());
+  assistant_controller_observation_.Observe(AssistantController::Get());
+  AssistantUiController::Get()->GetModel()->AddObserver(this);
 }
 
-AssistantMainView::~AssistantMainView() = default;
+AssistantMainView::~AssistantMainView() {
+  if (AssistantUiController::Get())
+    AssistantUiController::Get()->GetModel()->RemoveObserver(this);
+}
 
 const char* AssistantMainView::GetClassName() const {
   return "AssistantMainView";
@@ -73,8 +78,10 @@ void AssistantMainView::RequestFocus() {
 }
 
 void AssistantMainView::OnAssistantControllerDestroying() {
-  assistant_ui_model_observer_.Remove(AssistantUiController::Get());
-  assistant_controller_observer_.Remove(AssistantController::Get());
+  AssistantUiController::Get()->GetModel()->RemoveObserver(this);
+  DCHECK(assistant_controller_observation_.IsObservingSource(
+      AssistantController::Get()));
+  assistant_controller_observation_.Reset();
 }
 
 void AssistantMainView::OnUiVisibilityChanged(
@@ -102,7 +109,7 @@ void AssistantMainView::OnUiVisibilityChanged(
 }
 
 void AssistantMainView::InitLayout() {
-  constexpr int radius = search_box::kSearchBoxBorderCornerRadiusSearchResult;
+  constexpr int radius = kSearchBoxBorderCornerRadiusSearchResult;
 
   SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);

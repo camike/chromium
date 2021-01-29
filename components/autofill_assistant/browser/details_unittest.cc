@@ -59,6 +59,7 @@ class DetailsTest : public testing::Test {
   }
 
   UserData user_data_;
+  CollectUserDataOptions user_data_options_;
 };
 
 TEST_F(DetailsTest, UpdateFromParametersEmpty) {
@@ -86,8 +87,7 @@ TEST_F(DetailsTest, UpdateFromParametersSetsPlaceholderFlags) {
   Details details;
   details.UpdateFromParameters(*context);
 
-  EXPECT_TRUE(details.animatePlaceholders());
-  EXPECT_TRUE(details.showImagePlaceholder());
+  EXPECT_TRUE(details.placeholders().show_image_placeholder());
 }
 
 TEST_F(DetailsTest, UpdateFromParametersUpdateFromDetails) {
@@ -108,7 +108,7 @@ TEST_F(DetailsTest, UpdateFromParametersUpdateFromDetails) {
   Details details;
   EXPECT_TRUE(details.UpdateFromParameters(*context));
 
-  EXPECT_TRUE(details.animatePlaceholders());
+  EXPECT_TRUE(details.placeholders().show_image_placeholder());
   EXPECT_THAT(details.title(), Eq("title"));
   EXPECT_THAT(details.descriptionLine1(), Eq("line1"));
   EXPECT_THAT(details.descriptionLine2(), Eq("line2"));
@@ -136,8 +136,7 @@ TEST_F(DetailsTest, UpdateFromParametersBackwardsCompatibility) {
   Details details;
   EXPECT_TRUE(details.UpdateFromParameters(*context));
 
-  EXPECT_TRUE(details.animatePlaceholders());
-  EXPECT_TRUE(details.showImagePlaceholder());
+  EXPECT_TRUE(details.placeholders().show_image_placeholder());
   EXPECT_THAT(details.title(), Eq("movie_name"));
   EXPECT_THAT(details.descriptionLine2(), Eq("movie_theater"));
   EXPECT_THAT(details.descriptionLine1(),
@@ -162,21 +161,74 @@ TEST_F(DetailsTest, UpdateFromProtoBackwardsCompatibility) {
 }
 
 TEST_F(DetailsTest, UpdateFromContactDetailsNoAddressInMemory) {
-  EXPECT_FALSE(Details::UpdateFromContactDetails(ShowDetailsProto(),
-                                                 &user_data_, nullptr));
+  EXPECT_FALSE(Details::UpdateFromContactDetails(
+      ShowDetailsProto(), &user_data_, &user_data_options_, nullptr));
+}
+
+TEST_F(DetailsTest, UpdateFromContactDetailsNoUserDataOptions) {
+  EXPECT_FALSE(Details::UpdateFromContactDetails(
+      ShowDetailsProto(), &user_data_, /* user_data_options = */ nullptr,
+      nullptr));
+}
+
+TEST_F(DetailsTest, UpdateFromContactDetailsNoContactInfoRequested) {
+  ShowDetailsProto proto;
+  proto.set_contact_details("contact");
+  user_data_.selected_addresses_["contact"] = MakeAutofillProfile();
+  user_data_options_.request_payer_name = false;
+  user_data_options_.request_payer_email = false;
+  EXPECT_FALSE(Details::UpdateFromContactDetails(proto, &user_data_,
+                                                 &user_data_options_, nullptr));
 }
 
 TEST_F(DetailsTest, UpdateFromContactDetails) {
   ShowDetailsProto proto;
   proto.set_contact_details("contact");
   user_data_.selected_addresses_["contact"] = MakeAutofillProfile();
+  user_data_options_.request_payer_name = true;
+  user_data_options_.request_payer_email = true;
 
   Details details;
-  EXPECT_TRUE(Details::UpdateFromContactDetails(proto, &user_data_, &details));
+  EXPECT_TRUE(Details::UpdateFromContactDetails(proto, &user_data_,
+                                                &user_data_options_, &details));
 
   EXPECT_THAT(details.title(),
               Eq(l10n_util::GetStringUTF8(IDS_PAYMENTS_CONTACT_DETAILS_LABEL)));
   EXPECT_THAT(details.descriptionLine1(), Eq("Charles Hardin Holley"));
+  EXPECT_THAT(details.descriptionLine2(), Eq("\xE2\x98\xBA@gmail.com"));
+}
+
+TEST_F(DetailsTest, UpdateFromContactOnlyName) {
+  ShowDetailsProto proto;
+  proto.set_contact_details("contact");
+  user_data_.selected_addresses_["contact"] = MakeAutofillProfile();
+  user_data_options_.request_payer_name = true;
+  user_data_options_.request_payer_email = false;
+
+  Details details;
+  EXPECT_TRUE(Details::UpdateFromContactDetails(proto, &user_data_,
+                                                &user_data_options_, &details));
+
+  EXPECT_THAT(details.title(),
+              Eq(l10n_util::GetStringUTF8(IDS_PAYMENTS_CONTACT_DETAILS_LABEL)));
+  EXPECT_THAT(details.descriptionLine1(), Eq("Charles Hardin Holley"));
+  EXPECT_THAT(details.descriptionLine2(), Eq(""));
+}
+
+TEST_F(DetailsTest, UpdateFromContactOnlyEmail) {
+  ShowDetailsProto proto;
+  proto.set_contact_details("contact");
+  user_data_.selected_addresses_["contact"] = MakeAutofillProfile();
+  user_data_options_.request_payer_name = false;
+  user_data_options_.request_payer_email = true;
+
+  Details details;
+  EXPECT_TRUE(Details::UpdateFromContactDetails(proto, &user_data_,
+                                                &user_data_options_, &details));
+
+  EXPECT_THAT(details.title(),
+              Eq(l10n_util::GetStringUTF8(IDS_PAYMENTS_CONTACT_DETAILS_LABEL)));
+  EXPECT_THAT(details.descriptionLine1(), Eq(""));
   EXPECT_THAT(details.descriptionLine2(), Eq("\xE2\x98\xBA@gmail.com"));
 }
 
@@ -204,16 +256,16 @@ TEST_F(DetailsTest, UpdateFromShippingAddress) {
 TEST_F(DetailsTest, UpdateFromSelectedCreditCardEmptyMemory) {
   ShowDetailsProto proto;
   proto.set_credit_card(true);
-  EXPECT_FALSE(Details::UpdateFromContactDetails(ShowDetailsProto(),
-                                                 &user_data_, nullptr));
+  EXPECT_FALSE(Details::UpdateFromSelectedCreditCard(ShowDetailsProto(),
+                                                     &user_data_, nullptr));
 }
 
 TEST_F(DetailsTest, UpdateFromSelectedCreditCardNotRequested) {
   ShowDetailsProto proto;
   proto.set_credit_card(false);
   user_data_.selected_card_ = MakeCreditCard();
-  EXPECT_FALSE(Details::UpdateFromContactDetails(ShowDetailsProto(),
-                                                 &user_data_, nullptr));
+  EXPECT_FALSE(Details::UpdateFromSelectedCreditCard(ShowDetailsProto(),
+                                                     &user_data_, nullptr));
 }
 
 TEST_F(DetailsTest, UpdateFromCreditCard) {
@@ -231,42 +283,6 @@ TEST_F(DetailsTest, UpdateFromCreditCard) {
   // The credit card string contains 4 non-ascii dots, we just check that it
   // does contain something.
   EXPECT_FALSE(details.descriptionLine1().empty());
-}
-
-TEST_F(DetailsTest, GetTitleMaxLines) {
-  Details details;
-
-  ShowDetailsProto proto_no_description;
-  proto_no_description.mutable_details()->set_title("title");
-  EXPECT_TRUE(Details::UpdateFromProto(proto_no_description, &details));
-  EXPECT_THAT(details.titleMaxLines(), Eq(3));
-
-  ShowDetailsProto proto_description1;
-  proto_description1.mutable_details()->set_title("title");
-  proto_description1.mutable_details()->set_description_line_1("line 1");
-  EXPECT_TRUE(Details::UpdateFromProto(proto_description1, &details));
-  EXPECT_THAT(details.titleMaxLines(), Eq(2));
-
-  ShowDetailsProto proto_description2;
-  proto_description2.mutable_details()->set_title("title");
-  proto_description2.mutable_details()->set_description_line_2("line 2");
-  EXPECT_TRUE(Details::UpdateFromProto(proto_description2, &details));
-  EXPECT_THAT(details.titleMaxLines(), Eq(2));
-
-  ShowDetailsProto proto_description1_date;
-  proto_description1_date.mutable_details()->set_title("title");
-  SetDateTimeProto(
-      proto_description1_date.mutable_details()->mutable_datetime(), 2019, 9,
-      26, 16, 40, 2);
-  EXPECT_TRUE(Details::UpdateFromProto(proto_description1_date, &details));
-  EXPECT_THAT(details.titleMaxLines(), Eq(2));
-
-  ShowDetailsProto proto_both_descriptions;
-  proto_both_descriptions.mutable_details()->set_title("title");
-  proto_both_descriptions.mutable_details()->set_description_line_1("line 1");
-  proto_both_descriptions.mutable_details()->set_description_line_2("line 2");
-  EXPECT_TRUE(Details::UpdateFromProto(proto_both_descriptions, &details));
-  EXPECT_THAT(details.titleMaxLines(), Eq(1));
 }
 
 TEST_F(DetailsTest, GetDescriptionLine1) {
@@ -389,14 +405,13 @@ TEST_F(DetailsTest, GetClickthroughData) {
   EXPECT_THAT(details.imageClickthroughUrl(), Eq("url"));
 }
 
-TEST_F(DetailsTest, GetPlaceholderFlags) {
+TEST_F(DetailsTest, GetPlaceholderConfiguration) {
   Details details;
   ShowDetailsProto proto;
-  proto.mutable_details()->set_show_image_placeholder(true);
-  proto.mutable_details()->set_animate_placeholders(true);
+  proto.mutable_details()->mutable_placeholders()->set_show_image_placeholder(
+      true);
   EXPECT_TRUE(Details::UpdateFromProto(proto, &details));
-  EXPECT_TRUE(details.showImagePlaceholder());
-  EXPECT_TRUE(details.animatePlaceholders());
+  EXPECT_TRUE(details.placeholders().show_image_placeholder());
 }
 
 TEST_F(DetailsTest, GetTotalPrice) {

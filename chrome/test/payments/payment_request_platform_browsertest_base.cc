@@ -78,10 +78,10 @@ PaymentRequestPlatformBrowserTestBase::GetActiveWebContents() {
 }
 
 void PaymentRequestPlatformBrowserTestBase::
-    SetDownloaderAndIgnorePortInOriginComparisonForTesting(
-        const std::vector<
-            std::pair<const std::string&, net::EmbeddedTestServer*>>&
-            payment_methods) {
+    SetDownloaderAndIgnorePortInOriginComparisonForTestingInFrame(
+        const std::vector<std::pair<const std::string&,
+                                    net::EmbeddedTestServer*>>& payment_methods,
+        content::RenderFrameHost* frame) {
   // Set up test manifest downloader that knows how to fake origin.
   content::BrowserContext* context =
       GetActiveWebContents()->GetBrowserContext();
@@ -92,9 +92,18 @@ void PaymentRequestPlatformBrowserTestBase::
     downloader->AddTestServerURL("https://" + method.first + "/",
                                  method.second->GetURL(method.first, "/"));
   }
-  ServiceWorkerPaymentAppFinder::GetInstance()
+  ServiceWorkerPaymentAppFinder::GetOrCreateForCurrentDocument(frame)
       ->SetDownloaderAndIgnorePortInOriginComparisonForTesting(
           std::move(downloader));
+}
+
+void PaymentRequestPlatformBrowserTestBase::
+    SetDownloaderAndIgnorePortInOriginComparisonForTesting(
+        const std::vector<
+            std::pair<const std::string&, net::EmbeddedTestServer*>>&
+            payment_methods) {
+  SetDownloaderAndIgnorePortInOriginComparisonForTestingInFrame(
+      payment_methods, GetActiveWebContents()->GetMainFrame());
 }
 
 void PaymentRequestPlatformBrowserTestBase::OnCanMakePaymentCalled() {
@@ -125,9 +134,9 @@ void PaymentRequestPlatformBrowserTestBase::OnAbortCalled() {
   if (event_waiter_)
     event_waiter_->OnEvent(TestEvent::kAbortCalled);
 }
-void PaymentRequestPlatformBrowserTestBase::OnShowAppsReady() {
+void PaymentRequestPlatformBrowserTestBase::OnAppListReady() {
   if (event_waiter_)
-    event_waiter_->OnEvent(TestEvent::kShowAppsReady);
+    event_waiter_->OnEvent(TestEvent::kAppListReady);
 }
 void PaymentRequestPlatformBrowserTestBase::OnCompleteCalled() {
   if (event_waiter_)
@@ -137,6 +146,11 @@ void PaymentRequestPlatformBrowserTestBase::OnCompleteCalled() {
 void PaymentRequestPlatformBrowserTestBase::OnMinimalUIReady() {
   if (event_waiter_)
     event_waiter_->OnEvent(TestEvent::kMinimalUIReady);
+}
+
+void PaymentRequestPlatformBrowserTestBase::OnUIDisplayed() {
+  if (event_waiter_)
+    event_waiter_->OnEvent(TestEvent::kUIDisplayed);
 }
 
 void PaymentRequestPlatformBrowserTestBase::ResetEventWaiterForSingleEvent(

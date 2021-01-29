@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 // clang-format off
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {ContentSetting,ContentSettingsTypes,SiteSettingSource,SiteSettingsPrefsBrowserProxyImpl} from 'chrome://settings/lazy_load.js';
 import {TestSiteSettingsPrefsBrowserProxy} from 'chrome://test/settings/test_site_settings_prefs_browser_proxy.js';
@@ -40,8 +39,6 @@ suite('SiteDetailsPermission', function() {
         [createContentSettingTypeToValuePair(
             ContentSettingsTypes.CAMERA,
             [createRawSiteException('https://www.example.com')])]);
-
-    loadTimeData.overrideValues({enableAutoplayWhitelistContentSetting: true});
 
     browserProxy = new TestSiteSettingsPrefsBrowserProxy();
     SiteSettingsPrefsBrowserProxyImpl.instance_ = browserProxy;
@@ -177,12 +174,12 @@ suite('SiteDetailsPermission', function() {
                    '\nBlock (default)\nAllow\nBlock\nAsk'),
           testElement.$.permissionItem.innerText.trim());
       assertEquals(
-          permissionSourcesNoSetting[testSource] != '',
+          permissionSourcesNoSetting[testSource] !== '',
           testElement.$.permissionItem.classList.contains('two-line'));
 
-      if (testSource != SiteSettingSource.DEFAULT &&
-          testSource != SiteSettingSource.PREFERENCE &&
-          testSource != SiteSettingSource.EMBARGO) {
+      if (testSource !== SiteSettingSource.DEFAULT &&
+          testSource !== SiteSettingSource.PREFERENCE &&
+          testSource !== SiteSettingSource.EMBARGO) {
         assertTrue(testElement.$.permission.disabled);
       } else {
         assertFalse(testElement.$.permission.disabled);
@@ -326,6 +323,23 @@ suite('SiteDetailsPermission', function() {
     assertFalse(testElement.$.permission.disabled);
   });
 
+  test('info string correct for allowlisted source', function() {
+    const origin = 'chrome://test';
+    testElement.category = ContentSettingsTypes.NOTIFICATIONS;
+    testElement.$.details.hidden = false;
+    testElement.site = {
+      origin: origin,
+      embeddingOrigin: origin,
+      setting: ContentSetting.ALLOW,
+      source: SiteSettingSource.ALLOWLIST,
+    };
+    assertEquals(
+        'Allowlisted internally\nAllow\nBlock\nAsk',
+        testElement.$.permissionItem.innerText.trim());
+    assertTrue(testElement.$.permissionItem.classList.contains('two-line'));
+    assertTrue(testElement.$.permission.disabled);
+  });
+
   test('sound setting default string is correct', function() {
     const origin = 'https://www.example.com';
     browserProxy.setPrefs(prefs);
@@ -457,11 +471,10 @@ suite('SiteDetailsPermission', function() {
       });
 
   test(
-      'Native File System Write: ASK/BLOCK can be chosen as a preference by ' +
-          'users',
+      'File System Write: ASK/BLOCK can be chosen as a preference by users',
       function() {
         const origin = 'https://www.example.com';
-        testElement.category = ContentSettingsTypes.NATIVE_FILE_SYSTEM_WRITE;
+        testElement.category = ContentSettingsTypes.FILE_SYSTEM_WRITE;
         testElement.label = 'Save to original files';
         testElement.site = {
           origin: origin,

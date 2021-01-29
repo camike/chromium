@@ -18,7 +18,7 @@ namespace base {
 class ListValue;
 }  // namespace base
 
-namespace syncer {
+namespace invalidation {
 
 // Holds a list of invalidations that all share the same Topic.
 //
@@ -33,6 +33,8 @@ class INVALIDATION_EXPORT SingleObjectInvalidationSet {
 
   SingleObjectInvalidationSet();
   SingleObjectInvalidationSet(const SingleObjectInvalidationSet& other);
+  SingleObjectInvalidationSet& operator=(
+      const SingleObjectInvalidationSet& other);
   ~SingleObjectInvalidationSet();
 
   void Insert(const Invalidation& invalidation);
@@ -61,6 +63,6 @@ class INVALIDATION_EXPORT SingleObjectInvalidationSet {
   InvalidationsSet invalidations_;
 };
 
-}  // syncer
+}  // namespace invalidation
 
 #endif  // COMPONENTS_INVALIDATION_PUBLIC_SINGLE_OBJECT_INVALIDATION_SET_H_

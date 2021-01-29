@@ -26,7 +26,6 @@
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
-#include "net/url_request/url_request_status.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 
@@ -72,7 +71,7 @@ constexpr char kAccuracyString[] = "accuracy";
 
 // Error object and its contents.
 constexpr char kErrorString[] = "error";
-// "errors" array in "erorr" object is ignored.
+// "errors" array in "error" object is ignored.
 constexpr char kCodeString[] = "code";
 constexpr char kMessageString[] = "message";
 

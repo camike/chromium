@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import sys
+
 from .argument import Argument
 from .ast_group import AstGroup
 from .attribute import Attribute
@@ -30,6 +32,11 @@ from .operation import Operation
 from .typedef import Typedef
 
 
+# TODO: Remove this once Python2 is obsoleted.
+if sys.version_info.major != 2:
+    long = int
+
+
 def load_and_register_idl_definitions(filepaths, register_ir,
                                       create_ref_to_idl_def, idl_type_factory):
     """
@@ -47,33 +54,39 @@ def load_and_register_idl_definitions(filepaths, register_ir,
     assert callable(register_ir)
 
     for filepath in filepaths:
-        asts_per_component = AstGroup.read_from_file(filepath)
-        component = Component(asts_per_component.component)
+        asts = AstGroup.read_from_file(filepath)
         builder = _IRBuilder(
-            component=component,
+            component=Component(asts.component),
+            for_testing=asts.for_testing,
             create_ref_to_idl_def=create_ref_to_idl_def,
             idl_type_factory=idl_type_factory)
 
-        for file_node in asts_per_component:
+        for file_node in asts:
             assert file_node.GetClass() == 'File'
             for top_level_node in file_node.GetChildren():
                 register_ir(builder.build_top_level_def(top_level_node))
 
 
 class _IRBuilder(object):
-    def __init__(self, component, create_ref_to_idl_def, idl_type_factory):
+    def __init__(self, component, for_testing, create_ref_to_idl_def,
+                 idl_type_factory):
         """
         Args:
             component: A Component to which the built IRs are associated.
+            for_testing: True if the IDL definitions are meant for testing
+                purpose only.
             create_ref_to_idl_def: A callback function that creates a reference
                 to an IDL definition from the given identifier.
             idl_type_factory: All IdlType instances will be created through this
                 factory.
         """
+        assert isinstance(component, Component)
+        assert isinstance(for_testing, bool)
         assert callable(create_ref_to_idl_def)
         assert isinstance(idl_type_factory, IdlTypeFactory)
 
         self._component = component
+        self._for_testing = for_testing
         self._create_ref_to_idl_def = create_ref_to_idl_def
         self._idl_type_factory = idl_type_factory
 
@@ -87,7 +100,9 @@ class _IRBuilder(object):
             'Namespace': self._build_namespace,
             'Typedef': self._build_typedef,
         }
-        return build_functions[node.GetClass()](node)
+        ir = build_functions[node.GetClass()](node)
+        ir.code_generator_info.set_for_testing(self._for_testing)
+        return ir
 
     # Builder functions for top-level definitions
 
@@ -152,7 +167,7 @@ class _IRBuilder(object):
         child_nodes = list(node.GetChildren())
         extended_attributes = self._take_extended_attributes(child_nodes)
 
-        members = map(self._build_interface_member, child_nodes)
+        members = list(map(self._build_interface_member, child_nodes))
         attributes = []
         constants = []
         operations = []
@@ -294,7 +309,7 @@ class _IRBuilder(object):
         child_nodes = list(node.GetChildren())
         inherited = self._take_inheritance(child_nodes)
         extended_attributes = self._take_extended_attributes(child_nodes)
-        own_members = map(self._build_dictionary_member, child_nodes)
+        own_members = list(map(self._build_dictionary_member, child_nodes))
 
         return Dictionary.IR(
             identifier=Identifier(node.GetName()),
@@ -328,7 +343,7 @@ class _IRBuilder(object):
 
         child_nodes = list(node.GetChildren())
         extended_attributes = self._take_extended_attributes(child_nodes)
-        members = map(self._build_interface_member, child_nodes)
+        members = list(map(self._build_interface_member, child_nodes))
         constants = []
         operations = []
         for member in members:
@@ -448,8 +463,8 @@ class _IRBuilder(object):
                 assert len(child_nodes) == 1
                 child = child_nodes[0]
                 if child.GetClass() == 'Arguments':
-                    arguments = map(build_extattr_argument,
-                                    child.GetChildren())
+                    arguments = list(
+                        map(build_extattr_argument, child.GetChildren()))
                 elif child.GetClass() == 'Call':
                     assert len(child.GetChildren()) == 1
                     grand_child = child.GetChildren()[0]
@@ -478,7 +493,9 @@ class _IRBuilder(object):
 
         assert node.GetClass() == 'ExtAttributes'
         return ExtendedAttributes(
-            filter(None, map(build_extended_attribute, node.GetChildren())))
+            list(
+                filter(None, map(build_extended_attribute,
+                                 node.GetChildren()))))
 
     def _build_inheritance(self, node):
         assert node.GetClass() == 'Inherit'
@@ -498,7 +515,7 @@ class _IRBuilder(object):
 
     def _build_iterable(self, node):
         assert node.GetClass() == 'Iterable'
-        types = map(self._build_type, node.GetChildren())
+        types = list(map(self._build_type, node.GetChildren()))
         assert len(types) == 1 or len(types) == 2
         if len(types) == 1:  # value iterator
             key_type, value_type = (None, types[0])
@@ -576,7 +593,7 @@ class _IRBuilder(object):
     def _build_maplike(self, node, interface_identifier):
         assert node.GetClass() == 'Maplike'
         assert isinstance(interface_identifier, Identifier)
-        types = map(self._build_type, node.GetChildren())
+        types = list(map(self._build_type, node.GetChildren()))
         assert len(types) == 2
         key_type, value_type = types
         is_readonly = bool(node.GetProperty('READONLY'))
@@ -668,7 +685,7 @@ class _IRBuilder(object):
     def _build_setlike(self, node, interface_identifier):
         assert node.GetClass() == 'Setlike'
         assert isinstance(interface_identifier, Identifier)
-        types = map(self._build_type, node.GetChildren())
+        types = list(map(self._build_type, node.GetChildren()))
         assert len(types) == 1
         value_type = types[0]
         is_readonly = bool(node.GetProperty('READONLY'))
@@ -830,7 +847,7 @@ class _IRBuilder(object):
 
         def build_union_type(node, extended_attributes):
             return self._idl_type_factory.union_type(
-                member_types=map(self._build_type, node.GetChildren()),
+                member_types=list(map(self._build_type, node.GetChildren())),
                 is_optional=is_optional,
                 extended_attributes=extended_attributes,
                 debug_info=self._build_debug_info(node))

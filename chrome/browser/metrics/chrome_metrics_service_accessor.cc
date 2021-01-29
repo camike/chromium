@@ -5,6 +5,7 @@
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/pref_names.h"
@@ -12,7 +13,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #endif
 
@@ -67,24 +68,6 @@ bool ChromeMetricsServiceAccessor::RegisterSyntheticFieldTrial(
       g_browser_process->metrics_service(), trial_name, group_name);
 }
 
-// static
-bool ChromeMetricsServiceAccessor::RegisterSyntheticMultiGroupFieldTrial(
-    base::StringPiece trial_name,
-    const std::vector<uint32_t>& group_name_hashes) {
-  return metrics::MetricsServiceAccessor::RegisterSyntheticMultiGroupFieldTrial(
-      g_browser_process->metrics_service(), trial_name, group_name_hashes);
-}
-
-// static
-bool ChromeMetricsServiceAccessor::RegisterSyntheticFieldTrialWithNameHash(
-    uint32_t trial_name_hash,
-    base::StringPiece group_name) {
-  return metrics::MetricsServiceAccessor::
-      RegisterSyntheticFieldTrialWithNameHash(
-          g_browser_process->metrics_service(), trial_name_hash, group_name);
-}
-
-// static
 void ChromeMetricsServiceAccessor::SetForceIsMetricsReportingEnabledPrefLookup(
     bool value) {
   metrics::MetricsServiceAccessor::SetForceIsMetricsReportingEnabledPrefLookup(

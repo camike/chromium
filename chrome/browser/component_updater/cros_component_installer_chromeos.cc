@@ -12,7 +12,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
@@ -37,11 +36,11 @@ constexpr char kComponentsRootPath[] = "cros-components";
 const ComponentConfig kConfigs[] = {
     {"epson-inkjet-printer-escpr", "5.0",
      "1913a5e0a6cad30b6f03e176177e0d7ed62c5d6700a9c66da556d7c3f5d6a47e"},
-    {"cros-termina", "840.1",
+    {"cros-termina", "900.1",
      "e9d960f84f628e1f42d05de4046bb5b3154b6f1f65c08412c6af57a29aecaffb"},
-    {"rtanalytics-light", "17.0",
+    {"rtanalytics-light", "88.0",
      "69f09d33c439c2ab55bbbe24b47ab55cb3f6c0bd1f1ef46eefea3216ec925038"},
-    {"rtanalytics-full", "17.0",
+    {"rtanalytics-full", "88.0",
      "c93c3e1013c52100a20038b405ac854d69fa889f6dc4fa6f188267051e05e444"},
     {"star-cups-driver", "1.1",
      "6d24de30f671da5aee6d463d9e446cafe9ddac672800a9defe86877dcde6c466"},
@@ -49,6 +48,14 @@ const ComponentConfig kConfigs[] = {
      "5714811c04f0a63aac96b39096faa759ace4c04e9b68291e7c9716128f5a2722"},
     {"demo-mode-resources", "1.0",
      "93c093ebac788581389015e9c59c5af111d2fa5174d206eb795042e6376cbd10"},
+    // NOTE: If you change the lacros component names, you must also update
+    // chrome/browser/chromeos/crosapi/browser_loader.cc.
+    {"lacros-fishfood", "",
+     "7a85ffb4b316a3b89135a3f43660ef3049950a61a2f8df4237e1ec213852b848"},
+    {"lacros-dogfood-dev", "",
+     "b3e1ef1780c0acd2d3fa44b4d73c657a0f1ed3ad83fd8c964a18a3502ccf5f4f"},
+    {"lacros-dogfood-stable", "",
+     "7d5c1428f7f67b56f95123851adec1da105980c56b5c126352040f3b65d3e43b"},
 };
 
 const ComponentConfig* FindConfig(const std::string& name) {
@@ -140,20 +147,22 @@ CrOSComponentInstallerPolicy::OnCustomInstall(
 void CrOSComponentInstallerPolicy::OnCustomUninstall() {
   cros_component_installer_->UnregisterCompatiblePath(name_);
 
-  base::PostTask(FROM_HERE, {content::BrowserThread::UI},
-                 base::BindOnce(&FinishCustomUninstallOnUIThread, name_));
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&FinishCustomUninstallOnUIThread, name_));
 }
 
 void CrOSComponentInstallerPolicy::ComponentReady(
     const base::Version& version,
     const base::FilePath& path,
     std::unique_ptr<base::DictionaryValue> manifest) {
-  std::string min_env_version;
-  if (!manifest || !manifest->GetString("min_env_version", &min_env_version))
-    return;
+  if (env_version_.size()) {
+    std::string min_env_version;
+    if (!manifest || !manifest->GetString("min_env_version", &min_env_version))
+      return;
 
-  if (!IsCompatible(env_version_, min_env_version))
-    return;
+    if (!IsCompatible(env_version_, min_env_version))
+      return;
+  }
 
   cros_component_installer_->RegisterCompatiblePath(GetName(), path);
 }
@@ -182,11 +191,6 @@ CrOSComponentInstallerPolicy::GetInstallerAttributes() const {
   update_client::InstallerAttributes attrs;
   attrs["_env_version"] = env_version_;
   return attrs;
-}
-
-std::vector<std::string> CrOSComponentInstallerPolicy::GetMimeTypes() const {
-  std::vector<std::string> mime_types;
-  return mime_types;
 }
 
 bool CrOSComponentInstallerPolicy::IsCompatible(
@@ -270,7 +274,7 @@ void CrOSComponentInstaller::EmitInstalledSignal(const std::string& component) {
     delegate_->EmitInstalledSignal(component);
 }
 
-bool CrOSComponentInstaller::IsRegistered(const std::string& name) const {
+bool CrOSComponentInstaller::IsRegisteredMayBlock(const std::string& name) {
   base::FilePath root;
   if (!base::PathService::Get(DIR_COMPONENT_USER, &root))
     return false;

@@ -12,9 +12,9 @@
 #include "base/base_paths_posix.h"
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/containers/contains.h"
 #include "base/i18n/time_formatting.h"
 #include "base/path_service.h"
-#include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -23,6 +23,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/media_galleries/media_file_system_registry.h"
 #include "chrome/browser/media_galleries/media_galleries_histograms.h"
@@ -147,7 +148,7 @@ bool GetType(const base::DictionaryValue& dict,
 }
 
 const char* TypeToStringValue(MediaGalleryPrefInfo::Type type) {
-  const char* result = NULL;
+  const char* result = nullptr;
   switch (type) {
     case MediaGalleryPrefInfo::kUserAdded:
       result = kMediaGalleriesTypeUserAddedValue;
@@ -195,7 +196,7 @@ MediaGalleryPrefInfo::DefaultGalleryType GetDefaultGalleryType(
 
 const char* DefaultGalleryTypeToStringValue(
     MediaGalleryPrefInfo::DefaultGalleryType default_gallery_type) {
-  const char* result = NULL;
+  const char* result = nullptr;
   switch (default_gallery_type) {
     case MediaGalleryPrefInfo::kNotDefault:
       result = kMediaGalleriesDefaultGalleryTypeNotDefaultValue;
@@ -398,7 +399,7 @@ base::string16 MediaGalleryPrefInfo::GetGalleryDisplayName() const {
     if (!display_name.empty())
       return display_name;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     // See chrome/browser/chromeos/fileapi/file_system_backend.cc
     base::FilePath download_path;
     if (base::PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS_SAFE,
@@ -585,7 +586,7 @@ void MediaGalleriesPreferences::InitFromPrefs() {
       prefs::kMediaGalleriesRememberedGalleries);
   if (list) {
     for (auto it = list->begin(); it != list->end(); ++it) {
-      const base::DictionaryValue* dict = NULL;
+      const base::DictionaryValue* dict = nullptr;
       if (!it->GetAsDictionary(&dict))
         continue;
 
@@ -1027,9 +1028,9 @@ void MediaGalleriesPreferences::EraseOrBlacklistGalleryById(
           dict->SetInteger(kMediaGalleriesScanVideoCountKey, 0);
         }
       } else {
-        list->Erase(iter, NULL);
+        list->Erase(iter, nullptr);
       }
-      update.reset(NULL);  // commits the update.
+      update.reset();  // commits the update.
 
       InitFromPrefs();
       for (auto& observer : gallery_change_observers_)
@@ -1153,7 +1154,7 @@ const MediaGalleriesPrefInfoMap& MediaGalleriesPreferences::known_galleries()
 
 void MediaGalleriesPreferences::Shutdown() {
   weak_factory_.InvalidateWeakPtrs();
-  profile_ = NULL;
+  profile_ = nullptr;
 }
 
 // static
@@ -1185,7 +1186,7 @@ bool MediaGalleriesPreferences::SetGalleryPermissionInPrefs(
   } else {
     // If the gallery is already in the list, update the permission...
     for (auto iter = permissions->begin(); iter != permissions->end(); ++iter) {
-      base::DictionaryValue* dict = NULL;
+      base::DictionaryValue* dict = nullptr;
       if (!iter->GetAsDictionary(&dict))
         continue;
       MediaGalleryPermission perm;
@@ -1221,14 +1222,14 @@ bool MediaGalleriesPreferences::UnsetGalleryPermissionInPrefs(
     return false;
 
   for (auto iter = permissions->begin(); iter != permissions->end(); ++iter) {
-    const base::DictionaryValue* dict = NULL;
+    const base::DictionaryValue* dict = nullptr;
     if (!iter->GetAsDictionary(&dict))
       continue;
     MediaGalleryPermission perm;
     if (!GetMediaGalleryPermissionFromDictionary(dict, &perm))
       continue;
     if (perm.pref_id == gallery_id) {
-      permissions->Erase(iter, NULL);
+      permissions->Erase(iter, nullptr);
       return true;
     }
   }
@@ -1248,7 +1249,7 @@ MediaGalleriesPreferences::GetGalleryPermissionsFromPrefs(
   }
 
   for (auto iter = permissions->begin(); iter != permissions->end(); ++iter) {
-    const base::DictionaryValue* dict = NULL;
+    const base::DictionaryValue* dict = nullptr;
     if (!iter->GetAsDictionary(&dict))
       continue;
     MediaGalleryPermission perm;

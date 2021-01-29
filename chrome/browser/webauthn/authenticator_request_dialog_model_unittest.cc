@@ -7,12 +7,11 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
+#include "base/containers/contains.h"
 #include "base/containers/flat_set.h"
 #include "base/macros.h"
 #include "base/optional.h"
-#include "base/stl_util.h"
 #include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "chrome/browser/webauthn/authenticator_reference.h"
@@ -98,7 +97,7 @@ class AuthenticatorRequestDialogModelTest : public ::testing::Test {
 
 TEST_F(AuthenticatorRequestDialogModelTest, TransportAutoSelection) {
   enum class TransportAvailabilityParam {
-    kHasTouchIdCredential,
+    kHasPlatformCredential,
     kHasWinNativeAuthenticator,
     kHasCableExtension,
   };
@@ -128,7 +127,7 @@ TEST_F(AuthenticatorRequestDialogModelTest, TransportAutoSelection) {
       {RequestType::kGetAssertion,
        {AuthenticatorTransport::kInternal},
        {},
-       {TransportAvailabilityParam::kHasTouchIdCredential},
+       {TransportAvailabilityParam::kHasPlatformCredential},
        Step::kNotStarted},
       {RequestType::kGetAssertion,
        {AuthenticatorTransport::kCloudAssistedBluetoothLowEnergy},
@@ -155,7 +154,7 @@ TEST_F(AuthenticatorRequestDialogModelTest, TransportAutoSelection) {
       {RequestType::kGetAssertion,
        kAllTransports,
        AuthenticatorTransport::kUsbHumanInterfaceDevice,
-       {TransportAvailabilityParam::kHasTouchIdCredential},
+       {TransportAvailabilityParam::kHasPlatformCredential},
        Step::kNotStarted},
 
       // The KeyChain does not contain an allowed Touch ID credential.
@@ -198,13 +197,13 @@ TEST_F(AuthenticatorRequestDialogModelTest, TransportAutoSelection) {
       {RequestType::kGetAssertion,
        {AuthenticatorTransport::kUsbHumanInterfaceDevice},
        base::nullopt,
-       {TransportAvailabilityParam::kHasTouchIdCredential},
+       {TransportAvailabilityParam::kHasPlatformCredential},
        Step::kUsbInsertAndActivate},
       {RequestType::kGetAssertion,
        {AuthenticatorTransport::kUsbHumanInterfaceDevice,
         AuthenticatorTransport::kNearFieldCommunication},
        base::nullopt,
-       {TransportAvailabilityParam::kHasTouchIdCredential},
+       {TransportAvailabilityParam::kHasPlatformCredential},
        Step::kTransportSelection},
 
       // If caBLE is one of the allowed transports, it has second-highest
@@ -288,9 +287,9 @@ TEST_F(AuthenticatorRequestDialogModelTest, TransportAutoSelection) {
     transports_info.request_type = test_case.request_type;
     transports_info.available_transports = test_case.available_transports;
 
-    if (base::Contains(test_case.transport_params,
-                       TransportAvailabilityParam::kHasTouchIdCredential))
-      transports_info.has_recognized_mac_touch_id_credential = true;
+    transports_info.has_recognized_platform_authenticator_credential =
+        base::Contains(test_case.transport_params,
+                       TransportAvailabilityParam::kHasPlatformCredential);
 
     if (base::Contains(
             test_case.transport_params,
@@ -320,33 +319,19 @@ TEST_F(AuthenticatorRequestDialogModelTest, TransportAutoSelection) {
 
 TEST_F(AuthenticatorRequestDialogModelTest, TransportList) {
   for (const bool cable_extension_provided : {false, true}) {
-    for (const bool have_paired_phones : {false, true}) {
-      TransportAvailabilityInfo transports_info;
-      transports_info.available_transports = kAllTransports;
-      AuthenticatorRequestDialogModel model(/*relying_party_id=*/"example.com");
-      model.set_cable_transport_info(cable_extension_provided,
-                                     have_paired_phones,
-                                     /*qr_generator_key=*/base::nullopt);
-      model.StartFlow(std::move(transports_info), base::nullopt);
-
-      const bool should_include_cable =
-          cable_extension_provided || have_paired_phones;
-      if (should_include_cable) {
-        EXPECT_THAT(
-            model.available_transports(),
-            ::testing::UnorderedElementsAre(
-                AuthenticatorTransport::kUsbHumanInterfaceDevice,
-                AuthenticatorTransport::kNearFieldCommunication,
-                AuthenticatorTransport::kInternal,
-                AuthenticatorTransport::kCloudAssistedBluetoothLowEnergy));
-      } else {
-        EXPECT_THAT(model.available_transports(),
-                    ::testing::UnorderedElementsAre(
-                        AuthenticatorTransport::kUsbHumanInterfaceDevice,
-                        AuthenticatorTransport::kNearFieldCommunication,
-                        AuthenticatorTransport::kInternal));
-      }
-    }
+    TransportAvailabilityInfo transports_info;
+    transports_info.available_transports = kAllTransports;
+    AuthenticatorRequestDialogModel model(/*relying_party_id=*/"example.com");
+    model.set_cable_transport_info(cable_extension_provided,
+                                   /*have_paired_phones=*/false,
+                                   /*qr_generator_key=*/base::nullopt);
+    model.StartFlow(std::move(transports_info), base::nullopt);
+    EXPECT_THAT(model.available_transports(),
+                ::testing::UnorderedElementsAre(
+                    AuthenticatorTransport::kUsbHumanInterfaceDevice,
+                    AuthenticatorTransport::kNearFieldCommunication,
+                    AuthenticatorTransport::kInternal,
+                    AuthenticatorTransport::kCloudAssistedBluetoothLowEnergy));
   }
 }
 
@@ -532,7 +517,6 @@ TEST_F(AuthenticatorRequestDialogModelTest,
       &num_called));
   model.saved_authenticators().AddAuthenticator(
       AuthenticatorReference("authenticator" /* authenticator_id */,
-                             base::string16() /* authenticator_display_name */,
                              AuthenticatorTransport::kInternal));
 
   model.StartFlow(std::move(transports_info), base::nullopt);

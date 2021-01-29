@@ -7,7 +7,8 @@ package org.chromium.chrome.browser.provider;
 import android.content.ContentValues;
 import android.database.Cursor;
 import android.net.Uri;
-import android.support.test.filters.MediumTest;
+
+import androidx.test.filters.MediumTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -18,7 +19,6 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
@@ -41,7 +41,8 @@ public class ProviderBookmarksUriTest {
 
     @Before
     public void setUp() {
-        mBookmarksUri = ChromeBrowserProvider.getBookmarksApiUri(mProviderTestRule.getActivity());
+        mBookmarksUri =
+                ChromeBrowserProviderImpl.getBookmarksApiUri(mProviderTestRule.getActivity());
         mProviderTestRule.getContentResolver().delete(mBookmarksUri, null, null);
     }
 
@@ -111,7 +112,6 @@ public class ProviderBookmarksUriTest {
     @Test
     @MediumTest
     @Feature({"Android-ContentProvider"})
-    @RetryOnFailure
     public void testQueryBookmark() {
         final long now = System.currentTimeMillis();
         final long lastUpdateTime[] = { now, now - 1000 * 60 };
@@ -199,7 +199,6 @@ public class ProviderBookmarksUriTest {
     @Test
     @MediumTest
     @Feature({"Android-ContentProvider"})
-    @RetryOnFailure
     public void testUpdateBookmark() {
         final long now = System.currentTimeMillis();
         final long lastUpdateTime[] = { now, now - 1000 * 60 };
@@ -257,7 +256,6 @@ public class ProviderBookmarksUriTest {
     @Test
     @MediumTest
     @Feature({"Android-ContentProvider"})
-    @RetryOnFailure
     public void testDeleteBookmark() {
         final long now = System.currentTimeMillis();
         final long lastUpdateTime[] = { now, now - 1000 * 60 };

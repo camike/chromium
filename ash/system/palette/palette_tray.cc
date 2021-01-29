@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "ash/accessibility/accessibility_controller_impl.h"
+#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/ash_pref_names.h"
 #include "ash/public/cpp/shelf_config.h"
 #include "ash/public/cpp/stylus_utils.h"
@@ -21,17 +22,21 @@
 #include "ash/system/palette/palette_tool_manager.h"
 #include "ash/system/palette/palette_utils.h"
 #include "ash/system/palette/palette_welcome_bubble.h"
-#include "ash/system/tray/system_menu_button.h"
+#include "ash/system/palette/stylus_battery_delegate.h"
+#include "ash/system/tray/tray_background_view.h"
 #include "ash/system/tray/tray_bubble_wrapper.h"
 #include "ash/system/tray/tray_container.h"
-#include "ash/system/tray/tray_popup_item_style.h"
 #include "ash/system/tray/tray_popup_utils.h"
+#include "ash/system/tray/tray_utils.h"
+#include "ash/system/unified/top_shortcut_button.h"
 #include "base/bind.h"
 #include "base/metrics/histogram_macros.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
+#include "ui/accessibility/ax_enums.mojom-shared.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/display/display.h"
@@ -39,7 +44,6 @@
 #include "ui/events/devices/device_data_manager.h"
 #include "ui/events/devices/stylus_state.h"
 #include "ui/events/event_constants.h"
-#include "ui/gfx/color_palette.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/controls/image_view.h"
@@ -59,13 +63,15 @@ constexpr int kTrayIconCrossAxisInset = 0;
 // Width of the palette itself (dp).
 constexpr int kPaletteWidth = 332;
 
-// Padding at the top/bottom of the palette (dp).
-constexpr int kPalettePaddingOnTop = 4;
-constexpr int kPalettePaddingOnBottom = 2;
-
 // Margins between the title view and the edges around it (dp).
-constexpr int kPaddingBetweenTitleAndLeftEdge = 12;
 constexpr int kPaddingBetweenTitleAndSeparator = 3;
+constexpr int kPaddingBetweenBottomAndLastTrayItem = 8;
+
+// Insets for the title view (dp).
+constexpr gfx::Insets kTitleViewPadding(8, 16, 8, 16);
+
+// Spacing between buttons in the title view (dp).
+constexpr int kTitleViewChildSpacing = 16;
 
 // Returns true if the |palette_tray| is on an internal display or on every
 // display if requested from the command line.
@@ -85,33 +91,86 @@ bool ShouldShowOnDisplay(PaletteTray* palette_tray) {
   return display.IsInternal();
 }
 
-class TitleView : public views::View, public views::ButtonListener {
+class BatteryView : public views::View {
+ public:
+  explicit BatteryView(StylusBatteryDelegate* delegate) : delegate_(delegate) {
+    SetLayoutManager(std::make_unique<views::BoxLayout>(
+        views::BoxLayout::Orientation::kHorizontal, gfx::Insets(), 4));
+
+    SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
+
+    icon_ = AddChildView(std::make_unique<views::ImageView>());
+    icon_->SetImage(delegate->GetBatteryImage());
+
+    if (delegate->IsBatteryLevelLow()) {
+      label_ = AddChildView(std::make_unique<views::Label>(
+          l10n_util::GetStringUTF16(IDS_ASH_STYLUS_BATTERY_LOW_LABEL)));
+      label_->SetEnabledColor(delegate->GetColorForBatteryLevel());
+      TrayPopupUtils::SetLabelFontList(label_,
+                                       TrayPopupUtils::FontStyle::kSmallTitle);
+    }
+  }
+
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
+    node_data->role = ax::mojom::Role::kLabelText;
+    node_data->SetName(l10n_util::GetStringFUTF16(
+        IDS_ASH_STYLUS_BATTERY_PERCENT_ACCESSIBLE,
+        base::NumberToString16(delegate_->battery_level().value_or(0))));
+  }
+
+ private:
+  StylusBatteryDelegate* const delegate_;
+  views::ImageView* icon_ = nullptr;
+  views::Label* label_ = nullptr;
+};
+
+class TitleView : public views::View {
  public:
   explicit TitleView(PaletteTray* palette_tray) : palette_tray_(palette_tray) {
     // TODO(tdanderson|jdufault): Use TriView to handle the layout of the title.
     // See crbug.com/614453.
     auto box_layout = std::make_unique<views::BoxLayout>(
-        views::BoxLayout::Orientation::kHorizontal);
+        views::BoxLayout::Orientation::kHorizontal, kTitleViewPadding,
+        kTitleViewChildSpacing);
     box_layout->set_cross_axis_alignment(
         views::BoxLayout::CrossAxisAlignment::kCenter);
     views::BoxLayout* layout_ptr = SetLayoutManager(std::move(box_layout));
 
-    auto* title_label =
-        new views::Label(l10n_util::GetStringUTF16(IDS_ASH_STYLUS_TOOLS_TITLE));
+    auto* title_label = AddChildView(std::make_unique<views::Label>(
+        l10n_util::GetStringUTF16(IDS_ASH_STYLUS_TOOLS_TITLE)));
     title_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    AddChildView(title_label);
-    TrayPopupItemStyle style(TrayPopupItemStyle::FontStyle::TITLE,
-                             false /* use_unified_theme */);
-    style.SetupLabel(title_label);
+    title_label->SetEnabledColor(AshColorProvider::Get()->GetContentLayerColor(
+        AshColorProvider::ContentLayerType::kTextColorPrimary));
+    TrayPopupUtils::SetLabelFontList(title_label,
+                                     TrayPopupUtils::FontStyle::kPodMenuHeader);
     layout_ptr->SetFlexForView(title_label, 1);
-    help_button_ = new SystemMenuButton(this, kSystemMenuHelpIcon,
-                                        IDS_ASH_STATUS_TRAY_HELP);
-    settings_button_ = new SystemMenuButton(this, kSystemMenuSettingsIcon,
-                                            IDS_ASH_PALETTE_SETTINGS);
 
-    AddChildView(help_button_);
-    AddChildView(TrayPopupUtils::CreateVerticalSeparator());
-    AddChildView(settings_button_);
+    if (ash::features::IsStylusBatteryStatusEnabled()) {
+      AddChildView(std::make_unique<BatteryView>(
+          palette_tray->stylus_battery_delegate()));
+
+      auto* separator = AddChildView(std::make_unique<views::Separator>());
+      separator->SetPreferredHeight(GetPreferredSize().height());
+      separator->SetColor(AshColorProvider::Get()->GetContentLayerColor(
+          AshColorProvider::ContentLayerType::kSeparatorColor));
+    }
+
+    help_button_ = AddChildView(std::make_unique<TopShortcutButton>(
+        base::BindRepeating(
+            &TitleView::ButtonPressed, base::Unretained(this),
+            PaletteTrayOptions::PALETTE_HELP_BUTTON,
+            base::BindRepeating(
+                &SystemTrayClient::ShowPaletteHelp,
+                base::Unretained(Shell::Get()->system_tray_model()->client()))),
+        kSystemMenuHelpIcon, IDS_ASH_STATUS_TRAY_HELP));
+    settings_button_ = AddChildView(std::make_unique<TopShortcutButton>(
+        base::BindRepeating(
+            &TitleView::ButtonPressed, base::Unretained(this),
+            PaletteTrayOptions::PALETTE_SETTINGS_BUTTON,
+            base::BindRepeating(
+                &SystemTrayClient::ShowPaletteSettings,
+                base::Unretained(Shell::Get()->system_tray_model()->client()))),
+        kSystemMenuSettingsIcon, IDS_ASH_PALETTE_SETTINGS));
   }
 
   ~TitleView() override = default;
@@ -120,23 +179,12 @@ class TitleView : public views::View, public views::ButtonListener {
   const char* GetClassName() const override { return "TitleView"; }
 
  private:
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override {
-    if (sender == settings_button_) {
-      palette_tray_->RecordPaletteOptionsUsage(
-          PaletteTrayOptions::PALETTE_SETTINGS_BUTTON,
-          PaletteInvocationMethod::MENU);
-      Shell::Get()->system_tray_model()->client()->ShowPaletteSettings();
-      palette_tray_->HidePalette();
-    } else if (sender == help_button_) {
-      palette_tray_->RecordPaletteOptionsUsage(
-          PaletteTrayOptions::PALETTE_HELP_BUTTON,
-          PaletteInvocationMethod::MENU);
-      Shell::Get()->system_tray_model()->client()->ShowPaletteHelp();
-      palette_tray_->HidePalette();
-    } else {
-      NOTREACHED();
-    }
+  void ButtonPressed(PaletteTrayOptions option,
+                     base::RepeatingClosure callback) {
+    palette_tray_->RecordPaletteOptionsUsage(option,
+                                             PaletteInvocationMethod::MENU);
+    std::move(callback).Run();
+    palette_tray_->HidePalette();
   }
 
   // Unowned pointers to button views so we can determine which button was
@@ -159,8 +207,7 @@ class StylusEventHandler : public ui::EventHandler {
 
   // ui::EventHandler:
   void OnTouchEvent(ui::TouchEvent* event) override {
-    if (event->pointer_details().pointer_type ==
-        ui::EventPointerType::POINTER_TYPE_PEN) {
+    if (event->pointer_details().pointer_type == ui::EventPointerType::kPen) {
       palette_tray_->OnStylusEvent(*event);
     }
   }
@@ -182,16 +229,13 @@ PaletteTray::PaletteTray(Shelf* shelf)
 
   SetLayoutManager(std::make_unique<views::FillLayout>());
   icon_ = new views::ImageView();
-  icon_->set_tooltip_text(
-      l10n_util::GetStringUTF16(IDS_ASH_STYLUS_TOOLS_TITLE));
+  icon_->SetTooltipText(l10n_util::GetStringUTF16(IDS_ASH_STYLUS_TOOLS_TITLE));
   UpdateTrayIcon();
 
   tray_container()->SetMargin(kTrayIconMainAxisInset, kTrayIconCrossAxisInset);
   tray_container()->AddChildView(icon_);
 
   Shell::Get()->AddShellObserver(this);
-
-  InitializeWithLocalState();
 }
 
 PaletteTray::~PaletteTray() {
@@ -210,7 +254,7 @@ void PaletteTray::RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
 // static
 void PaletteTray::RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(
-      prefs::kEnableStylusTools, true,
+      prefs::kEnableStylusTools, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
   registry->RegisterBooleanPref(
       prefs::kLaunchPaletteOnEjectEvent, true,
@@ -231,8 +275,17 @@ bool PaletteTray::ShouldShowPalette() const {
 }
 
 void PaletteTray::OnStylusEvent(const ui::TouchEvent& event) {
-  if (!HasSeenStylus() && local_state_)
+  if (!HasSeenStylus() && local_state_) {
     local_state_->SetBoolean(prefs::kHasSeenStylus, true);
+
+    // Flip the enable stylus tools setting if the user has never interacted
+    // with it. crbug/1122609
+    if (!pref_change_registrar_user_->prefs()->HasPrefPath(
+            prefs::kEnableStylusTools)) {
+      pref_change_registrar_user_->prefs()->SetBoolean(
+          prefs::kEnableStylusTools, true);
+    }
+  }
 
   // Attempt to show the welcome bubble.
   if (!welcome_bubble_->HasBeenShown() && active_user_pref_service_) {
@@ -294,8 +347,17 @@ void PaletteTray::ClickedOutsideBubble() {
   HidePalette();
 }
 
+void PaletteTray::OnThemeChanged() {
+  TrayBackgroundView::OnThemeChanged();
+  UpdateTrayIcon();
+}
+
 base::string16 PaletteTray::GetAccessibleNameForTray() {
   return l10n_util::GetStringUTF16(IDS_ASH_STYLUS_TOOLS_TITLE);
+}
+
+void PaletteTray::HandleLocaleChange() {
+  icon_->SetTooltipText(l10n_util::GetStringUTF16(IDS_ASH_STYLUS_TOOLS_TITLE));
 }
 
 void PaletteTray::HideBubbleWithView(const TrayBubbleView* bubble_view) {
@@ -356,7 +418,7 @@ base::string16 PaletteTray::GetAccessibleNameForBubble() {
 }
 
 bool PaletteTray::ShouldEnableExtraKeyboardAccessibility() {
-  return Shell::Get()->accessibility_controller()->spoken_feedback_enabled();
+  return Shell::Get()->accessibility_controller()->spoken_feedback().enabled();
 }
 
 void PaletteTray::HideBubble(const TrayBubbleView* bubble_view) {
@@ -429,6 +491,8 @@ void PaletteTray::AnchorUpdated() {
 void PaletteTray::Initialize() {
   TrayBackgroundView::Initialize();
   ui::DeviceDataManager::GetInstance()->AddObserver(this);
+
+  InitializeWithLocalState();
 }
 
 bool PaletteTray::PerformAction(const ui::Event& event) {
@@ -474,6 +538,9 @@ void PaletteTray::ShowBubble(bool show_by_click) {
   init_params.preferred_width = kPaletteWidth;
   init_params.close_on_deactivate = true;
   init_params.show_by_click = show_by_click;
+  init_params.translucent = true;
+  init_params.has_shadow = false;
+  init_params.corner_radius = kTrayItemCornerRadius;
 
   // TODO(tdanderson): Refactor into common row layout code.
   // TODO(tdanderson|jdufault): Add material design ripple effects to the menu
@@ -482,30 +549,37 @@ void PaletteTray::ShowBubble(bool show_by_click) {
   // Create and customize bubble view.
   TrayBubbleView* bubble_view = new TrayBubbleView(init_params);
   bubble_view->set_anchor_view_insets(GetBubbleAnchorInsets());
-  bubble_view->set_margins(
-      gfx::Insets(kPalettePaddingOnTop, 0, kPalettePaddingOnBottom, 0));
+  bubble_view->set_margins(GetSecondaryBubbleInsets());
+  bubble_view->SetBorder(views::CreateEmptyBorder(
+      gfx::Insets(0, 0, kPaddingBetweenBottomAndLastTrayItem, 0)));
+
+  auto setup_layered_view = [](views::View* view) {
+    view->SetPaintToLayer();
+    view->layer()->SetFillsBoundsOpaquely(false);
+  };
 
   // Add title.
-  auto* title_view = new TitleView(this);
-  title_view->SetBorder(views::CreateEmptyBorder(
-      gfx::Insets(0, kPaddingBetweenTitleAndLeftEdge, 0, 0)));
-  bubble_view->AddChildView(title_view);
+  auto* title_view =
+      bubble_view->AddChildView(std::make_unique<TitleView>(this));
+  setup_layered_view(title_view);
 
   // Add horizontal separator between the title and tools.
-  auto* separator = new views::Separator();
+  auto* separator =
+      bubble_view->AddChildView(std::make_unique<views::Separator>());
+  setup_layered_view(separator);
   separator->SetColor(AshColorProvider::Get()->GetContentLayerColor(
-      AshColorProvider::ContentLayerType::kSeparator,
-      AshColorProvider::AshColorMode::kLight));
+      AshColorProvider::ContentLayerType::kSeparatorColor));
   separator->SetBorder(views::CreateEmptyBorder(gfx::Insets(
       kPaddingBetweenTitleAndSeparator, 0, kMenuSeparatorVerticalPadding, 0)));
-  bubble_view->AddChildView(separator);
 
   // Add palette tools.
   // TODO(tdanderson|jdufault): Use SystemMenuButton to get the material design
   // ripples.
   std::vector<PaletteToolView> views = palette_tool_manager_->CreateViews();
-  for (const PaletteToolView& view : views)
+  for (const PaletteToolView& view : views) {
     bubble_view->AddChildView(view.view);
+    setup_layered_view(view.view);
+  }
 
   // Show the bubble.
   bubble_ = std::make_unique<TrayBubbleWrapper>(this, bubble_view,
@@ -549,7 +623,9 @@ void PaletteTray::UpdateTrayIcon() {
   icon_->SetImage(CreateVectorIcon(
       palette_tool_manager_->GetActiveTrayIcon(
           palette_tool_manager_->GetActiveTool(PaletteGroup::MODE)),
-      kTrayIconSize, ShelfConfig::Get()->shelf_icon_color()));
+      kTrayIconSize,
+      AshColorProvider::Get()->GetContentLayerColor(
+          AshColorProvider::ContentLayerType::kIconColorPrimary)));
 }
 
 void PaletteTray::OnPaletteEnabledPrefChanged() {
@@ -575,8 +651,6 @@ bool PaletteTray::DeactivateActiveTool() {
       palette_tool_manager_->GetActiveTool(PaletteGroup::MODE);
   if (active_tool_id != PaletteToolId::NONE) {
     palette_tool_manager_->DeactivateTool(active_tool_id);
-    // TODO(sammiequon): Investigate whether we should removed |is_switched|
-    // from PaletteToolIdToPaletteModeCancelType.
     RecordPaletteModeCancellation(PaletteToolIdToPaletteModeCancelType(
         active_tool_id, false /*is_switched*/));
     return true;
@@ -590,10 +664,9 @@ bool PaletteTray::HasSeenStylus() {
 }
 
 void PaletteTray::UpdateIconVisibility() {
-  bool visible_preferred = HasSeenStylus() && is_palette_enabled_ &&
-                           stylus_utils::HasStylusInput() &&
-                           ShouldShowOnDisplay(this) &&
-                           palette_utils::IsInUserSession();
+  bool visible_preferred =
+      is_palette_enabled_ && stylus_utils::HasStylusInput() &&
+      ShouldShowOnDisplay(this) && palette_utils::IsInUserSession();
   SetVisiblePreferred(visible_preferred);
   if (visible_preferred)
     UpdateLayout();

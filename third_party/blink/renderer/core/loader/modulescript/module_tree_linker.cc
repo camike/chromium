@@ -4,7 +4,10 @@
 
 #include "third_party/blink/renderer/core/loader/modulescript/module_tree_linker.h"
 
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/module_record.h"
+#include "third_party/blink/renderer/bindings/core/v8/module_request.h"
+#include "third_party/blink/renderer/core/loader/modulescript/module_script_creation_params.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_fetch_request.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_tree_linker_registry.h"
 #include "third_party/blink/renderer/core/script/module_script.h"
@@ -33,7 +36,7 @@ namespace blink {
 void ModuleTreeLinker::Fetch(
     const KURL& url,
     ResourceFetcher* fetch_client_settings_object_fetcher,
-    mojom::RequestContextType context_type,
+    mojom::blink::RequestContextType context_type,
     network::mojom::RequestDestination destination,
     const ScriptFetchOptions& options,
     Modulator* modulator,
@@ -51,7 +54,7 @@ void ModuleTreeLinker::Fetch(
 void ModuleTreeLinker::FetchDescendantsForInlineScript(
     ModuleScript* module_script,
     ResourceFetcher* fetch_client_settings_object_fetcher,
-    mojom::RequestContextType context_type,
+    mojom::blink::RequestContextType context_type,
     network::mojom::RequestDestination destination,
     Modulator* modulator,
     ModuleScriptCustomFetchType custom_fetch_type,
@@ -68,7 +71,7 @@ void ModuleTreeLinker::FetchDescendantsForInlineScript(
 
 ModuleTreeLinker::ModuleTreeLinker(
     ResourceFetcher* fetch_client_settings_object_fetcher,
-    mojom::RequestContextType context_type,
+    mojom::blink::RequestContextType context_type,
     network::mojom::RequestDestination destination,
     Modulator* modulator,
     ModuleScriptCustomFetchType custom_fetch_type,
@@ -87,7 +90,7 @@ ModuleTreeLinker::ModuleTreeLinker(
   CHECK(client);
 }
 
-void ModuleTreeLinker::Trace(Visitor* visitor) {
+void ModuleTreeLinker::Trace(Visitor* visitor) const {
   visitor->Trace(fetch_client_settings_object_fetcher_);
   visitor->Trace(modulator_);
   visitor->Trace(registry_);
@@ -175,7 +178,9 @@ void ModuleTreeLinker::FetchRoot(const KURL& original_url,
 #endif
 
   // https://wicg.github.io/import-maps/#wait-for-import-maps
-  modulator_->ClearIsAcquiringImportMaps();
+  // 1.2. Set document’s acquiring import maps to false. [spec text]
+  modulator_->SetAcquiringImportMapsState(
+      Modulator::AcquiringImportMapsState::kAfterModuleScriptLoad);
 
   AdvanceState(State::kFetchingSelf);
 
@@ -246,9 +251,11 @@ void ModuleTreeLinker::FetchRootInline(ModuleScript* module_script) {
 #endif
 
   // https://wicg.github.io/import-maps/#wait-for-import-maps
+  // 1.2. Set document’s acquiring import maps to false. [spec text]
   //
   // TODO(hiroshige): This should be done before |module_script| is created.
-  modulator_->ClearIsAcquiringImportMaps();
+  modulator_->SetAcquiringImportMapsState(
+      Modulator::AcquiringImportMapsState::kAfterModuleScriptLoad);
 
   AdvanceState(State::kFetchingSelf);
 
@@ -379,19 +386,23 @@ void ModuleTreeLinker::FetchDescendants(const ModuleScript* module_script) {
 
   // <spec step="5">For each string requested of
   // record.[[RequestedModules]],</spec>
-  Vector<Modulator::ModuleRequest> module_requests =
+  Vector<ModuleRequest> module_requests =
       modulator_->ModuleRequestsFromModuleRecord(record);
 
   for (const auto& module_request : module_requests) {
     // <spec step="5.1">Let url be the result of resolving a module specifier
     // given module script's base URL and requested.</spec>
     KURL url = module_script->ResolveModuleSpecifier(module_request.specifier);
+    ModuleType module_type = modulator_->ModuleTypeFromRequest(module_request);
 
     // <spec step="5.2">Assert: url is never failure, because resolving a module
     // specifier must have been previously successful with these same two
     // arguments.</spec>
     CHECK(url.IsValid()) << "ModuleScript::ResolveModuleSpecifier() impl must "
                             "return a valid url.";
+    CHECK_NE(module_type, ModuleType::kInvalid);
+    // TODO(crbug.com/1132413) Collect module types alongside URLs to include in
+    // visited_set_ and each ModuleScriptFetchRequest.
 
     // <spec step="5.3">If visited set does not contain url, then:</spec>
     if (!visited_set_.Contains(url)) {
@@ -572,7 +583,7 @@ ScriptValue ModuleTreeLinker::FindFirstParseError(
 
   // <spec step="5.1">Let childSpecifiers be the value of moduleScript's
   // record's [[RequestedModules]] internal slot.</spec>
-  Vector<Modulator::ModuleRequest> child_specifiers =
+  Vector<ModuleRequest> child_specifiers =
       modulator_->ModuleRequestsFromModuleRecord(record);
 
   for (const auto& module_request : child_specifiers) {
@@ -581,6 +592,8 @@ ScriptValue ModuleTreeLinker::FindFirstParseError(
     // moduleScript's base URL and that item. ...</spec>
     KURL child_url =
         module_script->ResolveModuleSpecifier(module_request.specifier);
+    ModuleType child_module_type =
+        modulator_->ModuleTypeFromRequest(module_request);
 
     // <spec step="5.2">... (None of these will ever fail, as otherwise
     // moduleScript would have been marked as itself having a parse
@@ -588,13 +601,14 @@ ScriptValue ModuleTreeLinker::FindFirstParseError(
     CHECK(child_url.IsValid())
         << "ModuleScript::ResolveModuleSpecifier() impl must "
            "return a valid url.";
+    CHECK_NE(child_module_type, ModuleType::kInvalid);
 
     // <spec step="5.3">Let childModules be the list obtained by getting each
     // value in moduleMap whose key is given by an item of childURLs.</spec>
     //
     // <spec step="5.4">For each childModule of childModules:</spec>
     const ModuleScript* child_module =
-        modulator_->GetFetchedModuleScript(child_url);
+        modulator_->GetFetchedModuleScript(child_url, child_module_type);
 
     // <spec step="5.4.1">Assert: childModule is a module script (i.e., it is
     // not "fetching" or null); ...</spec>

@@ -42,8 +42,7 @@ enum SendTabToSelfMenuType { kTab, kOmnibox, kContent, kLink };
 void CreateNewEntry(content::WebContents* tab,
                     const std::string& target_device_name,
                     const std::string& target_device_guid,
-                    const GURL& link_url = GURL(),
-                    bool show_notification = true);
+                    const GURL& link_url = GURL());
 
 // Adds a new entry to SendTabToSelfModel when user clicks the single valid
 // device. Will be called when GetValidDeviceCount() == 1.
@@ -54,10 +53,6 @@ void ShareToSingleTarget(content::WebContents* tab,
 // entry point is shown.
 void RecordSendTabToSelfClickResult(const std::string& entry_point,
                                     SendTabToSelfClickResult state);
-
-// Records the count of valid devices when user sees the device list.
-void RecordSendTabToSelfDeviceCount(const std::string& entry_point,
-                                    const int& device_count);
 
 // Gets the count of valid device number.
 size_t GetValidDeviceCount(Profile* profile);

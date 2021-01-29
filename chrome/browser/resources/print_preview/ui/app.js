@@ -18,7 +18,8 @@ import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bun
 
 import {CloudPrintInterface, CloudPrintInterfaceErrorEventDetail, CloudPrintInterfaceEventType} from '../cloud_print_interface.js';
 import {CloudPrintInterfaceImpl} from '../cloud_print_interface_impl.js';
-import {Destination} from '../data/destination.js';
+import {Destination, DestinationOrigin} from '../data/destination.js';
+import {getPrinterTypeForDestination, PrinterType} from '../data/destination_match.js';
 import {DocumentSettings} from '../data/document_info.js';
 import {Margins} from '../data/margins.js';
 import {MeasurementSystem} from '../data/measurement_system.js';
@@ -26,7 +27,10 @@ import {DuplexMode, whenReady} from '../data/model.js';
 import {PrintableArea} from '../data/printable_area.js';
 import {Size} from '../data/size.js';
 import {Error, State} from '../data/state.js';
-import {NativeInitialSettings, NativeLayer} from '../native_layer.js';
+import {NativeInitialSettings, NativeLayer, NativeLayerImpl} from '../native_layer.js';
+// <if expr="chromeos">
+import {NativeLayerCros, NativeLayerCrosImpl} from '../native_layer_cros.js';
+// </if>
 
 import {DestinationState} from './destination_settings.js';
 import {PreviewAreaState} from './preview_area.js';
@@ -112,6 +116,17 @@ Polymer({
 
     /** @private {number} */
     maxSheets_: Number,
+
+    // <if expr="chromeos">
+    /** @private */
+    saveToDriveFlagEnabled_: {
+      type: Boolean,
+      value() {
+        return loadTimeData.getBoolean('printSaveToDrive');
+      },
+      readOnly: true,
+    },
+    // </if>
   },
 
   listeners: {
@@ -121,6 +136,11 @@ Polymer({
 
   /** @private {?NativeLayer} */
   nativeLayer_: null,
+
+  // <if expr="chromeos">
+  /** @private {?NativeLayerCros} */
+  nativeLayerCros_: null,
+  // </if>
 
   /** @private {!EventTracker} */
   tracker_: new EventTracker(),
@@ -168,7 +188,10 @@ Polymer({
   /** @override */
   attached() {
     document.documentElement.classList.remove('loading');
-    this.nativeLayer_ = NativeLayer.getInstance();
+    this.nativeLayer_ = NativeLayerImpl.getInstance();
+    // <if expr="chromeos">
+    this.nativeLayerCros_ = NativeLayerCrosImpl.getInstance();
+    // </if>
     this.addWebUIListener('print-failed', this.onPrintFailed_.bind(this));
     this.addWebUIListener(
         'print-preset-options', this.onPrintPresetOptions_.bind(this));
@@ -187,7 +210,7 @@ Polymer({
 
   /** @private */
   onSidebarFocus_() {
-    this.$.previewArea.hideToolbars();
+    this.$.previewArea.hideToolbar();
   },
 
   /**
@@ -217,6 +240,14 @@ Polymer({
         this.close_();
         e.preventDefault();
       }
+
+      // <if expr="chromeos">
+      if (this.destination_ &&
+          this.destination_.origin === DestinationOrigin.CROS) {
+        this.nativeLayerCros_.recordPrinterStatusHistogram(
+            this.destination_.printerStatusReason, false);
+      }
+      // </if>
       return;
     }
 
@@ -320,7 +351,7 @@ Polymer({
           settings.isInAppKioskMode, settings.printerName,
           settings.serializedDefaultDestinationSelectionRulesStr,
           settings.userAccounts || null, settings.syncAvailable,
-          settings.pdfPrinterDisabled);
+          settings.pdfPrinterDisabled, settings.isDriveMounted || false);
       this.destinationsManaged_ = settings.destinationsManaged;
       this.isInKioskAutoPrintMode_ = settings.isInKioskAutoPrintMode;
 
@@ -344,8 +375,7 @@ Polymer({
   initializeCloudPrint_(cloudPrintUrl, appKioskMode, uiLocale) {
     assert(!this.cloudPrintInterface_);
     this.cloudPrintInterface_ = CloudPrintInterfaceImpl.getInstance();
-    this.cloudPrintInterface_.configure(
-        cloudPrintUrl, assert(this.nativeLayer_), appKioskMode, uiLocale);
+    this.cloudPrintInterface_.configure(cloudPrintUrl, appKioskMode, uiLocale);
     this.tracker_.add(
         assert(this.cloudPrintInterface_).getEventTarget(),
         CloudPrintInterfaceEventType.SUBMIT_DONE, this.close_.bind(this));
@@ -371,7 +401,8 @@ Polymer({
     switch (this.destinationState_) {
       case DestinationState.SELECTED:
       case DestinationState.SET:
-        if (this.state !== State.NOT_READY) {
+        if (this.state !== State.NOT_READY &&
+            this.state !== State.FATAL_ERROR) {
           this.$.state.transitTo(State.NOT_READY);
         }
         break;
@@ -434,7 +465,8 @@ Polymer({
       this.nativeLayer_.dialogClose(this.cancelled_);
     } else if (this.state === State.HIDDEN) {
       if (this.destination_.isLocal &&
-          this.destination_.id !== Destination.GooglePromotedId.SAVE_AS_PDF) {
+          getPrinterTypeForDestination(this.destination_) !==
+              PrinterType.PDF_PRINTER) {
         // Only hide the preview for local, non PDF destinations.
         this.nativeLayer_.hidePreview();
       }
@@ -445,8 +477,8 @@ Polymer({
               destination, this.openPdfInPreview_,
               this.showSystemDialogBeforePrint_));
       if (destination.isLocal) {
-        const onError =
-            destination.id === Destination.GooglePromotedId.SAVE_AS_PDF ?
+        const onError = getPrinterTypeForDestination(destination) ===
+                PrinterType.PDF_PRINTER ?
             this.onFileSelectionCancel_.bind(this) :
             this.onPrintFailed_.bind(this);
         whenPrintDone.then(this.close_.bind(this), onError);
@@ -466,12 +498,26 @@ Polymer({
       this.printRequested_ = true;
       return;
     }
+    // <if expr="chromeos">
+    if (this.destination_ &&
+        this.destination_.origin === DestinationOrigin.CROS) {
+      this.nativeLayerCros_.recordPrinterStatusHistogram(
+          this.destination_.printerStatusReason, true);
+    }
+    // </if>
     this.$.state.transitTo(
         this.$.previewArea.previewLoaded() ? State.PRINTING : State.HIDDEN);
   },
 
   /** @private */
   onCancelRequested_() {
+    // <if expr="chromeos">
+    if (this.destination_ &&
+        this.destination_.origin === DestinationOrigin.CROS) {
+      this.nativeLayerCros_.recordPrinterStatusHistogram(
+          this.destination_.printerStatusReason, false);
+    }
+    // </if>
     this.cancelled_ = true;
     this.$.state.transitTo(State.CLOSING);
   },

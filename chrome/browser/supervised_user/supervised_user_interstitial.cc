@@ -7,14 +7,13 @@
 #include <stddef.h>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -46,7 +45,6 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #endif
 
-using content::BrowserThread;
 using content::WebContents;
 
 namespace {
@@ -83,8 +81,8 @@ class TabCloser : public content::WebContentsUserData<TabCloser> {
   friend class content::WebContentsUserData<TabCloser>;
 
   explicit TabCloser(WebContents* web_contents) : web_contents_(web_contents) {
-    base::PostTask(FROM_HERE, {BrowserThread::UI},
-                   base::BindOnce(&TabCloser::CloseTabImpl,
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&TabCloser::CloseTabImpl,
                                   weak_ptr_factory_.GetWeakPtr()));
   }
 
@@ -129,9 +127,10 @@ void CleanUpInfoBar(content::WebContents* web_contents) {
     details.entry = controller.GetVisibleEntry();
     if (controller.GetLastCommittedEntry()) {
       details.previous_entry_index = controller.GetLastCommittedEntryIndex();
-      details.previous_url = controller.GetLastCommittedEntry()->GetURL();
+      details.previous_main_frame_url =
+          controller.GetLastCommittedEntry()->GetURL();
     }
-    details.type = content::NAVIGATION_TYPE_NEW_PAGE;
+    details.type = content::NAVIGATION_TYPE_NEW_ENTRY;
     for (int i = service->infobar_count() - 1; i >= 0; --i) {
       infobars::InfoBar* infobar = service->infobar_at(i);
       if (infobar->delegate()->ShouldExpire(

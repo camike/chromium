@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
@@ -24,13 +23,14 @@
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/users/affiliation.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager_impl.h"
-#include "chrome/browser/chromeos/policy/app_install_event_log_uploader.h"
+#include "chrome/browser/chromeos/policy/arc_app_install_event_log_uploader.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
+#include "chrome/browser/chromeos/policy/extension_install_event_log_uploader.h"
 #include "chrome/browser/chromeos/policy/policy_oauth2_token_fetcher.h"
 #include "chrome/browser/chromeos/policy/remote_commands/user_commands_factory_chromeos.h"
 #include "chrome/browser/chromeos/policy/wildcard_login_checker.h"
-#include "chrome/browser/enterprise/reporting/report_generator.h"
-#include "chrome/browser/enterprise/reporting/report_scheduler.h"
+#include "chrome/browser/enterprise/reporting/report_scheduler_desktop.h"
+#include "chrome/browser/enterprise/reporting/reporting_delegate_factory_desktop.h"
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/net/system_network_context_manager.h"
@@ -39,6 +39,8 @@
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_features.h"
 #include "chromeos/constants/chromeos_switches.h"
+#include "components/enterprise/browser/reporting/report_generator.h"
+#include "components/enterprise/browser/reporting/report_scheduler.h"
 #include "components/invalidation/impl/profile_invalidation_provider.h"
 #include "components/keyed_service/content/browser_context_keyed_service_shutdown_notifier_factory.h"
 #include "components/policy/core/common/cloud/cloud_external_data_manager.h"
@@ -54,7 +56,6 @@
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/network_service_instance.h"
-#include "net/url_request/url_request_context_getter.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "url/gurl.h"
 
@@ -223,12 +224,7 @@ void UserCloudPolicyManagerChromeOS::Connect(
   // fully initialized (required so we can perform the initial policy load).
   std::unique_ptr<CloudPolicyClient> cloud_policy_client =
       std::make_unique<CloudPolicyClient>(
-          std::string() /* machine_id */, std::string() /* machine_model */,
-          std::string() /* brand_code */,
-          std::string() /* ethernet_mac_address */,
-          std::string() /* dock_mac_address */,
-          std::string() /* manufacture_date */, device_management_service,
-          system_url_loader_factory, nullptr /* signing_service */,
+          device_management_service, system_url_loader_factory,
           chromeos::GetDeviceDMTokenForUserPolicyGetter(account_id_));
   CreateComponentCloudPolicyService(
       dm_protocol::kChromeExtensionPolicyType, component_policy_cache_path_,
@@ -271,7 +267,9 @@ void UserCloudPolicyManagerChromeOS::Connect(
   }
 
   app_install_event_log_uploader_ =
-      std::make_unique<AppInstallEventLogUploader>(client(), profile_);
+      std::make_unique<ArcAppInstallEventLogUploader>(client(), profile_);
+  extension_install_event_log_uploader_ =
+      std::make_unique<ExtensionInstallEventLogUploader>(profile_);
 }
 
 void UserCloudPolicyManagerChromeOS::OnAccessTokenAvailable(
@@ -338,14 +336,20 @@ void UserCloudPolicyManagerChromeOS::EnableWildcardLoginCheck(
   wildcard_username_ = username;
 }
 
-AppInstallEventLogUploader*
+ArcAppInstallEventLogUploader*
 UserCloudPolicyManagerChromeOS::GetAppInstallEventLogUploader() {
   return app_install_event_log_uploader_.get();
+}
+
+ExtensionInstallEventLogUploader*
+UserCloudPolicyManagerChromeOS::GetExtensionInstallEventLogUploader() {
+  return extension_install_event_log_uploader_.get();
 }
 
 void UserCloudPolicyManagerChromeOS::Shutdown() {
   observed_profile_manager_.RemoveAll();
   app_install_event_log_uploader_.reset();
+  extension_install_event_log_uploader_.reset();
   report_scheduler_.reset();
   if (client())
     client()->RemoveObserver(this);
@@ -615,8 +619,9 @@ void UserCloudPolicyManagerChromeOS::FetchPolicyOAuthToken() {
     token_fetcher_ = PolicyOAuth2TokenFetcher::CreateInstance();
     token_fetcher_->StartWithRefreshToken(
         refresh_token, system_url_loader_factory,
-        base::Bind(&UserCloudPolicyManagerChromeOS::OnOAuth2PolicyTokenFetched,
-                   base::Unretained(this)));
+        base::BindOnce(
+            &UserCloudPolicyManagerChromeOS::OnOAuth2PolicyTokenFetched,
+            base::Unretained(this)));
     return;
   }
 
@@ -774,8 +779,14 @@ void UserCloudPolicyManagerChromeOS::StartReportSchedulerIfReady(
     return;
   }
 
+  // TODO(crbug.com/1102047): Split up Chrome OS reporting code into its own
+  // delegates, then use the Chrome OS delegate factory here.
+  enterprise_reporting::ReportingDelegateFactoryDesktop delegate_factory;
   report_scheduler_ = std::make_unique<enterprise_reporting::ReportScheduler>(
-      client(), std::make_unique<enterprise_reporting::ReportGenerator>());
+      client(),
+      std::make_unique<enterprise_reporting::ReportGenerator>(
+          &delegate_factory),
+      std::make_unique<enterprise_reporting::ReportSchedulerDesktop>(profile_));
 
   report_scheduler_->OnDMTokenUpdated();
 }
@@ -803,7 +814,7 @@ void UserCloudPolicyManagerChromeOS::OnProfileAdded(Profile* profile) {
       invalidation_provider->GetInvalidationServiceForCustomSender(
           policy::kPolicyFCMInvalidationSenderID));
 
-  shutdown_notifier_ =
+  shutdown_subscription_ =
       UserCloudPolicyManagerChromeOSNotifierFactory::GetInstance()
           ->Get(profile_)
           ->Subscribe(base::AdaptCallbackForRepeating(
@@ -815,7 +826,7 @@ void UserCloudPolicyManagerChromeOS::ProfileShutdown() {
   // Unregister the RemoteCommandsInvalidatorImpl from the InvalidatorRegistrar.
   invalidator_->Shutdown();
   invalidator_.reset();
-  shutdown_notifier_.reset();
+  shutdown_subscription_ = {};
 }
 
 void UserCloudPolicyManagerChromeOS::SetUserContextRefreshTokenForTests(

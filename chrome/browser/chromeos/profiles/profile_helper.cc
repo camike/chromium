@@ -13,11 +13,12 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
-#include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
+#include "chrome/browser/browsing_data/chrome_browsing_data_remover_constants.h"
 #include "chrome/browser/chromeos/base/file_flusher.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager.h"
@@ -35,13 +36,11 @@
 #include "chromeos/constants/chromeos_switches.h"
 #include "components/account_id/account_id.h"
 #include "components/crx_file/id_util.h"
-#include "components/prefs/pref_service.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/browsing_data_remover.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/browser/pref_names.h"
 
 namespace chromeos {
 
@@ -54,7 +53,6 @@ namespace {
 const char* kNonRiskyExtensionsIdsHashes[] = {
     "E24F1786D842E91E74C27929B0B3715A4689A473",  // Gnubby component extension
     "6F9E349A0561C78A0D3F41496FE521C5151C7F71",  // Gnubby app
-    "8EBDF73405D0B84CEABB8C7513C9B9FA9F1DC2CE",  // Genius app (help)
     "06BE211D5F014BAB34BC22D9DDA09C63A81D828E",  // Chrome OS XKB
     "3F50C3A83839D9C76334BCE81CDEC06174F266AF",  // Virtual Keyboard
     "2F47B526FA71F44816618C41EC55E5EE9543FDCC",  // Braille Keyboard
@@ -62,7 +60,8 @@ const char* kNonRiskyExtensionsIdsHashes[] = {
     "1CF709D51B2B96CF79D00447300BD3BFBE401D21",  // Mobile activation
     "40FF1103292F40C34066E023B8BE8CAE18306EAE",  // Chromeos help
     "3C654B3B6682CA194E75AD044CEDE927675DDEE8",  // Easy unlock
-    "2FCBCE08B34CCA1728A85F1EFBD9A34DD2558B2E",  // ChromeVox
+    "75C7F4B720314B6CB1B5817CD86089DB95CD2461",  // ChromeVox
+    "4D725C894DA4CF1F4D96C60F0D83BD745EB530CA",  // Switch Access
 };
 
 // As defined in /chromeos/dbus/cryptohome/cryptohome_client.cc.
@@ -110,6 +109,31 @@ bool IsLockScreenAppProfilePath(const base::FilePath& profile_path) {
   return profile_path.value() == chrome::kLockScreenAppProfile;
 }
 
+bool IsLockScreenProfilePath(const base::FilePath& profile_path) {
+  return profile_path.value() == chrome::kLockScreenProfile;
+}
+
+// Returns the path that corresponds to the passed profile.
+base::FilePath GetProfileDir(base::StringPiece profile) {
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  // profile_manager can be null in unit tests.
+  if (!profile_manager)
+    return base::FilePath();
+  base::FilePath user_data_dir = profile_manager->user_data_dir();
+  return user_data_dir.AppendASCII(profile);
+}
+
+// Returns an incognito profile that corresponds to the passed path.
+Profile* GetIncognitoProfile(base::FilePath profile_dir) {
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  // |profile_manager| could be null in tests.
+  if (!profile_manager) {
+    return nullptr;
+  }
+
+  return profile_manager->GetProfile(profile_dir)->GetPrimaryOTRProfile();
+}
+
 }  // anonymous namespace
 
 // static
@@ -126,7 +150,7 @@ class ProfileHelperImpl : public ProfileHelper,
   void ProfileStartup(Profile* profile) override;
   base::FilePath GetActiveUserProfileDir() override;
   void Initialize() override;
-  void ClearSigninProfile(const base::Closure& on_clear_callback) override;
+  void ClearSigninProfile(base::OnceClosure on_clear_callback) override;
 
   Profile* GetProfileByAccountId(const AccountId& account_id) override;
   Profile* GetProfileByUser(const user_manager::User* user) override;
@@ -148,7 +172,7 @@ class ProfileHelperImpl : public ProfileHelper,
 
  private:
   // BrowsingDataRemover::Observer implementation:
-  void OnBrowsingDataRemoverDone() override;
+  void OnBrowsingDataRemoverDone(uint64_t failed_data_types) override;
 
   // OAuth2LoginManager::Observer overrides.
   void OnSessionRestoreStateChanged(
@@ -165,10 +189,10 @@ class ProfileHelperImpl : public ProfileHelper,
   std::string active_user_id_hash_;
 
   // List of callbacks called after signin profile clearance.
-  std::vector<base::Closure> on_clear_callbacks_;
+  std::vector<base::OnceClosure> on_clear_callbacks_;
 
   // Called when a single stage of profile clearing is finished.
-  base::Closure on_clear_profile_stage_finished_;
+  base::RepeatingClosure on_clear_profile_stage_finished_;
 
   // A currently running browsing data remover.
   content::BrowsingDataRemover* browsing_data_remover_ = nullptr;
@@ -234,19 +258,12 @@ base::FilePath ProfileHelper::GetProfilePathByUserIdHash(
 
 // static
 base::FilePath ProfileHelper::GetSigninProfileDir() {
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  // profile_manager can be null in unit tests.
-  if (!profile_manager)
-    return base::FilePath();
-  base::FilePath user_data_dir = profile_manager->user_data_dir();
-  return user_data_dir.AppendASCII(chrome::kInitialProfile);
+  return GetProfileDir(chrome::kInitialProfile);
 }
 
 // static
 Profile* ProfileHelper::GetSigninProfile() {
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  return profile_manager->GetProfile(GetSigninProfileDir())
-      ->GetPrimaryOTRProfile();
+  return GetIncognitoProfile(GetSigninProfileDir());
 }
 
 // static
@@ -292,32 +309,33 @@ bool ProfileHelper::IsSigninProfileInitialized() {
 }
 
 // static
-bool ProfileHelper::SigninProfileHasLoginScreenExtensions() {
-  DCHECK(IsSigninProfileInitialized());
-  const Profile* profile = GetSigninProfile();
-  const PrefService* prefs = profile->GetPrefs();
-  DCHECK(prefs->GetInitializationStatus() ==
-         PrefService::INITIALIZATION_STATUS_SUCCESS);
-  const base::DictionaryValue* pref_value =
-      prefs->GetDictionary(extensions::pref_names::kLoginScreenExtensions);
-  return !pref_value->DictEmpty();
-}
-
-// static
 bool ProfileHelper::IsLockScreenAppProfile(const Profile* profile) {
   return profile && IsLockScreenAppProfilePath(profile->GetPath().BaseName());
 }
 
 // static
 base::FilePath ProfileHelper::GetLockScreenAppProfilePath() {
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  return profile_manager->user_data_dir().AppendASCII(
-      chrome::kLockScreenAppProfile);
+  return GetProfileDir(chrome::kLockScreenAppProfile);
 }
 
 // static
 std::string ProfileHelper::GetLockScreenAppProfileName() {
   return chrome::kLockScreenAppProfile;
+}
+
+// static
+base::FilePath ProfileHelper::GetLockScreenProfileDir() {
+  return GetProfileDir(chrome::kLockScreenProfile);
+}
+
+// static
+Profile* ProfileHelper::GetLockScreenIncognitoProfile() {
+  return GetIncognitoProfile(GetLockScreenProfileDir());
+}
+
+// static
+bool ProfileHelper::IsLockScreenProfile(const Profile* profile) {
+  return profile && IsLockScreenProfilePath(profile->GetPath().BaseName());
 }
 
 // static
@@ -371,13 +389,15 @@ bool ProfileHelper::IsEphemeralUserProfile(const Profile* profile) {
 // static
 bool ProfileHelper::IsRegularProfile(const Profile* profile) {
   return !chromeos::ProfileHelper::IsSigninProfile(profile) &&
-         !chromeos::ProfileHelper::IsLockScreenAppProfile(profile);
+         !chromeos::ProfileHelper::IsLockScreenAppProfile(profile) &&
+         !chromeos::ProfileHelper::IsLockScreenProfile(profile);
 }
 
 // static
 bool ProfileHelper::IsRegularProfilePath(const base::FilePath& profile_path) {
   return !IsSigninProfilePath(profile_path) &&
-         !IsLockScreenAppProfilePath(profile_path);
+         !IsLockScreenAppProfilePath(profile_path) &&
+         !IsLockScreenProfilePath(profile_path);
 }
 
 // static
@@ -434,8 +454,8 @@ void ProfileHelperImpl::Initialize() {
 }
 
 void ProfileHelperImpl::ClearSigninProfile(
-    const base::Closure& on_clear_callback) {
-  on_clear_callbacks_.push_back(on_clear_callback);
+    base::OnceClosure on_clear_callback) {
+  on_clear_callbacks_.push_back(std::move(on_clear_callback));
 
   // Profile is already clearing.
   if (on_clear_callbacks_.size() > 1)
@@ -457,8 +477,8 @@ void ProfileHelperImpl::ClearSigninProfile(
   browsing_data_remover_->AddObserver(this);
   browsing_data_remover_->RemoveAndReply(
       base::Time(), base::Time::Max(),
-      ChromeBrowsingDataRemoverDelegate::DATA_TYPE_SITE_DATA,
-      ChromeBrowsingDataRemoverDelegate::ALL_ORIGIN_TYPES, this);
+      chrome_browsing_data_remover::DATA_TYPE_SITE_DATA,
+      chrome_browsing_data_remover::ALL_ORIGIN_TYPES, this);
 
   // Close the current session with SigninPartitionManager. This clears cached
   // data from the last-used sign-in StoragePartition.
@@ -622,18 +642,18 @@ user_manager::User* ProfileHelperImpl::GetUserByProfile(
 }
 
 void ProfileHelperImpl::OnSigninProfileCleared() {
-  std::vector<base::Closure> callbacks;
+  std::vector<base::OnceClosure> callbacks;
   callbacks.swap(on_clear_callbacks_);
-  for (const base::Closure& callback : callbacks) {
+  for (auto& callback : callbacks) {
     if (!callback.is_null())
-      callback.Run();
+      std::move(callback).Run();
   }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // ProfileHelper, content::BrowsingDataRemover::Observer implementation:
 
-void ProfileHelperImpl::OnBrowsingDataRemoverDone() {
+void ProfileHelperImpl::OnBrowsingDataRemoverDone(uint64_t failed_data_types) {
   LOG_ASSERT(browsing_data_remover_);
   browsing_data_remover_->RemoveObserver(this);
   browsing_data_remover_ = nullptr;
@@ -654,7 +674,7 @@ void ProfileHelperImpl::OnSessionRestoreStateChanged(
         chromeos::OAuth2LoginManagerFactory::GetInstance()->GetForProfile(
             user_profile);
     login_manager->RemoveObserver(this);
-    ClearSigninProfile(base::Closure());
+    ClearSigninProfile(base::OnceClosure());
   }
 }
 
@@ -698,7 +718,7 @@ void ProfileHelperImpl::FlushProfile(Profile* profile) {
   // Flushes files directly under profile path since these are the critical
   // ones.
   profile_flusher_->RequestFlush(profile->GetPath(), /*recursive=*/false,
-                                 base::Closure());
+                                 base::OnceClosure());
 }
 
 }  // namespace chromeos

@@ -28,7 +28,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/time/time.h"
@@ -47,6 +47,7 @@
 #include "net/test/embedded_test_server/http_response.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/redirect_info.h"
+#include "net/url_request/url_request.h"
 #include "services/network/network_service.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/simple_url_loader_stream_consumer.h"
@@ -54,6 +55,7 @@
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
+#include "services/network/test/fake_test_cert_verifier_params_factory.h"
 #include "services/network/test/test_network_context_client.h"
 #include "services/network/test/test_network_service_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -249,6 +251,17 @@ class SimpleLoaderTestHelper : public SimpleURLLoaderStreamConsumer {
     download_to_stream_async_resume_ = download_to_stream_async_resume;
   }
 
+  // Sets whether the resume-reading closure should be captured and later
+  // available in TakeCapturedStreamResume()
+  void set_download_to_stream_capture_resume(
+      bool download_to_stream_capture_resume) {
+    download_to_stream_capture_resume_ = download_to_stream_capture_resume;
+  }
+
+  base::OnceClosure TakeCapturedStreamResume() {
+    return std::move(captured_stream_resume_);
+  }
+
   // Sets whether the helper should destroy the SimpleURLLoader in
   // OnDataReceived.
   void set_download_to_stream_destroy_on_data_received(
@@ -374,7 +387,7 @@ class SimpleLoaderTestHelper : public SimpleURLLoaderStreamConsumer {
     // Clean up file, so tests don't leave around files in the temp directory.
     // Only matters in the TO_TEMP_FILE case.
     if (!file_path.empty())
-      base::DeleteFile(file_path, false);
+      base::DeleteFile(file_path);
 
     done_ = true;
     run_loop_.Quit();
@@ -412,6 +425,14 @@ class SimpleLoaderTestHelper : public SimpleURLLoaderStreamConsumer {
 
     if (download_to_stream_destroy_on_data_received_) {
       run_loop_.Quit();
+      return;
+    }
+
+    if (download_to_stream_capture_resume_) {
+      if (captured_stream_resume_) {
+        std::move(captured_stream_resume_).Run();
+      }
+      captured_stream_resume_ = std::move(resume);
       return;
     }
 
@@ -494,6 +515,8 @@ class SimpleLoaderTestHelper : public SimpleURLLoaderStreamConsumer {
   bool download_to_stream_destroy_on_data_received_ = false;
   bool download_to_stream_async_retry_ = false;
   bool download_to_stream_destroy_on_retry_ = false;
+  bool download_to_stream_capture_resume_ = false;
+  base::OnceClosure captured_stream_resume_;
 
   bool destroy_loader_on_complete_ = false;
 
@@ -592,6 +615,12 @@ class SimpleURLLoaderTestBase {
         network_service_remote.BindNewPipeAndPassReceiver());
     network::mojom::NetworkContextParamsPtr context_params =
         network::mojom::NetworkContextParams::New();
+
+    // Use a dummy CertVerifier that always passes cert verification, since
+    // these unittests don't need to test CertVerifier behavior.
+    context_params->cert_verifier_params =
+        FakeTestCertVerifierParamsFactory::GetCertVerifierParams();
+
     network_service_remote->CreateNetworkContext(
         network_context_.BindNewPipeAndPassReceiver(),
         std::move(context_params));
@@ -695,9 +724,9 @@ class SimpleURLLoaderTest
         network::ResourceRequest::TrustedParams();
     url::Origin request_origin = url::Origin::Create(url);
     resource_request->trusted_params->isolation_info =
-        net::IsolationInfo::Create(
-            net::IsolationInfo::RedirectMode::kUpdateNothing, request_origin,
-            request_origin, net::SiteForCookies());
+        net::IsolationInfo::Create(net::IsolationInfo::RequestType::kOther,
+                                   request_origin, request_origin,
+                                   net::SiteForCookies());
     return std::make_unique<SimpleLoaderTestHelper>(std::move(resource_request),
                                                     GetParam());
   }
@@ -715,6 +744,9 @@ TEST_P(SimpleURLLoaderTest, BasicRequest) {
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
@@ -722,6 +754,9 @@ TEST_P(SimpleURLLoaderTest, BasicRequest) {
     EXPECT_EQ(kExpectedResponse, *test_helper->response_body());
     EXPECT_EQ(kExpectedResponseSize,
               test_helper->simple_url_loader()->GetContentSize());
+    EXPECT_EQ(kExpectedResponseSize, test_helper->simple_url_loader()
+                                         ->CompletionStatus()
+                                         ->decoded_body_length);
   }
 }
 
@@ -735,6 +770,9 @@ TEST_P(SimpleURLLoaderTest, GzipBody) {
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
@@ -742,6 +780,17 @@ TEST_P(SimpleURLLoaderTest, GzipBody) {
     EXPECT_EQ(content, *test_helper->response_body());
     EXPECT_EQ(static_cast<int64_t>(content.size()),
               test_helper->simple_url_loader()->GetContentSize());
+    ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+    EXPECT_EQ(static_cast<int64_t>(content.size()),
+              test_helper->simple_url_loader()
+                  ->CompletionStatus()
+                  ->decoded_body_length);
+    EXPECT_LT(test_helper->simple_url_loader()
+                  ->CompletionStatus()
+                  ->encoded_body_length,
+              test_helper->simple_url_loader()
+                  ->CompletionStatus()
+                  ->decoded_body_length);
   }
 }
 
@@ -753,6 +802,9 @@ TEST_P(SimpleURLLoaderTest, Redirect) {
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
@@ -769,6 +821,9 @@ TEST_P(SimpleURLLoaderTest, RedirectFile) {
 
   EXPECT_EQ(net::ERR_UNKNOWN_URL_SCHEME,
             test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::ERR_UNKNOWN_URL_SCHEME,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_FALSE(test_helper->simple_url_loader()->ResponseInfo());
 }
 
@@ -781,6 +836,9 @@ TEST_P(SimpleURLLoaderTest, RedirectData) {
 
   EXPECT_EQ(net::ERR_UNKNOWN_URL_SCHEME,
             test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::ERR_UNKNOWN_URL_SCHEME,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_FALSE(test_helper->simple_url_loader()->ResponseInfo());
 }
 
@@ -891,6 +949,9 @@ TEST_P(SimpleURLLoaderTest, UploadShortStringWithRedirect) {
 
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -919,6 +980,9 @@ TEST_P(SimpleURLLoaderTest, UploadLongStringWithRedirect) {
 
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -954,6 +1018,9 @@ TEST_P(SimpleURLLoaderTest,
 
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -988,6 +1055,9 @@ TEST_P(SimpleURLLoaderTest,
 
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -1093,6 +1163,7 @@ TEST_P(SimpleURLLoaderTest, DisconnectedURLLoader) {
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
 
   EXPECT_EQ(net::ERR_FAILED, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_FALSE(test_helper->simple_url_loader()->ResponseInfo());
 }
 
@@ -1104,6 +1175,7 @@ TEST_P(SimpleURLLoaderTest, HttpErrorStatusCodeResponse) {
 
   EXPECT_EQ(net::ERR_HTTP_RESPONSE_CODE_FAILURE,
             test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_EQ(400, test_helper->GetResponseCode());
   EXPECT_FALSE(test_helper->response_body());
   EXPECT_EQ(0, test_helper->simple_url_loader()->GetContentSize());
@@ -1118,12 +1190,18 @@ TEST_P(SimpleURLLoaderTest, HttpErrorStatusCodeResponseAllowed) {
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(400, test_helper->GetResponseCode());
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
     EXPECT_EQ("Echo", *test_helper->response_body());
     EXPECT_EQ(4, test_helper->simple_url_loader()->GetContentSize());
+    EXPECT_EQ(4, test_helper->simple_url_loader()
+                     ->CompletionStatus()
+                     ->decoded_body_length);
   }
 }
 
@@ -1133,6 +1211,9 @@ TEST_P(SimpleURLLoaderTest, EmptyResponseBody) {
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(204, test_helper->GetResponseCode());
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
@@ -1140,6 +1221,9 @@ TEST_P(SimpleURLLoaderTest, EmptyResponseBody) {
     // A response body is sent from the NetworkService, but it's empty.
     EXPECT_EQ("", *test_helper->response_body());
     EXPECT_EQ(0, test_helper->simple_url_loader()->GetContentSize());
+    EXPECT_EQ(0, test_helper->simple_url_loader()
+                     ->CompletionStatus()
+                     ->decoded_body_length);
   }
 }
 
@@ -1155,6 +1239,9 @@ TEST_P(SimpleURLLoaderTest, BigResponseBody) {
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
@@ -1163,6 +1250,9 @@ TEST_P(SimpleURLLoaderTest, BigResponseBody) {
     EXPECT_EQ(std::string(kResponseSize, 'a'), *test_helper->response_body());
     EXPECT_EQ(kResponseSize,
               test_helper->simple_url_loader()->GetContentSize());
+    EXPECT_EQ(kResponseSize, test_helper->simple_url_loader()
+                                 ->CompletionStatus()
+                                 ->decoded_body_length);
   }
 }
 
@@ -1179,6 +1269,9 @@ TEST_P(SimpleURLLoaderTest, ResponseBodyWithSizeMatchingLimit) {
                                         kResponseSize);
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
@@ -1187,6 +1280,9 @@ TEST_P(SimpleURLLoaderTest, ResponseBodyWithSizeMatchingLimit) {
     EXPECT_EQ(std::string(kResponseSize, 'a'), *test_helper->response_body());
     EXPECT_EQ(kResponseSize,
               test_helper->simple_url_loader()->GetContentSize());
+    EXPECT_EQ(kResponseSize, test_helper->simple_url_loader()
+                                 ->CompletionStatus()
+                                 ->decoded_body_length);
   }
 }
 
@@ -1204,6 +1300,9 @@ TEST_P(SimpleURLLoaderTest, ResponseBodyWithSizeBelowLimit) {
                                         kMaxResponseSize);
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
@@ -1212,6 +1311,9 @@ TEST_P(SimpleURLLoaderTest, ResponseBodyWithSizeBelowLimit) {
     EXPECT_EQ(std::string(kResponseSize, 'a'), *test_helper->response_body());
     EXPECT_EQ(kResponseSize,
               test_helper->simple_url_loader()->GetContentSize());
+    EXPECT_EQ(kResponseSize, test_helper->simple_url_loader()
+                                 ->CompletionStatus()
+                                 ->decoded_body_length);
   }
 }
 
@@ -1229,7 +1331,9 @@ TEST_P(SimpleURLLoaderTest, ResponseBodyWithSizeAboveLimit) {
 
   if (GetParam() == SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+    EXPECT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
   } else {
+    EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
     EXPECT_EQ(net::ERR_INSUFFICIENT_RESOURCES,
               test_helper->simple_url_loader()->NetError());
     EXPECT_EQ(0, test_helper->simple_url_loader()->GetContentSize());
@@ -1253,9 +1357,11 @@ TEST_P(SimpleURLLoaderTest, ResponseBodyWithSizeAboveLimitPartialResponse) {
                                         kMaxResponseSize);
 
   if (GetParam() == SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
+    EXPECT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
     EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
     EXPECT_FALSE(test_helper->response_body());
   } else {
+    EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
     EXPECT_EQ(net::ERR_INSUFFICIENT_RESOURCES,
               test_helper->simple_url_loader()->NetError());
     ASSERT_TRUE(test_helper->response_body());
@@ -1282,6 +1388,9 @@ TEST_P(SimpleURLLoaderTest, BigResponseBodyWithSizeMatchingLimit) {
                                         kResponseSize);
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -1289,6 +1398,9 @@ TEST_P(SimpleURLLoaderTest, BigResponseBodyWithSizeMatchingLimit) {
     EXPECT_EQ(std::string(kResponseSize, 'a'), *test_helper->response_body());
     EXPECT_EQ(kResponseSize,
               test_helper->simple_url_loader()->GetContentSize());
+    EXPECT_EQ(kResponseSize, test_helper->simple_url_loader()
+                                 ->CompletionStatus()
+                                 ->decoded_body_length);
   }
 }
 
@@ -1306,6 +1418,9 @@ TEST_P(SimpleURLLoaderTest, BigResponseBodyWithSizeBelowLimit) {
                                         kMaxResponseSize);
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -1313,6 +1428,9 @@ TEST_P(SimpleURLLoaderTest, BigResponseBodyWithSizeBelowLimit) {
     EXPECT_EQ(std::string(kResponseSize, 'a'), *test_helper->response_body());
     EXPECT_EQ(kResponseSize,
               test_helper->simple_url_loader()->GetContentSize());
+    EXPECT_EQ(kResponseSize, test_helper->simple_url_loader()
+                                 ->CompletionStatus()
+                                 ->decoded_body_length);
   }
 }
 
@@ -1330,9 +1448,13 @@ TEST_P(SimpleURLLoaderTest, BigResponseBodyWithSizeAboveLimit) {
 
   if (GetParam() == SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+    ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+    EXPECT_EQ(net::OK,
+              test_helper->simple_url_loader()->CompletionStatus()->error_code);
   } else {
     EXPECT_EQ(net::ERR_INSUFFICIENT_RESOURCES,
               test_helper->simple_url_loader()->NetError());
+    EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
     EXPECT_EQ(0, test_helper->simple_url_loader()->GetContentSize());
   }
   EXPECT_FALSE(test_helper->response_body());
@@ -1354,10 +1476,14 @@ TEST_P(SimpleURLLoaderTest, BigResponseBodyWithSizeAboveLimitPartialResponse) {
 
   if (GetParam() == SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+    ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+    EXPECT_EQ(net::OK,
+              test_helper->simple_url_loader()->CompletionStatus()->error_code);
     EXPECT_FALSE(test_helper->response_body());
   } else {
     EXPECT_EQ(net::ERR_INSUFFICIENT_RESOURCES,
               test_helper->simple_url_loader()->NetError());
+    EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
     ASSERT_TRUE(test_helper->response_body());
     EXPECT_EQ(std::string(kMaxResponseSize, 'a'),
               *test_helper->response_body());
@@ -1374,9 +1500,15 @@ TEST_P(SimpleURLLoaderTest, NetErrorBeforeHeaders) {
 
   EXPECT_EQ(net::ERR_EMPTY_RESPONSE,
             test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::ERR_EMPTY_RESPONSE,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_FALSE(test_helper->simple_url_loader()->ResponseInfo());
   EXPECT_FALSE(test_helper->response_body());
   EXPECT_EQ(0, test_helper->simple_url_loader()->GetContentSize());
+  EXPECT_EQ(0, test_helper->simple_url_loader()
+                   ->CompletionStatus()
+                   ->decoded_body_length);
 }
 
 TEST_P(SimpleURLLoaderTest, NetErrorBeforeHeadersWithPartialResults) {
@@ -1391,8 +1523,14 @@ TEST_P(SimpleURLLoaderTest, NetErrorBeforeHeadersWithPartialResults) {
 
   EXPECT_EQ(net::ERR_EMPTY_RESPONSE,
             test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::ERR_EMPTY_RESPONSE,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_FALSE(test_helper->simple_url_loader()->ResponseInfo());
   EXPECT_EQ(0, test_helper->simple_url_loader()->GetContentSize());
+  EXPECT_EQ(0, test_helper->simple_url_loader()
+                   ->CompletionStatus()
+                   ->decoded_body_length);
 }
 
 TEST_P(SimpleURLLoaderTest, NetErrorAfterHeaders) {
@@ -1402,9 +1540,15 @@ TEST_P(SimpleURLLoaderTest, NetErrorAfterHeaders) {
 
   EXPECT_EQ(net::ERR_CONTENT_DECODING_FAILED,
             test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::ERR_CONTENT_DECODING_FAILED,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
   EXPECT_FALSE(test_helper->response_body());
   EXPECT_EQ(0, test_helper->simple_url_loader()->GetContentSize());
+  EXPECT_EQ(0, test_helper->simple_url_loader()
+                   ->CompletionStatus()
+                   ->decoded_body_length);
 }
 
 TEST_P(SimpleURLLoaderTest, NetErrorAfterHeadersWithPartialResults) {
@@ -1416,12 +1560,18 @@ TEST_P(SimpleURLLoaderTest, NetErrorAfterHeadersWithPartialResults) {
 
   EXPECT_EQ(net::ERR_CONTENT_DECODING_FAILED,
             test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::ERR_CONTENT_DECODING_FAILED,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
     EXPECT_EQ("", *test_helper->response_body());
     EXPECT_EQ(0, test_helper->simple_url_loader()->GetContentSize());
+    EXPECT_EQ(0, test_helper->simple_url_loader()
+                     ->CompletionStatus()
+                     ->decoded_body_length);
   }
 }
 
@@ -1432,10 +1582,17 @@ TEST_P(SimpleURLLoaderTest, TruncatedBody) {
 
   EXPECT_EQ(net::ERR_CONTENT_LENGTH_MISMATCH,
             test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::ERR_CONTENT_LENGTH_MISMATCH,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
   EXPECT_FALSE(test_helper->response_body());
   EXPECT_EQ(static_cast<int64_t>(strlen(kTruncatedBody)),
             test_helper->simple_url_loader()->GetContentSize());
+  EXPECT_EQ(static_cast<int64_t>(strlen(kTruncatedBody)),
+            test_helper->simple_url_loader()
+                ->CompletionStatus()
+                ->decoded_body_length);
 }
 
 TEST_P(SimpleURLLoaderTest, TruncatedBodyWithPartialResults) {
@@ -1446,12 +1603,19 @@ TEST_P(SimpleURLLoaderTest, TruncatedBodyWithPartialResults) {
 
   EXPECT_EQ(net::ERR_CONTENT_LENGTH_MISMATCH,
             test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::ERR_CONTENT_LENGTH_MISMATCH,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
     EXPECT_EQ(static_cast<int64_t>(strlen(kTruncatedBody)),
               test_helper->simple_url_loader()->GetContentSize());
+    EXPECT_EQ(static_cast<int64_t>(strlen(kTruncatedBody)),
+              test_helper->simple_url_loader()
+                  ->CompletionStatus()
+                  ->decoded_body_length);
   }
 }
 
@@ -1470,6 +1634,7 @@ TEST_P(SimpleURLLoaderTest, DestroyServiceBeforeResponseStarts) {
   test_helper->Wait();
 
   EXPECT_EQ(net::ERR_FAILED, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_FALSE(test_helper->response_body());
   ASSERT_FALSE(test_helper->simple_url_loader()->ResponseInfo());
 }
@@ -1481,6 +1646,9 @@ TEST_P(SimpleURLLoaderTest, UploadShortString) {
                                                           "text/plain");
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -1496,6 +1664,9 @@ TEST_P(SimpleURLLoaderTest, UploadLongString) {
                                                           "text/plain");
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -1509,6 +1680,9 @@ TEST_P(SimpleURLLoaderTest, UploadEmptyString) {
   test_helper->simple_url_loader()->AttachStringForUpload("", "text/plain");
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -1520,6 +1694,9 @@ TEST_P(SimpleURLLoaderTest, UploadEmptyString) {
   test_helper->simple_url_loader()->AttachStringForUpload("", "text/plain");
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -1539,6 +1716,9 @@ TEST_P(SimpleURLLoaderTest, UploadShortStringWithRetry) {
       1, SimpleURLLoader::RETRY_ON_5XX);
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -1559,6 +1739,9 @@ TEST_P(SimpleURLLoaderTest, UploadLongStringWithRetry) {
       1, SimpleURLLoader::RETRY_ON_5XX);
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -1576,6 +1759,9 @@ TEST_P(SimpleURLLoaderTest, UploadFile) {
                                                         "text/plain");
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -1588,6 +1774,9 @@ TEST_P(SimpleURLLoaderTest, UploadFile) {
                                                         "text/plain");
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -1608,6 +1797,9 @@ TEST_P(SimpleURLLoaderTest, UploadFileRange) {
       GetTestFilePath(), "text/plain", kOffset, kLength);
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -1623,6 +1815,9 @@ TEST_P(SimpleURLLoaderTest, UploadFileWithPut) {
                                                         "text/plain");
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -1635,6 +1830,9 @@ TEST_P(SimpleURLLoaderTest, UploadFileWithPut) {
                                                         "text/salted");
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -1656,19 +1854,26 @@ TEST_P(SimpleURLLoaderTest, UploadFileWithRetry) {
       1, SimpleURLLoader::RETRY_ON_5XX);
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
     EXPECT_EQ(GetTestFileContents(), *test_helper->response_body());
     EXPECT_EQ(static_cast<int64_t>(GetTestFileContents().size()),
               test_helper->simple_url_loader()->GetContentSize());
+    EXPECT_EQ(static_cast<int64_t>(GetTestFileContents().size()),
+              test_helper->simple_url_loader()
+                  ->CompletionStatus()
+                  ->decoded_body_length);
   }
 
   if (GetParam() == SimpleLoaderTestHelper::DownloadType::AS_STREAM)
     EXPECT_EQ(1, test_helper->download_as_stream_retries());
 }
 
-TEST_P(SimpleURLLoaderTest, UploadNonexistantFile) {
+TEST_P(SimpleURLLoaderTest, UploadNonexistentFile) {
   std::unique_ptr<SimpleLoaderTestHelper> test_helper =
       CreateHelperForURL(test_server_.GetURL("/echo"), "POST");
   // Path to a file that doesn't exist.  Start with the test directory just to
@@ -1681,9 +1886,15 @@ TEST_P(SimpleURLLoaderTest, UploadNonexistantFile) {
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::ERR_FILE_NOT_FOUND,
             test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::ERR_FILE_NOT_FOUND,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_FALSE(test_helper->simple_url_loader()->ResponseInfo());
   EXPECT_FALSE(test_helper->response_body());
   EXPECT_EQ(0, test_helper->simple_url_loader()->GetContentSize());
+  EXPECT_EQ(0, test_helper->simple_url_loader()
+                   ->CompletionStatus()
+                   ->decoded_body_length);
 }
 
 // Test case where uploading a file is canceled before the URLLoader is started
@@ -1729,6 +1940,9 @@ enum class TestLoaderEvent {
   // kReadLongUploadBody.
   kReadFirstByteOfLongUploadBody,
 
+  // DNS resolution error.
+  kNameNotResolved,
+
   kReceivedRedirect,
   // Receive a response with a 200 status code.
   kReceivedResponse,
@@ -1773,9 +1987,10 @@ class MockURLLoader : public network::mojom::URLLoader {
         test_events_(std::move(test_events)) {
     if (request_body && request_body->elements()->size() == 1 &&
         (*request_body->elements())[0].type() ==
-            network::mojom::DataElementType::kDataPipe) {
-      data_pipe_getter_.Bind(
-          (*request_body->elements())[0].CloneDataPipeGetter());
+            network::mojom::DataElementDataView::Tag::kDataPipe) {
+      const auto& element =
+          (*request_body->elements())[0].As<network::DataElementDataPipe>();
+      data_pipe_getter_.Bind(element.CloneDataPipeGetter());
       DCHECK(data_pipe_getter_);
     }
   }
@@ -1845,6 +2060,13 @@ class MockURLLoader : public network::mojom::URLLoader {
           }
           EXPECT_EQ(1u, read_size);
           EXPECT_EQ(GetLongUploadBody()[0], byte);
+          break;
+        }
+        case TestLoaderEvent::kNameNotResolved: {
+          network::URLLoaderCompletionStatus status;
+          status.error_code = net::ERR_NAME_NOT_RESOLVED;
+          status.decoded_body_length = CountBytesToSend();
+          client_->OnComplete(status);
           break;
         }
         case TestLoaderEvent::kReceivedRedirect: {
@@ -2124,6 +2346,7 @@ TEST_P(SimpleURLLoaderTest, ResponseCompleteBeforeReceivedResponse) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::ERR_UNEXPECTED, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_FALSE(test_helper->simple_url_loader()->ResponseInfo());
   EXPECT_FALSE(test_helper->response_body());
 }
@@ -2139,6 +2362,7 @@ TEST_P(SimpleURLLoaderTest, ResponseCompleteAfterReceivedResponse) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::ERR_UNEXPECTED, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_EQ(200, test_helper->GetResponseCode());
   EXPECT_FALSE(test_helper->response_body());
 }
@@ -2152,6 +2376,7 @@ TEST_P(SimpleURLLoaderTest, CloseClientPipeBeforeBodyStarts) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::ERR_FAILED, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_EQ(200, test_helper->GetResponseCode());
   EXPECT_FALSE(test_helper->response_body());
 }
@@ -2171,8 +2396,10 @@ TEST_P(SimpleURLLoaderTest, CloseClientPipeOrder) {
   // Order of other main events can't vary, relative to each other (Getting body
   // pipe, reading body bytes, closing body pipe).
   const ClientCloseOrder kClientCloseOrder[] = {
-      ClientCloseOrder::kBeforeData, ClientCloseOrder::kDuringData,
-      ClientCloseOrder::kAfterData, ClientCloseOrder::kAfterBufferClosed,
+      ClientCloseOrder::kBeforeData,
+      ClientCloseOrder::kDuringData,
+      ClientCloseOrder::kAfterData,
+      ClientCloseOrder::kAfterBufferClosed,
   };
 
   const TestLoaderEvent kClientCloseEvents[] = {
@@ -2222,9 +2449,15 @@ TEST_P(SimpleURLLoaderTest, CloseClientPipeOrder) {
                 TestLoaderEvent::kResponseCompleteFailed) {
               EXPECT_EQ(net::ERR_TIMED_OUT,
                         test_helper->simple_url_loader()->NetError());
+              ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+              EXPECT_EQ(net::ERR_TIMED_OUT, test_helper->simple_url_loader()
+                                                ->CompletionStatus()
+                                                ->error_code);
             } else {
               EXPECT_EQ(net::ERR_FAILED,
                         test_helper->simple_url_loader()->NetError());
+              EXPECT_FALSE(
+                  test_helper->simple_url_loader()->CompletionStatus());
             }
             if (!allow_partial_results) {
               EXPECT_FALSE(test_helper->response_body());
@@ -2236,6 +2469,10 @@ TEST_P(SimpleURLLoaderTest, CloseClientPipeOrder) {
             }
           } else {
             EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+            ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+            EXPECT_EQ(net::OK, test_helper->simple_url_loader()
+                                   ->CompletionStatus()
+                                   ->error_code);
 
             if (GetParam() !=
                 SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
@@ -2261,6 +2498,9 @@ TEST_P(SimpleURLLoaderTest, ErrorAndCloseClientPipeBeforeBodyStarts) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::ERR_TIMED_OUT, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::ERR_TIMED_OUT,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
   EXPECT_FALSE(test_helper->response_body());
 }
@@ -2277,6 +2517,9 @@ TEST_P(SimpleURLLoaderTest, SuccessAndCloseClientPipeBeforeBodyComplete) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
@@ -2297,6 +2540,9 @@ TEST_P(SimpleURLLoaderTest, SuccessAndCloseClientPipeAfterBodyComplete) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
@@ -2314,11 +2560,12 @@ TEST_P(SimpleURLLoaderTest, DoubleReceivedResponse) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::ERR_UNEXPECTED, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_EQ(200, test_helper->GetResponseCode());
   EXPECT_FALSE(test_helper->response_body());
 }
 
-TEST_P(SimpleURLLoaderTest, RedirectAfterReseivedResponse) {
+TEST_P(SimpleURLLoaderTest, RedirectAfterReceivedResponse) {
   MockURLLoaderFactory loader_factory(&task_environment_);
   loader_factory.AddEvents(
       {TestLoaderEvent::kReceivedResponse, TestLoaderEvent::kReceivedRedirect});
@@ -2327,6 +2574,7 @@ TEST_P(SimpleURLLoaderTest, RedirectAfterReseivedResponse) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::ERR_UNEXPECTED, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_EQ(200, test_helper->GetResponseCode());
   EXPECT_FALSE(test_helper->response_body());
 }
@@ -2339,6 +2587,7 @@ TEST_P(SimpleURLLoaderTest, UnexpectedBodyBufferReceived) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::ERR_UNEXPECTED, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_FALSE(test_helper->simple_url_loader()->ResponseInfo());
   EXPECT_FALSE(test_helper->response_body());
 }
@@ -2353,6 +2602,7 @@ TEST_P(SimpleURLLoaderTest, DoubleBodyBufferReceived) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::ERR_UNEXPECTED, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_EQ(200, test_helper->GetResponseCode());
   EXPECT_FALSE(test_helper->response_body());
 }
@@ -2367,6 +2617,7 @@ TEST_P(SimpleURLLoaderTest, UnexpectedMessageAfterBodyStarts) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::ERR_UNEXPECTED, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_EQ(200, test_helper->GetResponseCode());
   EXPECT_FALSE(test_helper->response_body());
 }
@@ -2381,6 +2632,7 @@ TEST_P(SimpleURLLoaderTest, UnexpectedMessageAfterBodyStarts2) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::ERR_UNEXPECTED, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_EQ(200, test_helper->GetResponseCode());
   EXPECT_FALSE(test_helper->response_body());
 }
@@ -2396,6 +2648,7 @@ TEST_P(SimpleURLLoaderTest, UnexpectedMessageAfterBodyComplete) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::ERR_UNEXPECTED, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_EQ(200, test_helper->GetResponseCode());
   EXPECT_FALSE(test_helper->response_body());
 }
@@ -2412,6 +2665,7 @@ TEST_P(SimpleURLLoaderTest, MoreDataThanExpected) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::ERR_UNEXPECTED, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_EQ(200, test_helper->GetResponseCode());
   EXPECT_FALSE(test_helper->response_body());
 }
@@ -2507,6 +2761,10 @@ TEST_P(SimpleURLLoaderTest, RetryOn5xx) {
 
     if (test_case.expect_success) {
       EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+      ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+      EXPECT_EQ(
+          net::OK,
+          test_helper->simple_url_loader()->CompletionStatus()->error_code);
       EXPECT_EQ(200, test_helper->GetResponseCode());
 
       if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
@@ -2516,6 +2774,98 @@ TEST_P(SimpleURLLoaderTest, RetryOn5xx) {
     } else {
       EXPECT_EQ(501, test_helper->GetResponseCode());
       EXPECT_FALSE(test_helper->response_body());
+    }
+
+    EXPECT_EQ(static_cast<size_t>(test_case.expected_num_requests),
+              loader_factory.requested_urls().size());
+    for (const auto& url : loader_factory.requested_urls()) {
+      EXPECT_EQ(kInitialURL, url);
+    }
+
+    if (GetParam() == SimpleLoaderTestHelper::DownloadType::AS_STREAM) {
+      EXPECT_EQ(test_case.expected_num_requests - 1,
+                test_helper->download_as_stream_retries());
+    }
+  }
+}
+
+TEST_P(SimpleURLLoaderTest, RetryOnNameNotResolved) {
+  const GURL kInitialURL("foo://bar/initial");
+  struct TestCase {
+    // Parameters passed to SetRetryOptions.
+    int max_retries;
+    int retry_mode;
+
+    // Number of resolution errors before a successful response.
+    int num_name_not_resolved;
+
+    // Whether the request is expected to succeed in the end.
+    bool expect_success;
+
+    // Expected times the url should be requested.
+    int expected_num_requests;
+  } const kTestCases[] = {
+      // No retry when retries disabled.
+      {0, SimpleURLLoader::RETRY_NEVER, 1, false, 1},
+
+      // No retry on name resolution when retries enabled on network change.
+      {1, SimpleURLLoader::RETRY_ON_NETWORK_CHANGE, 1, false, 1},
+
+      // As many retries allowed as resolution errors.
+      {1, SimpleURLLoader::RETRY_ON_NAME_NOT_RESOLVED, 1, true, 2},
+      {1,
+       SimpleURLLoader::RETRY_ON_NAME_NOT_RESOLVED |
+           SimpleURLLoader::RETRY_ON_NETWORK_CHANGE,
+       1, true, 2},
+      {2, SimpleURLLoader::RETRY_ON_NAME_NOT_RESOLVED, 2, true, 3},
+
+      // More retries than resolution errors.
+      {2, SimpleURLLoader::RETRY_ON_NAME_NOT_RESOLVED, 1, true, 2},
+
+      // Fewer retries than resolution errors.
+      {1, SimpleURLLoader::RETRY_ON_NAME_NOT_RESOLVED, 2, false, 2},
+  };
+
+  for (const auto& test_case : kTestCases) {
+    MockURLLoaderFactory loader_factory(&task_environment_);
+    for (int i = 0; i < test_case.num_name_not_resolved; i++) {
+      loader_factory.AddEvents({TestLoaderEvent::kNameNotResolved});
+    }
+
+    if (test_case.expect_success) {
+      // Valid response with a 1-byte body.
+      loader_factory.AddEvents({TestLoaderEvent::kReceivedResponse,
+                                TestLoaderEvent::kBodyBufferReceived,
+                                TestLoaderEvent::kBodyDataRead,
+                                TestLoaderEvent::kBodyBufferClosed,
+                                TestLoaderEvent::kResponseComplete});
+    }
+
+    std::unique_ptr<SimpleLoaderTestHelper> test_helper =
+        CreateHelperForURL(GURL(kInitialURL));
+    test_helper->simple_url_loader()->SetRetryOptions(test_case.max_retries,
+                                                      test_case.retry_mode);
+    loader_factory.RunTest(test_helper.get());
+
+    if (test_case.expect_success) {
+      EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+      ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+      EXPECT_EQ(
+          net::OK,
+          test_helper->simple_url_loader()->CompletionStatus()->error_code);
+      EXPECT_EQ(200, test_helper->GetResponseCode());
+
+      if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
+        ASSERT_TRUE(test_helper->response_body());
+        EXPECT_EQ(1u, test_helper->response_body()->size());
+      }
+    } else {
+      EXPECT_EQ(net::ERR_NAME_NOT_RESOLVED,
+                test_helper->simple_url_loader()->NetError());
+      ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+      EXPECT_EQ(
+          net::ERR_NAME_NOT_RESOLVED,
+          test_helper->simple_url_loader()->CompletionStatus()->error_code);
     }
 
     EXPECT_EQ(static_cast<size_t>(test_case.expected_num_requests),
@@ -2679,6 +3029,10 @@ TEST_P(SimpleURLLoaderTest, RetryOnNetworkChange) {
 
       if (test_case.expect_success) {
         EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+        ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+        EXPECT_EQ(
+            net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
         EXPECT_EQ(200, test_helper->GetResponseCode());
 
         if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
@@ -2688,6 +3042,10 @@ TEST_P(SimpleURLLoaderTest, RetryOnNetworkChange) {
       } else {
         EXPECT_EQ(net::ERR_NETWORK_CHANGED,
                   test_helper->simple_url_loader()->NetError());
+        ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+        EXPECT_EQ(
+            net::ERR_NETWORK_CHANGED,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
         EXPECT_FALSE(test_helper->response_body());
       }
 
@@ -2722,6 +3080,9 @@ TEST_P(SimpleURLLoaderTest, RetryOnNetworkChange) {
     loader_factory.RunTest(test_helper.get());
 
     EXPECT_EQ(net::ERR_TIMED_OUT, test_helper->simple_url_loader()->NetError());
+    ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+    EXPECT_EQ(net::ERR_TIMED_OUT,
+              test_helper->simple_url_loader()->CompletionStatus()->error_code);
     EXPECT_FALSE(test_helper->response_body());
     EXPECT_EQ(1u, loader_factory.requested_urls().size());
 
@@ -2745,6 +3106,7 @@ TEST_P(SimpleURLLoaderTest, RetryWithUnboundFactory) {
       1, SimpleURLLoader::RETRY_ON_NETWORK_CHANGE);
   loader_factory.RunTest(test_helper.get());
   EXPECT_EQ(net::ERR_FAILED, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_FALSE(test_helper->response_body());
 
   // Retry is still called, before the dead factory is discovered.
@@ -2771,6 +3133,9 @@ TEST_P(SimpleURLLoaderTest, UploadLongStringStartReadTwice) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
     EXPECT_EQ("", *test_helper->response_body());
@@ -2800,6 +3165,9 @@ TEST_P(SimpleURLLoaderTest,
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
 
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());
@@ -2818,6 +3186,9 @@ TEST_P(SimpleURLLoaderTest, GetFinalURL) {
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(url, test_helper->simple_url_loader()->GetFinalURL());
 }
 
@@ -2829,6 +3200,9 @@ TEST_P(SimpleURLLoaderTest, GetFinalURLAfterRedirect) {
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(url, test_helper->simple_url_loader()->GetFinalURL());
 }
 
@@ -2873,6 +3247,9 @@ TEST_F(SimpleURLLoaderFileTest, OverwriteFile) {
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   ASSERT_TRUE(test_helper->simple_url_loader()->ResponseInfo());
   ASSERT_TRUE(test_helper->response_body());
   EXPECT_EQ("Echo", *test_helper->response_body());
@@ -2894,6 +3271,7 @@ TEST_F(SimpleURLLoaderFileTest, FileCreateError) {
 
   EXPECT_EQ(net::ERR_ACCESS_DENIED,
             test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
   EXPECT_TRUE(test_helper->simple_url_loader()->ResponseInfo());
   EXPECT_FALSE(test_helper->response_body());
 }
@@ -2982,6 +3360,9 @@ TEST_F(SimpleURLLoaderStreamTest, OnDataReceivedCompletesAsync) {
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
   ASSERT_TRUE(test_helper->response_body());
   EXPECT_EQ(kResponseSize, test_helper->response_body()->length());
@@ -3011,6 +3392,9 @@ TEST_F(SimpleURLLoaderStreamTest, OnRetryCompletesAsync) {
       1, SimpleURLLoader::RETRY_ON_5XX);
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   ASSERT_TRUE(test_helper->response_body());
   EXPECT_EQ(kShortUploadBody, *test_helper->response_body());
   EXPECT_EQ(1, test_helper->download_as_stream_retries());
@@ -3058,6 +3442,17 @@ class SimpleURLLoaderMockTimeTest : public testing::Test {
         SimpleLoaderTestHelper::DownloadType::TO_STRING);
   }
 
+  std::unique_ptr<SimpleLoaderTestHelper> CreateStreamHelper() {
+    std::unique_ptr<network::ResourceRequest> resource_request =
+        std::make_unique<network::ResourceRequest>();
+    resource_request->url = GURL("foo://bar/");
+    resource_request->method = "GET";
+    resource_request->enable_upload_progress = true;
+    return std::make_unique<SimpleLoaderTestHelper>(
+        std::move(resource_request),
+        SimpleLoaderTestHelper::DownloadType::AS_STREAM);
+  }
+
  protected:
   base::test::TaskEnvironment task_environment_;
   std::unique_ptr<base::ScopedDisallowBlocking> disallow_blocking_;
@@ -3078,6 +3473,33 @@ TEST_F(SimpleURLLoaderMockTimeTest, TimeoutTriggered) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::ERR_TIMED_OUT, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
+}
+
+// Request fails with a timeout like in TimeoutTriggered, and the stream resume
+// closure is called after the timeout. The loader is alive throughout.
+TEST_F(SimpleURLLoaderMockTimeTest, StreamResumeAfterTimeout) {
+  MockURLLoaderFactory loader_factory(&task_environment_);
+  loader_factory.AddEvents(
+      {TestLoaderEvent::kReceivedResponse, TestLoaderEvent::kBodyBufferReceived,
+       TestLoaderEvent::kBodyDataRead, TestLoaderEvent::kAdvanceOneSecond,
+       TestLoaderEvent::kResponseComplete, TestLoaderEvent::kBodyBufferClosed});
+  std::unique_ptr<SimpleLoaderTestHelper> test_helper = CreateStreamHelper();
+  test_helper->simple_url_loader()->SetTimeoutDuration(
+      base::TimeDelta::FromSeconds(1));
+  test_helper->set_download_to_stream_capture_resume(true);
+
+  loader_factory.RunTest(test_helper.get());
+
+  EXPECT_EQ(net::ERR_TIMED_OUT, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
+
+  base::OnceClosure captured_resume = test_helper->TakeCapturedStreamResume();
+  ASSERT_TRUE(captured_resume);
+  base::SequencedTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                   std::move(captured_resume));
+  // Make sure no pending task results in a crash.
+  base::RunLoop().RunUntilIdle();
 }
 
 // Less time is simulated passing than the timeout value, so this request should
@@ -3095,6 +3517,9 @@ TEST_F(SimpleURLLoaderMockTimeTest, TimeoutNotTriggered) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
 }
 
@@ -3111,6 +3536,9 @@ TEST_F(SimpleURLLoaderMockTimeTest, TimeNotSetAndTimeAdvanced) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
 }
 
@@ -3130,6 +3558,7 @@ TEST_F(SimpleURLLoaderMockTimeTest, TimeoutAfterRedirectTriggered) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::ERR_TIMED_OUT, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
 }
 
 // Simulate time passing after a failure. The retry restarts the timeout timer,
@@ -3151,6 +3580,9 @@ TEST_F(SimpleURLLoaderMockTimeTest, TimeoutAfterRetryNotTriggered) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(200, test_helper->GetResponseCode());
 }
 
@@ -3173,6 +3605,7 @@ TEST_F(SimpleURLLoaderMockTimeTest, TimeoutAfterRetryTriggered) {
   loader_factory.RunTest(test_helper.get());
 
   EXPECT_EQ(net::ERR_TIMED_OUT, test_helper->simple_url_loader()->NetError());
+  EXPECT_FALSE(test_helper->simple_url_loader()->CompletionStatus());
 }
 
 TEST_P(SimpleURLLoaderTest, OnUploadProgressCallback) {
@@ -3203,6 +3636,9 @@ TEST_P(SimpleURLLoaderTest, OnUploadProgressCallback) {
       }));
   test_helper->StartSimpleLoaderAndWait(url_loader_factory_.get());
   EXPECT_EQ(net::OK, test_helper->simple_url_loader()->NetError());
+  ASSERT_TRUE(test_helper->simple_url_loader()->CompletionStatus());
+  EXPECT_EQ(net::OK,
+            test_helper->simple_url_loader()->CompletionStatus()->error_code);
   EXPECT_EQ(long_string.size(), progress);
   if (GetParam() != SimpleLoaderTestHelper::DownloadType::HEADERS_ONLY) {
     ASSERT_TRUE(test_helper->response_body());

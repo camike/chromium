@@ -4,7 +4,7 @@
 
 package org.chromium.weblayer.test;
 
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Rule;
@@ -29,6 +29,5 @@ public class WebLayerTest {
                 () -> { return mActivityTestRule.getWebLayer().getUserAgentString(); });
         Assert.assertNotNull(userAgent);
         Assert.assertFalse(userAgent.isEmpty());
-        Assert.assertNotEquals(-1, userAgent.indexOf("Mobile"));
     }
 }

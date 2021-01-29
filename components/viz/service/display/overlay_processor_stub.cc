@@ -11,7 +11,8 @@ bool OverlayProcessorStub::IsOverlaySupported() const {
 gfx::Rect OverlayProcessorStub::GetAndResetOverlayDamage() {
   return gfx::Rect();
 }
-bool OverlayProcessorStub::NeedsSurfaceOccludingDamageRect() const {
+
+bool OverlayProcessorStub::NeedsSurfaceDamageRectList() const {
   return false;
 }
 

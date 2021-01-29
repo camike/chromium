@@ -4,10 +4,10 @@
 
 package org.chromium.chrome.browser.firstrun;
 
-import android.accounts.Account;
 import android.accounts.AuthenticatorDescription;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -32,11 +32,6 @@ import org.chromium.content_public.browser.test.util.TestThreadUtils;
 public class FirstRunUtilsTest {
     private FakeAuthenticationAccountManager mAccountManager;
     private AdvancedMockContext mAccountTestingContext;
-    private Account mTestAccount;
-
-    public FirstRunUtilsTest() {
-        mTestAccount = AccountUtils.createAccountFromName("Dummy");
-    }
 
     @Before
     public void setUp() {
@@ -50,7 +45,6 @@ public class FirstRunUtilsTest {
         private final String mAccountType;
 
         FakeAuthenticationAccountManager(String accountType) {
-            super(FakeAccountManagerDelegate.DISABLE_PROFILE_DATA_SOURCE);
             mAccountType = accountType;
         }
 
@@ -73,7 +67,7 @@ public class FirstRunUtilsTest {
 
     private void addTestAccount() {
         mAccountManager.addAccountHolderBlocking(
-                AccountHolder.builder(mTestAccount).alwaysAccept(true).build());
+                AccountHolder.builder("dummy@gmail.com").alwaysAccept(true).build());
     }
 
     @Test

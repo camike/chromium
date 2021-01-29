@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/android/jni_string.h"
+#include "base/bind.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/memory/ptr_util.h"
@@ -20,7 +21,7 @@
 #include "content/public/browser/web_contents.h"
 
 NearOomInfoBar::NearOomInfoBar(InterventionDelegate* delegate)
-    : InfoBarAndroid(std::make_unique<InterventionInfoBarDelegate>(
+    : infobars::InfoBarAndroid(std::make_unique<InterventionInfoBarDelegate>(
           infobars::InfoBarDelegate::InfoBarIdentifier::
               NEAR_OOM_INFOBAR_ANDROID,
           delegate)),
@@ -45,7 +46,8 @@ void NearOomInfoBar::ProcessButton(int action) {
 }
 
 base::android::ScopedJavaLocalRef<jobject> NearOomInfoBar::CreateRenderInfoBar(
-    JNIEnv* env) {
+    JNIEnv* env,
+    const ResourceIdMapper& resource_id_mapper) {
   return Java_NearOomInfoBar_create(env);
 }
 

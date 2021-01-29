@@ -2,12 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// clang-format off
+// #import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+// #import {assert} from 'chrome://resources/js/assert.m.js';
+// #import {VolumeManagerCommon} from '../../../base/js/volume_manager_types.m.js';
+// #import {Crostini} from '../../../externs/background/crostini.m.js';
+// #import {VolumeManager} from '../../../externs/volume_manager.m.js';
+// clang-format on
+
 /**
  * Implementation of Crostini shared path state handler.
  *
  * @implements {Crostini}
  */
-class CrostiniImpl {
+/* #export */ class CrostiniImpl {
   constructor() {
     /**
      * True if VM is enabled.
@@ -104,14 +112,6 @@ class CrostiniImpl {
     } else {
       this.shared_paths_[url] = [vmName];
     }
-
-    // Record UMA.
-    const root = this.getRoot_(entry);
-    let suffix = CrostiniImpl.VALID_ROOT_TYPES_FOR_SHARE.get(root) ||
-        CrostiniImpl.UMA_ROOT_TYPE_OTHER;
-    metrics.recordSmallCount(
-        'CrostiniSharedPaths.Depth.' + suffix,
-        entry.fullPath.split('/').length - 1);
   }
 
   /**
@@ -143,7 +143,7 @@ class CrostiniImpl {
 
   /**
    * Handles events for enable/disable, share/unshare.
-   * @param {chrome.fileManagerPrivate.CrostiniEvent} event
+   * @param {!chrome.fileManagerPrivate.CrostiniEvent} event
    * @private
    */
   onCrostiniChanged_(event) {
@@ -156,12 +156,12 @@ class CrostiniImpl {
         break;
       case chrome.fileManagerPrivate.CrostiniEventType.SHARE:
         for (const entry of event.entries) {
-          this.registerSharedPath(event.vmName, entry);
+          this.registerSharedPath(event.vmName, assert(entry));
         }
         break;
       case chrome.fileManagerPrivate.CrostiniEventType.UNSHARE:
         for (const entry of event.entries) {
-          this.unregisterSharedPath(event.vmName, entry);
+          this.unregisterSharedPath(event.vmName, assert(entry));
         }
         break;
     }
@@ -198,6 +198,7 @@ class CrostiniImpl {
    * @param {string} vmName
    * @param {!Entry} entry
    * @param {boolean} persist If path is to be persisted.
+   * @return {boolean}
    */
   canSharePath(vmName, entry, persist) {
     if (!this.enabled_[vmName]) {
@@ -257,8 +258,6 @@ CrostiniImpl.DEFAULT_VM = 'termina';
 CrostiniImpl.PLUGIN_VM = 'PvmDefault';
 
 /**
- * Keep in sync with histograms.xml:FileBrowserCrostiniSharedPathsDepth
- * histogram_suffix.
  * @type {!Map<?VolumeManagerCommon.RootType, string>}
  * @const
  */
@@ -272,10 +271,6 @@ CrostiniImpl.VALID_ROOT_TYPES_FOR_SHARE = new Map([
   [VolumeManagerCommon.RootType.SHARED_DRIVES_GRAND_ROOT, 'TeamDrive'],
   [VolumeManagerCommon.RootType.SHARED_DRIVE, 'TeamDrive'],
   [VolumeManagerCommon.RootType.CROSTINI, 'Crostini'],
+  [VolumeManagerCommon.RootType.ARCHIVE, 'Archive'],
+  [VolumeManagerCommon.RootType.SMB, 'SMB'],
 ]);
-
-/**
- * @private {string}
- * @const
- */
-CrostiniImpl.UMA_ROOT_TYPE_OTHER = 'Other';

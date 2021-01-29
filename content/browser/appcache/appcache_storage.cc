@@ -7,12 +7,12 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/memory/ptr_util.h"
 #include "content/browser/appcache/appcache_disk_cache_ops.h"
 #include "content/browser/appcache/appcache_response_info.h"
 #include "content/browser/appcache/appcache_service_impl.h"
-#include "storage/browser/quota/quota_client.h"
+#include "storage/browser/quota/quota_client_type.h"
 #include "storage/browser/quota/quota_manager_proxy.h"
 #include "third_party/blink/public/mojom/quota/quota_types.mojom.h"
 
@@ -114,8 +114,9 @@ void AppCacheStorage::UpdateUsageMapAndNotify(const url::Origin& origin,
     usage_map_.erase(origin);
   if (new_usage != old_usage && service()->quota_manager_proxy()) {
     service()->quota_manager_proxy()->NotifyStorageModified(
-        storage::QuotaClient::kAppcache, origin,
-        blink::mojom::StorageType::kTemporary, new_usage - old_usage);
+        storage::QuotaClientType::kAppcache, origin,
+        blink::mojom::StorageType::kTemporary, new_usage - old_usage,
+        base::Time::Now());
   }
 }
 
@@ -123,8 +124,9 @@ void AppCacheStorage::ClearUsageMapAndNotify() {
   if (service()->quota_manager_proxy()) {
     for (const auto& pair : usage_map_) {
       service()->quota_manager_proxy()->NotifyStorageModified(
-          storage::QuotaClient::kAppcache, pair.first,
-          blink::mojom::StorageType::kTemporary, -(pair.second));
+          storage::QuotaClientType::kAppcache, pair.first,
+          blink::mojom::StorageType::kTemporary, -(pair.second),
+          base::Time::Now());
     }
   }
   usage_map_.clear();
@@ -134,7 +136,7 @@ void AppCacheStorage::NotifyStorageAccessed(const url::Origin& origin) {
   if (service()->quota_manager_proxy() &&
       usage_map_.find(origin) != usage_map_.end())
     service()->quota_manager_proxy()->NotifyStorageAccessed(
-        origin, blink::mojom::StorageType::kTemporary);
+        origin, blink::mojom::StorageType::kTemporary, base::Time::Now());
 }
 
 }  // namespace content

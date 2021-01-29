@@ -12,9 +12,9 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_features.h"
 #include "components/prefs/json_pref_store.h"
 #include "components/prefs/persistent_pref_store.h"
 #include "components/prefs/pref_registry_simple.h"
@@ -40,7 +40,7 @@ const base::string16* g_preference_validation_registry_path_for_testing =
 // Preference tracking and protection is not required on platforms where other
 // apps do not have access to chrome's persistent storage.
 const bool ProfilePrefStoreManager::kPlatformSupportsPreferenceTracking =
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+#if defined(OS_ANDROID) || BUILDFLAG(IS_CHROMEOS_ASH)
     false;
 #else
     true;
@@ -54,7 +54,7 @@ ProfilePrefStoreManager::ProfilePrefStoreManager(
       seed_(seed),
       legacy_device_id_(legacy_device_id) {}
 
-ProfilePrefStoreManager::~ProfilePrefStoreManager() {}
+ProfilePrefStoreManager::~ProfilePrefStoreManager() = default;
 
 // static
 void ProfilePrefStoreManager::RegisterProfilePrefs(

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "base/notreached.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/dbus/constants/cryptohome_key_delegate_constants.h"
 #include "chromeos/dbus/cryptohome/key.pb.h"
@@ -61,26 +62,9 @@ void ChallengeResponseKeyToPublicKeyInfo(
 
 void KeyDefPrivilegesToKeyPrivileges(int key_def_privileges,
                                      KeyPrivileges* privileges) {
-  privileges->set_mount(key_def_privileges & PRIV_MOUNT);
   privileges->set_add(key_def_privileges & PRIV_ADD);
   privileges->set_remove(key_def_privileges & PRIV_REMOVE);
   privileges->set_update(key_def_privileges & PRIV_MIGRATE);
-  privileges->set_authorized_update(key_def_privileges &
-                                    PRIV_AUTHORIZED_UPDATE);
-}
-
-// TODO(crbug.com/797848): Add tests that cover this logic.
-void KeyDefSecretToKeyAuthorizationSecret(
-    const KeyDefinition::AuthorizationData::Secret& key_def_secret,
-    KeyAuthorizationSecret* secret) {
-  secret->mutable_usage()->set_encrypt(key_def_secret.encrypt);
-  secret->mutable_usage()->set_sign(key_def_secret.sign);
-  secret->set_wrapped(key_def_secret.wrapped);
-  if (!key_def_secret.symmetric_key.empty())
-    secret->set_symmetric_key(key_def_secret.symmetric_key);
-
-  if (!key_def_secret.public_key.empty())
-    secret->set_public_key(key_def_secret.public_key);
 }
 
 // TODO(crbug.com/797848): Add tests that cover this logic.
@@ -93,17 +77,6 @@ void KeyDefProviderDataToKeyProviderDataEntry(
 
   if (provider_data.bytes)
     entry->set_bytes(*provider_data.bytes);
-}
-
-// TODO(crbug.com/797848): Add tests that cover this logic.
-KeyAuthorizationData::KeyAuthorizationType GetKeyAuthDataType(
-    KeyDefinition::AuthorizationData::Type key_def_auth_data_type) {
-  switch (key_def_auth_data_type) {
-    case KeyDefinition::AuthorizationData::TYPE_HMACSHA256:
-      return KeyAuthorizationData::KEY_AUTHORIZATION_TYPE_HMACSHA256;
-    case KeyDefinition::AuthorizationData::TYPE_AES256CBC_HMACSHA256:
-      return KeyAuthorizationData::KEY_AUTHORIZATION_TYPE_AES256CBC_HMACSHA256;
-  }
 }
 
 }  // namespace
@@ -156,37 +129,29 @@ std::vector<KeyDefinition> GetKeyDataReplyToKeyDefinitions(
       case KeyData::KEY_TYPE_CHALLENGE_RESPONSE:
         key_definition.type = KeyDefinition::TYPE_CHALLENGE_RESPONSE;
         break;
+      case KeyData::KEY_TYPE_FINGERPRINT:
+        // KEY_TYPE_FINGERPRINT means the key is a request for fingerprint auth
+        // and does not really carry any auth information. KEY_TYPE_FINGERPRINT
+        // is not expected to be used in GetKeyData.
+        NOTREACHED();
+        break;
     }
     key_definition.label = it->label();
     key_definition.revision = it->revision();
 
     // Extract |privileges|.
     const KeyPrivileges& privileges = it->privileges();
-    if (privileges.mount())
-      key_definition.privileges |= PRIV_MOUNT;
     if (privileges.add())
       key_definition.privileges |= PRIV_ADD;
     if (privileges.remove())
       key_definition.privileges |= PRIV_REMOVE;
     if (privileges.update())
       key_definition.privileges |= PRIV_MIGRATE;
-    if (privileges.authorized_update())
-      key_definition.privileges |= PRIV_AUTHORIZED_UPDATE;
 
     // Extract |policy|.
     key_definition.policy.low_entropy_credential =
         it->policy().low_entropy_credential();
     key_definition.policy.auth_locked = it->policy().auth_locked();
-
-    // Extract |authorization_data|.
-    for (RepeatedPtrField<KeyAuthorizationData>::const_iterator auth_it =
-             it->authorization_data().begin();
-         auth_it != it->authorization_data().end(); ++auth_it) {
-      key_definition.authorization_data.push_back(
-          KeyDefinition::AuthorizationData());
-      KeyAuthorizationDataToAuthorizationData(
-          *auth_it, &key_definition.authorization_data.back());
-    }
 
     // Extract |provider_data|.
     for (RepeatedPtrField<KeyProviderData::Entry>::const_iterator
@@ -265,6 +230,8 @@ AuthorizationRequest CreateAuthorizationRequestFromKeyDef(
       auth_request.mutable_key_delegate()->set_dbus_object_path(
           cryptohome::kCryptohomeKeyDelegateServicePath);
       break;
+    case KeyDefinition::TYPE_FINGERPRINT:
+      break;
   }
 
   return auth_request;
@@ -290,6 +257,10 @@ void KeyDefinitionToKey(const KeyDefinition& key_def, Key* key) {
                                             data->add_challenge_response_key());
       }
       break;
+
+    case KeyDefinition::TYPE_FINGERPRINT:
+      data->set_type(KeyData::KEY_TYPE_FINGERPRINT);
+      break;
   }
 
   if (key_def.revision > 0)
@@ -298,15 +269,6 @@ void KeyDefinitionToKey(const KeyDefinition& key_def, Key* key) {
   if (key_def.privileges != 0) {
     KeyDefPrivilegesToKeyPrivileges(key_def.privileges,
                                     data->mutable_privileges());
-  }
-
-  for (const auto& key_def_auth_data : key_def.authorization_data) {
-    KeyAuthorizationData* auth_data = data->add_authorization_data();
-    auth_data->set_type(GetKeyAuthDataType(key_def_auth_data.type));
-    for (const auto& key_def_secret : key_def_auth_data.secrets) {
-      KeyDefSecretToKeyAuthorizationSecret(key_def_secret,
-                                           auth_data->add_secrets());
-    }
   }
 
   for (const auto& provider_data : key_def.provider_data) {
@@ -330,6 +292,9 @@ MountError CryptohomeErrorToMountError(CryptohomeErrorCode code) {
     case CRYPTOHOME_ERROR_INSTALL_ATTRIBUTES_GET_FAILED:
     case CRYPTOHOME_ERROR_INSTALL_ATTRIBUTES_SET_FAILED:
     case CRYPTOHOME_ERROR_INVALID_ARGUMENT:
+    case CRYPTOHOME_ERROR_FINGERPRINT_ERROR_INTERNAL:
+    case CRYPTOHOME_ERROR_FINGERPRINT_RETRY_REQUIRED:
+    case CRYPTOHOME_ERROR_FINGERPRINT_DENIED:
       return MOUNT_ERROR_FATAL;
     case CRYPTOHOME_ERROR_AUTHORIZATION_KEY_NOT_FOUND:
     case CRYPTOHOME_ERROR_KEY_NOT_FOUND:
@@ -356,6 +321,8 @@ MountError CryptohomeErrorToMountError(CryptohomeErrorCode code) {
       return MOUNT_ERROR_REMOVE_FAILED;
     case CRYPTOHOME_ERROR_TPM_UPDATE_REQUIRED:
       return MOUNT_ERROR_TPM_UPDATE_REQUIRED;
+    case CRYPTOHOME_ERROR_VAULT_UNRECOVERABLE:
+      return MOUNT_ERROR_VAULT_UNRECOVERABLE;
     // TODO(crbug.com/797563): Split the error space and/or handle everything.
     case CRYPTOHOME_ERROR_LOCKBOX_SIGNATURE_INVALID:
     case CRYPTOHOME_ERROR_LOCKBOX_CANNOT_SIGN:
@@ -376,28 +343,12 @@ MountError CryptohomeErrorToMountError(CryptohomeErrorCode code) {
     case CRYPTOHOME_ERROR_PCR_ALREADY_EXTENDED:
       NOTREACHED();
       return MOUNT_ERROR_FATAL;
-  }
-}
-
-void KeyAuthorizationDataToAuthorizationData(
-    const KeyAuthorizationData& authorization_data_proto,
-    KeyDefinition::AuthorizationData* authorization_data) {
-  switch (authorization_data_proto.type()) {
-    case KeyAuthorizationData::KEY_AUTHORIZATION_TYPE_HMACSHA256:
-      authorization_data->type =
-          KeyDefinition::AuthorizationData::TYPE_HMACSHA256;
-      break;
-    case KeyAuthorizationData::KEY_AUTHORIZATION_TYPE_AES256CBC_HMACSHA256:
-      authorization_data->type =
-          KeyDefinition::AuthorizationData::TYPE_AES256CBC_HMACSHA256;
-      break;
-  }
-
-  for (const auto& secret : authorization_data_proto.secrets()) {
-    authorization_data->secrets.push_back(
-        KeyDefinition::AuthorizationData::Secret(
-            secret.usage().encrypt(), secret.usage().sign(),
-            secret.symmetric_key(), secret.public_key(), secret.wrapped()));
+    // TODO(dlunev): remove this temporary case after rolling up system api
+    // change and adding proper handling for the new enum value in
+    // https://chromium-review.googlesource.com/c/chromium/src/+/2518524
+    default:
+      NOTREACHED();
+      return MOUNT_ERROR_FATAL;
   }
 }
 

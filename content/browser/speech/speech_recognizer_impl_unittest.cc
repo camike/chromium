@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
@@ -18,9 +18,9 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "content/browser/speech/proto/google_streaming_api.pb.h"
 #include "content/browser/speech/speech_recognition_engine.h"
 #include "content/browser/speech/speech_recognizer_impl.h"
+#include "content/public/browser/google_streaming_api.pb.h"
 #include "content/public/browser/speech_recognition_event_listener.h"
 #include "content/public/common/content_features.h"
 #include "content/public/test/browser_task_environment.h"
@@ -433,15 +433,12 @@ TEST_F(SpeechRecognizerImplTest, StopWithData) {
       ASSERT_TRUE(GetUpstreamRequest(&upstream_request));
       ASSERT_TRUE(upstream_request->request.request_body);
       ASSERT_EQ(1u, upstream_request->request.request_body->elements()->size());
-      ASSERT_EQ(
-          network::mojom::DataElementType::kChunkedDataPipe,
-          (*upstream_request->request.request_body->elements())[0].type());
-      network::TestURLLoaderFactory::PendingRequest* mutable_upstream_request =
-          const_cast<network::TestURLLoaderFactory::PendingRequest*>(
-              upstream_request);
-      chunked_data_pipe_getter.Bind((*mutable_upstream_request->request
-                                          .request_body->elements_mutable())[0]
-                                        .ReleaseChunkedDataPipeGetter());
+      auto& element =
+          (*upstream_request->request.request_body->elements_mutable())[0];
+      ASSERT_EQ(network::DataElement::Tag::kChunkedDataPipe, element.type());
+      chunked_data_pipe_getter.Bind(
+          element.As<network::DataElementChunkedDataPipe>()
+              .ReleaseChunkedDataPipeGetter());
       chunked_data_pipe_getter->StartReading(
           std::move(data_pipe.producer_handle));
     }

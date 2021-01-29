@@ -13,18 +13,17 @@
 #include "third_party/blink/renderer/modules/webtransport/web_transport_stream.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/visitor.h"
 
 namespace blink {
 
 class QuicTransport;
 class ScriptState;
-class Visitor;
 
 class MODULES_EXPORT SendStream final : public ScriptWrappable,
                                         public WebTransportStream,
                                         public OutgoingStream::Client {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(SendStream);
 
  public:
   // SendStream doesn't have a JavaScript constructor. It is only constructed
@@ -56,9 +55,9 @@ class MODULES_EXPORT SendStream final : public ScriptWrappable,
 
   // Implementation of OutgoingStream::Client
   void SendFin() override;
-  void ForgetStream() override;
+  void OnOutgoingStreamAbort() override;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   const Member<OutgoingStream> outgoing_stream_;

@@ -7,8 +7,9 @@
 [
     RuntimeEnabled=WebGPU
 ] interface mixin GPUProgrammablePassEncoder {
+    void setBindGroup(GPUIndex32 index, GPUBindGroup bindGroup);
     void setBindGroup(GPUIndex32 index, GPUBindGroup bindGroup,
-                      optional sequence<GPUBufferDynamicOffset> dynamicOffsets = []);
+                      sequence<GPUBufferDynamicOffset> dynamicOffsets);
 
     [RaisesException] void setBindGroup(
         GPUIndex32 index, GPUBindGroup bindGroup,
@@ -16,7 +17,7 @@
         GPUSize64 dynamicOffsetsDataStart,
         GPUSize32 dynamicOffsetsDataLength);
 
-    void pushDebugGroup(DOMString groupLabel);
+    void pushDebugGroup(USVString groupLabel);
     void popDebugGroup();
-    void insertDebugMarker(DOMString markerLabel);
+    void insertDebugMarker(USVString markerLabel);
 };

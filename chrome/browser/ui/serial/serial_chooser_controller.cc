@@ -8,10 +8,13 @@
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/unguessable_token.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/serial/serial_blocklist.h"
 #include "chrome/browser/serial/serial_chooser_context_factory.h"
+#include "chrome/browser/serial/serial_chooser_histograms.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -43,7 +46,11 @@ SerialChooserController::SerialChooserController(
 
 SerialChooserController::~SerialChooserController() {
   if (callback_)
-    std::move(callback_).Run(nullptr);
+    RunCallback(/*port=*/nullptr);
+}
+
+bool SerialChooserController::ShouldShowHelpButton() const {
+  return false;
 }
 
 base::string16 SerialChooserController::GetNoOptionsText() const {
@@ -52,6 +59,13 @@ base::string16 SerialChooserController::GetNoOptionsText() const {
 
 base::string16 SerialChooserController::GetOkButtonLabel() const {
   return l10n_util::GetStringUTF16(IDS_SERIAL_PORT_CHOOSER_CONNECT_BUTTON_TEXT);
+}
+
+std::pair<base::string16, base::string16>
+SerialChooserController::GetThrobberLabelAndTooltip() const {
+  return {
+      l10n_util::GetStringUTF16(IDS_SERIAL_PORT_CHOOSER_LOADING_LABEL),
+      l10n_util::GetStringUTF16(IDS_SERIAL_PORT_CHOOSER_LOADING_LABEL_TOOLTIP)};
 }
 
 size_t SerialChooserController::NumOptions() const {
@@ -67,7 +81,7 @@ base::string16 SerialChooserController::GetOption(size_t index) const {
   // serial port and to differentiate between ports with similar display names.
   base::string16 display_path = port.path.BaseName().LossyDisplayName();
 
-  if (port.display_name) {
+  if (port.display_name && !port.display_name->empty()) {
     return l10n_util::GetStringFUTF16(IDS_SERIAL_PORT_CHOOSER_NAME_WITH_PATH,
                                       base::UTF8ToUTF16(*port.display_name),
                                       display_path);
@@ -93,13 +107,13 @@ void SerialChooserController::Select(const std::vector<size_t>& indices) {
   DCHECK_LT(index, ports_.size());
 
   if (!chooser_context_) {
-    std::move(callback_).Run(nullptr);
+    RunCallback(/*port=*/nullptr);
     return;
   }
 
   chooser_context_->GrantPortPermission(requesting_origin_, embedding_origin_,
                                         *ports_[index]);
-  std::move(callback_).Run(ports_[index]->Clone());
+  RunCallback(ports_[index]->Clone());
 }
 
 void SerialChooserController::Cancel() {}
@@ -112,6 +126,9 @@ void SerialChooserController::OpenHelpCenterUrl() const {
 
 void SerialChooserController::OnPortAdded(
     const device::mojom::SerialPortInfo& port) {
+  if (!DisplayDevice(port))
+    return;
+
   ports_.push_back(port.Clone());
   if (view())
     view()->OnOptionAdded(ports_.size() - 1);
@@ -136,8 +153,14 @@ void SerialChooserController::OnPortManagerConnectionError() {
 
 void SerialChooserController::OnGetDevices(
     std::vector<device::mojom::SerialPortInfoPtr> ports) {
+  // Sort ports by file paths.
+  std::sort(ports.begin(), ports.end(),
+            [](const auto& port1, const auto& port2) {
+              return port1->path.BaseName() < port2->path.BaseName();
+            });
+
   for (auto& port : ports) {
-    if (FilterMatchesAny(*port))
+    if (DisplayDevice(*port))
       ports_.push_back(std::move(port));
   }
 
@@ -145,8 +168,11 @@ void SerialChooserController::OnGetDevices(
     view()->OnOptionsInitialized();
 }
 
-bool SerialChooserController::FilterMatchesAny(
+bool SerialChooserController::DisplayDevice(
     const device::mojom::SerialPortInfo& port) const {
+  if (SerialBlocklist::Get().IsExcluded(port))
+    return false;
+
   if (filters_.empty())
     return true;
 
@@ -163,4 +189,19 @@ bool SerialChooserController::FilterMatchesAny(
   }
 
   return false;
+}
+
+void SerialChooserController::RunCallback(
+    device::mojom::SerialPortInfoPtr port) {
+  auto outcome = ports_.empty() ? SerialChooserOutcome::kCancelledNoDevices
+                                : SerialChooserOutcome::kCancelled;
+
+  if (port) {
+    outcome = SerialChooserContext::CanStorePersistentEntry(*port)
+                  ? SerialChooserOutcome::kPermissionGranted
+                  : SerialChooserOutcome::kEphemeralPermissionGranted;
+  }
+
+  UMA_HISTOGRAM_ENUMERATION("Permissions.Serial.ChooserClosed", outcome);
+  std::move(callback_).Run(std::move(port));
 }

@@ -17,6 +17,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
@@ -53,13 +54,13 @@
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
-#include "net/url_request/url_request_context_getter.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/dbus/constants/dbus_paths.h"
@@ -108,7 +109,7 @@ std::unique_ptr<KeyedService> BuildFakeProfileInvalidationProvider(
 }
 
 const char* GetTestUser() {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   return user_manager::kStubUserEmail;
 #else
   return "user@example.com";
@@ -138,7 +139,7 @@ std::string GetTestPolicy(const char* homepage, int key_version) {
       "    \"mandatory\": {"
       "      \"ShowHomeButton\": true,"
       "      \"RestoreOnStartup\": 4,"
-      "      \"URLBlacklist\": [ \"dev.chromium.org\", \"youtube.com\" ],"
+      "      \"URLBlocklist\": [ \"dev.chromium.org\", \"youtube.com\" ],"
       "      \"MaxInvalidationFetchDelay\": 1000"
       "    },"
       "    \"recommended\": {"
@@ -160,22 +161,21 @@ void GetExpectedTestPolicy(PolicyMap* expected, const char* homepage) {
   GetExpectedDefaultPolicy(expected);
 
   expected->Set(key::kShowHomeButton, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-                POLICY_SOURCE_CLOUD, std::make_unique<base::Value>(true),
-                nullptr);
+                POLICY_SOURCE_CLOUD, base::Value(true), nullptr);
   expected->Set(key::kRestoreOnStartup, POLICY_LEVEL_MANDATORY,
-                POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                std::make_unique<base::Value>(4), nullptr);
+                POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, base::Value(4),
+                nullptr);
   base::ListValue list;
   list.AppendString("dev.chromium.org");
   list.AppendString("youtube.com");
-  expected->Set(key::kURLBlacklist, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-                POLICY_SOURCE_CLOUD, list.CreateDeepCopy(), nullptr);
+  expected->Set(key::kURLBlocklist, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
+                POLICY_SOURCE_CLOUD, list.Clone(), nullptr);
   expected->Set(key::kMaxInvalidationFetchDelay, POLICY_LEVEL_MANDATORY,
-                POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                std::make_unique<base::Value>(1000), nullptr);
+                POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, base::Value(1000),
+                nullptr);
   expected->Set(key::kHomepageLocation, POLICY_LEVEL_RECOMMENDED,
-                POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                std::make_unique<base::Value>(homepage), nullptr);
+                POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, base::Value(homepage),
+                nullptr);
 }
 
 }  // namespace
@@ -198,6 +198,7 @@ class CloudPolicyTest : public InProcessBrowserTest,
 
     base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
     command_line->AppendSwitchASCII(switches::kDeviceManagementUrl, url);
+    ChromeBrowserPolicyConnector::EnableCommandLineSupportForTesting();
   }
 
   void CreatedBrowserMainParts(
@@ -215,7 +216,7 @@ class CloudPolicyTest : public InProcessBrowserTest,
         g_browser_process->browser_policy_connector();
     connector->ScheduleServiceInitialization(0);
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     UserCloudPolicyManagerChromeOS* policy_manager =
         browser()->profile()->GetUserCloudPolicyManagerChromeOS();
     ASSERT_TRUE(policy_manager);
@@ -235,7 +236,7 @@ class CloudPolicyTest : public InProcessBrowserTest,
         UserCloudPolicyManager::CreateCloudPolicyClient(
             connector->device_management_service(),
             g_browser_process->shared_url_loader_factory()));
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
     ASSERT_TRUE(policy_manager->core()->client());
 
@@ -261,7 +262,7 @@ class CloudPolicyTest : public InProcessBrowserTest,
     // CloudPolicyClient fetch the DMToken.
     ASSERT_FALSE(policy_manager->core()->client()->is_registered());
     CloudPolicyClient::RegistrationParameters parameters(
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
         em::DeviceRegisterRequest::USER,
 #else
         em::DeviceRegisterRequest::BROWSER,
@@ -280,7 +281,7 @@ class CloudPolicyTest : public InProcessBrowserTest,
     policy_manager->core()->client()->AddObserver(
         policy_manager->core()->refresh_scheduler());
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     // Get the path to the user policy key file.
     base::FilePath user_policy_key_dir;
     ASSERT_TRUE(base::PathService::Get(
@@ -311,9 +312,7 @@ class CloudPolicyTest : public InProcessBrowserTest,
 
   void SetServerPolicy(const std::string& policy) {
     base::ScopedAllowBlockingForTesting allow_blocking;
-    int result = base::WriteFile(policy_file_path(), policy.data(),
-                                 policy.size());
-    ASSERT_EQ(base::checked_cast<int>(policy.size()), result);
+    ASSERT_TRUE(base::WriteFile(policy_file_path(), policy));
   }
 
   base::FilePath policy_file_path() const {
@@ -364,7 +363,7 @@ IN_PROC_BROWSER_TEST_F(CloudPolicyTest, FetchPolicy) {
       PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))));
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 // ENTERPRISE_DEFAULT policies only are supported on Chrome OS currently.
 IN_PROC_BROWSER_TEST_F(CloudPolicyTest, EnsureDefaultPoliciesSet) {
   PolicyService* policy_service = GetPolicyService();
@@ -405,7 +404,7 @@ IN_PROC_BROWSER_TEST_F(CloudPolicyTest, InvalidatePolicy) {
       base::Time::NowFromSystemTime() - base::Time::UnixEpoch();
 
   GetInvalidationServiceForSenderId(kPolicyFCMInvalidationSenderID)
-      ->EmitInvalidationForTest(syncer::Invalidation::Init(
+      ->EmitInvalidationForTest(invalidation::Invalidation::Init(
           policy_invalidation_topic, now.InMicroseconds() /* version */,
           "payload"));
   {
@@ -423,7 +422,7 @@ IN_PROC_BROWSER_TEST_F(CloudPolicyTest, InvalidatePolicy) {
   policy_service->RemoveObserver(POLICY_DOMAIN_CHROME, this);
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 IN_PROC_BROWSER_TEST_F(CloudPolicyTest, FetchPolicyWithRotatedKey) {
   PolicyService* policy_service = GetPolicyService();
   {

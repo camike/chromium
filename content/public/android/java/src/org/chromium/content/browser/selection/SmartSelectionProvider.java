@@ -18,7 +18,10 @@ import android.view.textclassifier.TextSelection;
 import androidx.annotation.IntDef;
 
 import org.chromium.base.task.AsyncTask;
+import org.chromium.content.browser.WindowEventObserver;
+import org.chromium.content.browser.WindowEventObserverManager;
 import org.chromium.content_public.browser.SelectionClient;
+import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
 
 import java.lang.annotation.Retention;
@@ -46,9 +49,19 @@ public class SmartSelectionProvider {
     private Runnable mFailureResponseRunnable;
 
     public SmartSelectionProvider(
-            SelectionClient.ResultCallback callback, WindowAndroid windowAndroid) {
+            SelectionClient.ResultCallback callback, WebContents webContents) {
         mResultCallback = callback;
-        mWindowAndroid = windowAndroid;
+        mWindowAndroid = webContents.getTopLevelNativeWindow();
+        WindowEventObserverManager manager = WindowEventObserverManager.from(webContents);
+        if (manager != null) {
+            manager.addObserver(new WindowEventObserver() {
+                @Override
+                public void onWindowAndroidChanged(WindowAndroid newWindowAndroid) {
+                    mWindowAndroid = newWindowAndroid;
+                }
+            });
+        }
+
         mHandler = new Handler();
         mFailureResponseRunnable = new Runnable() {
             @Override
@@ -117,7 +130,10 @@ public class SmartSelectionProvider {
             mClassificationTask = null;
         }
 
-        mClassificationTask = new ClassificationTask(classifier, requestType, text, start, end);
+        // We checked mWindowAndroid.getContext().get() is not null in getTextClassifier(), so pass
+        // the value directly here.
+        mClassificationTask = new ClassificationTask(
+                classifier, requestType, text, start, end, mWindowAndroid.getContext().get());
         mClassificationTask.executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
 
@@ -128,14 +144,16 @@ public class SmartSelectionProvider {
         private final CharSequence mText;
         private final int mOriginalStart;
         private final int mOriginalEnd;
+        private final Context mContext;
 
         ClassificationTask(TextClassifier classifier, @RequestType int requestType,
-                CharSequence text, int start, int end) {
+                CharSequence text, int start, int end, Context context) {
             mTextClassifier = classifier;
             mRequestType = requestType;
             mText = text;
             mOriginalStart = start;
             mOriginalEnd = end;
+            mContext = context;
         }
 
         @Override
@@ -170,6 +188,11 @@ public class SmartSelectionProvider {
             result.onClickListener = tc.getOnClickListener();
             result.textSelection = ts;
             result.textClassification = tc;
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                result.additionalIcons = AdditionalMenuItemProviderImpl.loadIconDrawables(
+                        mContext, result.textClassification);
+            }
 
             return result;
         }

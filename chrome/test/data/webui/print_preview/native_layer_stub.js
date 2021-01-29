@@ -2,15 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {Destination, PrinterType} from 'chrome://print/print_preview.js';
+import {CapabilitiesResponse, Destination, LocalDestinationInfo, NativeInitialSettings, NativeLayer, PageLayoutInfo, PrinterType, ProvisionalDestinationInfo} from 'chrome://print/print_preview.js';
 import {assert} from 'chrome://resources/js/assert.m.js';
 import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
 import {PromiseResolver} from 'chrome://resources/js/promise_resolver.m.js';
-import {getPdfPrinter} from 'chrome://test/print_preview/print_preview_test_utils.js';
-import {TestBrowserProxy} from 'chrome://test/test_browser_proxy.m.js';
+
+import {TestBrowserProxy} from '../test_browser_proxy.m.js';
+
+import {getCddTemplate, getPdfPrinter} from './print_preview_test_utils.js';
 
 /**
  * Test version of the native layer.
+ * @implements {NativeLayer}
  */
 export class NativeLayerStub extends TestBrowserProxy {
   constructor() {
@@ -20,17 +23,15 @@ export class NativeLayerStub extends TestBrowserProxy {
       'getPrinters',
       'getPreview',
       'getPrinterCapabilities',
-      'getEulaUrl',
       'hidePreview',
       'print',
       'saveAppState',
-      'setupPrinter',
       'showSystemDialog',
       'signIn',
     ]);
 
     /**
-     * @private {!NativeInitialSettings} The initial settings
+     * @private {?NativeInitialSettings} The initial settings
      *     to be used for the response to a |getInitialSettings| call.
      */
     this.initialSettings_ = null;
@@ -52,23 +53,11 @@ export class NativeLayerStub extends TestBrowserProxy {
 
     /**
      * @private {!Map<string,
-     *                !Promise<!CapabilitiesResponse>}
+     *                !Promise<!CapabilitiesResponse>>}
      *     A map from destination IDs to the responses to be sent when
      *     |getPrinterCapabilities| is called for the ID.
      */
     this.localDestinationCapabilities_ = new Map();
-
-    /**
-     * @private {!PrinterSetupResponse} The response to be sent
-     *     on a |setupPrinter| call.
-     */
-    this.setupPrinterResponse_ = null;
-
-    /**
-     * @private {boolean} Whether the printer setup request should be
-     *     rejected.
-     */
-    this.shouldRejectPrinterSetup_ = false;
 
     /** @private {?PromiseResolver} */
     this.multipleCapabilitiesPromise_ = null;
@@ -86,9 +75,6 @@ export class NativeLayerStub extends TestBrowserProxy {
 
     /** @private {?PageLayoutInfo} Page layout information */
     this.pageLayoutInfo_ = null;
-
-    /** @private {string} license The PPD license of a destination. */
-    this.eulaUrl_ = '';
   }
 
   /** @param {number} pageCount The number of pages in the document. */
@@ -104,18 +90,18 @@ export class NativeLayerStub extends TestBrowserProxy {
   /** @override */
   getInitialSettings() {
     this.methodCalled('getInitialSettings');
-    return Promise.resolve(this.initialSettings_);
+    return Promise.resolve(assert(this.initialSettings_));
   }
 
   /** @override */
   getPrinters(type) {
     this.methodCalled('getPrinters', type);
-    if (type == PrinterType.LOCAL_PRINTER &&
+    if (type === PrinterType.LOCAL_PRINTER &&
         this.localDestinationInfos_.length > 0) {
       webUIListenerCallback(
           'printers-added', type, this.localDestinationInfos_);
     } else if (
-        type == PrinterType.EXTENSION_PRINTER &&
+        type === PrinterType.EXTENSION_PRINTER &&
         this.extensionDestinationInfos_.length > 0) {
       webUIListenerCallback(
           'printers-added', type, this.extensionDestinationInfos_);
@@ -127,7 +113,7 @@ export class NativeLayerStub extends TestBrowserProxy {
   getPreview(printTicket) {
     this.methodCalled('getPreview', {printTicket: printTicket});
     const printTicketParsed = JSON.parse(printTicket);
-    if (printTicketParsed.deviceName == this.badPrinterId_) {
+    if (printTicketParsed.deviceName === this.badPrinterId_) {
       return Promise.reject('SETTINGS_INVALID');
     }
     const pageRanges = printTicketParsed.pageRange;
@@ -135,7 +121,7 @@ export class NativeLayerStub extends TestBrowserProxy {
     if (this.pageLayoutInfo_) {
       webUIListenerCallback('page-layout-ready', this.pageLayoutInfo_, false);
     }
-    if (pageRanges.length == 0) {  // assume full length document, 1 page.
+    if (pageRanges.length === 0) {  // assume full length document, 1 page.
       webUIListenerCallback(
           'page-count-ready', this.pageCount_, requestId, 100);
       for (let i = 0; i < this.pageCount_; i++) {
@@ -158,12 +144,6 @@ export class NativeLayerStub extends TestBrowserProxy {
   }
 
   /** @override */
-  getPrivetPrinters() {
-    this.methodCalled('getPrivetPrinters');
-    return Promise.resolve(true);
-  }
-
-  /** @override */
   getPrinterCapabilities(printerId, type) {
     this.methodCalled(
         'getPrinterCapabilities',
@@ -175,13 +155,11 @@ export class NativeLayerStub extends TestBrowserProxy {
         this.multipleCapabilitiesPromise_ = null;
       }
     }
-    if (printerId == Destination.GooglePromotedId.SAVE_AS_PDF) {
-      return Promise.resolve({
-        deviceName: 'Save as PDF',
-        capabilities: getPdfPrinter(),
-      });
+    if (printerId === Destination.GooglePromotedId.SAVE_AS_PDF ||
+        printerId === Destination.GooglePromotedId.SAVE_TO_DRIVE_CROS) {
+      return Promise.resolve(getPdfPrinter());
     }
-    if (type != PrinterType.LOCAL_PRINTER) {
+    if (type !== PrinterType.LOCAL_PRINTER) {
       return Promise.reject();
     }
     return this.localDestinationCapabilities_.get(printerId) ||
@@ -189,27 +167,12 @@ export class NativeLayerStub extends TestBrowserProxy {
   }
 
   /** @override */
-  getEulaUrl(destinationId) {
-    this.methodCalled('getEulaUrl', {destinationId: destinationId});
-
-    return Promise.resolve(this.eulaUrl_);
-  }
-
-  /** @override */
   print(printTicket) {
     this.methodCalled('print', printTicket);
-    if (JSON.parse(printTicket).printerType == PrinterType.CLOUD_PRINTER) {
+    if (JSON.parse(printTicket).printerType === PrinterType.CLOUD_PRINTER) {
       return Promise.resolve('sample data');
     }
     return Promise.resolve();
-  }
-
-  /** @override */
-  setupPrinter(printerId) {
-    this.methodCalled('setupPrinter', printerId);
-    return this.shouldRejectPrinterSetup_ ?
-        Promise.reject(this.setupPrinterResponse_) :
-        Promise.resolve(this.setupPrinterResponse_);
   }
 
   /** @override */
@@ -223,9 +186,6 @@ export class NativeLayerStub extends TestBrowserProxy {
   }
 
   /** @override */
-  recordAction() {}
-
-  /** @override */
   recordInHistogram() {}
 
   /** @override */
@@ -234,10 +194,10 @@ export class NativeLayerStub extends TestBrowserProxy {
   }
 
   /** @override */
-  signIn(addAccount) {
-    this.methodCalled('signIn', addAccount);
+  signIn() {
+    this.methodCalled('signIn');
     const accounts = this.accounts_ || ['foo@chromium.org'];
-    if (!this.accounts_ && addAccount) {
+    if (!this.accounts_) {
       accounts.push('bar@chromium.org');
     }
     if (accounts.length > 0) {
@@ -245,13 +205,11 @@ export class NativeLayerStub extends TestBrowserProxy {
     }
   }
 
-  /**
-   * @param {!Array<string>} accounts The accounts to send when signIn is
-   * called.
-   */
-  setSignIn(accounts) {
-    this.accounts_ = accounts;
-  }
+  /** @override */
+  cancelPendingPrintRequest() {}
+
+  /** @override */
+  managePrinters() {}
 
   /**
    * @param {!NativeInitialSettings} settings The settings
@@ -267,6 +225,14 @@ export class NativeLayerStub extends TestBrowserProxy {
    */
   setLocalDestinations(localDestinations) {
     this.localDestinationInfos_ = localDestinations;
+    this.localDestinationCapabilities_ = new Map();
+    this.localDestinationInfos_.forEach(info => {
+      this.setLocalDestinationCapabilities({
+        printer: info,
+        capabilities:
+            getCddTemplate(info.deviceName, info.printerName).capabilities,
+      });
+    });
   }
 
   /**
@@ -281,7 +247,7 @@ export class NativeLayerStub extends TestBrowserProxy {
   /**
    * @param {!CapabilitiesResponse} response The
    *     response to send for the destination whose ID is in the response.
-   * @param {?boolean} opt_reject Whether to reject the callback for this
+   * @param {boolean=} opt_reject Whether to reject the callback for this
    *     destination. Defaults to false (will resolve callback) if not
    *     provided.
    */
@@ -292,18 +258,7 @@ export class NativeLayerStub extends TestBrowserProxy {
   }
 
   /**
-   * @param {!PrinterSetupResponse} The response to send when
-   *     |setupPrinter| is called.
-   * @param {?boolean} opt_reject Whether printSetup requests should be
-   *     rejected. Defaults to false (will resolve callback) if not provided.
-   */
-  setSetupPrinterResponse(response, opt_reject) {
-    this.shouldRejectPrinterSetup_ = opt_reject || false;
-    this.setupPrinterResponse_ = response;
-  }
-
-  /**
-   * @param {string} bad_id The printer ID that should cause an
+   * @param {string} id The printer ID that should cause an
    *     SETTINGS_INVALID error in response to a preview request. Models a
    *     bad printer driver.
    */
@@ -325,10 +280,5 @@ export class NativeLayerStub extends TestBrowserProxy {
     this.multipleCapabilitiesCount_ = count;
     this.multipleCapabilitiesPromise_ = new PromiseResolver();
     return this.multipleCapabilitiesPromise_.promise;
-  }
-
-  /** @param {string} eulaUrl The eulaUrl of the PPD. */
-  setEulaUrl(eulaUrl) {
-    this.eulaUrl_ = eulaUrl;
   }
 }

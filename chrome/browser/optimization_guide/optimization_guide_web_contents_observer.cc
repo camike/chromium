@@ -8,24 +8,16 @@
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
 #include "chrome/browser/optimization_guide/optimization_guide_top_host_provider.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/optimization_guide/hints_fetcher.h"
-#include "components/optimization_guide/hints_processing_util.h"
-#include "components/optimization_guide/optimization_guide_enums.h"
-#include "components/optimization_guide/optimization_guide_features.h"
+#include "components/optimization_guide/core/hints_fetcher.h"
+#include "components/optimization_guide/core/hints_processing_util.h"
+#include "components/optimization_guide/core/optimization_guide_enums.h"
+#include "components/optimization_guide/core/optimization_guide_features.h"
 #include "components/optimization_guide/proto/hints.pb.h"
 #include "components/page_load_metrics/common/page_load_metrics.mojom.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
 
 namespace {
-
-bool WasHostCoveredByFetch(content::NavigationHandle* navigation_handle) {
-  return optimization_guide::HintsFetcher::WasHostCoveredByFetch(
-      Profile::FromBrowserContext(
-          navigation_handle->GetWebContents()->GetBrowserContext())
-          ->GetPrefs(),
-      navigation_handle->GetURL().host());
-}
 
 bool IsValidOptimizationGuideNavigation(
     content::NavigationHandle* navigation_handle) {
@@ -89,8 +81,6 @@ void OptimizationGuideWebContentsObserver::DidStartNavigation(
       navigation_handle);
   OptimizationGuideNavigationData* nav_data =
       GetOrCreateOptimizationGuideNavigationData(navigation_handle);
-  nav_data->set_was_host_covered_by_fetch_at_navigation_start(
-      WasHostCoveredByFetch(navigation_handle));
   nav_data->set_is_same_origin_navigation(is_same_origin);
 }
 
@@ -106,10 +96,6 @@ void OptimizationGuideWebContentsObserver::DidRedirectNavigation(
 
   optimization_guide_keyed_service_->OnNavigationStartOrRedirect(
       navigation_handle);
-  OptimizationGuideNavigationData* nav_data =
-      GetOrCreateOptimizationGuideNavigationData(navigation_handle);
-  nav_data->set_was_host_covered_by_fetch_at_navigation_start(
-      WasHostCoveredByFetch(navigation_handle));
 }
 
 void OptimizationGuideWebContentsObserver::DidFinishNavigation(
@@ -132,14 +118,6 @@ void OptimizationGuideWebContentsObserver::DidFinishNavigation(
           &OptimizationGuideWebContentsObserver::NotifyNavigationFinish,
           weak_factory_.GetWeakPtr(), navigation_handle->GetNavigationId(),
           navigation_handle->GetRedirectChain()));
-
-  if (!optimization_guide_keyed_service_)
-    return;
-
-  OptimizationGuideNavigationData* nav_data =
-      GetOrCreateOptimizationGuideNavigationData(navigation_handle);
-  nav_data->set_was_host_covered_by_fetch_at_commit(
-      WasHostCoveredByFetch(navigation_handle));
 }
 
 void OptimizationGuideWebContentsObserver::NotifyNavigationFinish(
@@ -152,7 +130,7 @@ void OptimizationGuideWebContentsObserver::NotifyNavigationFinish(
 
   if (optimization_guide_keyed_service_) {
     optimization_guide_keyed_service_->OnNavigationFinish(
-        navigation_redirect_chain, nav_data_iter->second.get());
+        navigation_redirect_chain);
   }
 
   // We keep the last navigation data around to keep track of events happening
@@ -171,6 +149,11 @@ void OptimizationGuideWebContentsObserver::UpdateSessionTimingStatistics(
 
   optimization_guide_keyed_service_->UpdateSessionFCP(
       timing.paint_timing->first_contentful_paint.value());
+}
+
+void OptimizationGuideWebContentsObserver::FlushLastNavigationData() {
+  if (last_navigation_data_)
+    last_navigation_data_.reset();
 }
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(OptimizationGuideWebContentsObserver)

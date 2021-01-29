@@ -4,7 +4,10 @@
 
 #import "ios/chrome/browser/ui/autofill/save_card_infobar_view.h"
 
-#include "base/logging.h"
+#import <MaterialComponents/MaterialButtons.h>
+#import <MaterialComponents/MaterialTypography.h>
+
+#include "base/check_op.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/procedural_block_types.h"
 #import "ios/chrome/browser/ui/autofill/save_card_infobar_view_delegate.h"
@@ -17,8 +20,7 @@
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
-#import "ios/third_party/material_components_ios/src/components/Buttons/src/MaterialButtons.h"
-#import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
+#import "ios/chrome/common/ui/util/pointer_interaction_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #import "ui/gfx/ios/uikit_util.h"
 #include "url/gurl.h"
@@ -287,6 +289,9 @@ NSString* const kTitleViewAccessibilityIdentifier = @"titleView";
     [closeButton.trailingAnchor
         constraintEqualToAnchor:headerView.trailingAnchor],
   ]];
+  if (@available(iOS 13.4, *)) {
+      closeButton.pointerInteractionEnabled = YES;
+  }
 
   // Add the content view.
   UIView* contentView = [self contentView];
@@ -347,6 +352,11 @@ NSString* const kTitleViewAccessibilityIdentifier = @"titleView";
                            titleColor:[UIColor colorNamed:kBlueColor]
                                target:self
                                action:@selector(didTapCancel)];
+      if (@available(iOS 13.4, *)) {
+          cancelButton.pointerInteractionEnabled = YES;
+          cancelButton.pointerStyleProvider =
+              CreateTransparentButtonPointerStyleProvider();
+      }
 
       [footerView addArrangedSubview:cancelButton];
     }
@@ -358,6 +368,11 @@ NSString* const kTitleViewAccessibilityIdentifier = @"titleView";
                            titleColor:[UIColor colorNamed:kSolidButtonTextColor]
                                target:self
                                action:@selector(didTapConfirm)];
+      if (@available(iOS 13.4, *)) {
+          confirmButton.pointerInteractionEnabled = YES;
+          confirmButton.pointerStyleProvider =
+              CreateOpaqueButtonPointerStyleProvider();
+      }
 
       [footerView addArrangedSubview:confirmButton];
     }

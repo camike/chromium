@@ -51,8 +51,8 @@ JavaScriptDialogPresenter* WebStateDelegate::GetJavaScriptDialogPresenter(
 void WebStateDelegate::OnAuthRequired(WebState* source,
                                       NSURLProtectionSpace* protection_space,
                                       NSURLCredential* proposed_credential,
-                                      const AuthCallback& callback) {
-  callback.Run(nil, nil);
+                                      AuthCallback callback) {
+  std::move(callback).Run(nil, nil);
 }
 
 bool WebStateDelegate::ShouldPreviewLink(WebState* source,
@@ -70,6 +70,10 @@ void WebStateDelegate::CommitPreviewingViewController(
     WebState* source,
     UIViewController* previewing_view_controller) {}
 
+UIView* WebStateDelegate::GetWebViewContainer(WebState* source) {
+  return nil;
+}
+
 void WebStateDelegate::Attach(WebState* source) {
   DCHECK(attached_states_.find(source) == attached_states_.end());
   attached_states_.insert(source);
@@ -82,9 +86,12 @@ void WebStateDelegate::Detach(WebState* source) {
 
 void WebStateDelegate::ContextMenuConfiguration(
     WebState* source,
-    const GURL& link_url,
+    const ContextMenuParams& params,
+    UIContextMenuContentPreviewProvider preview_provider,
     void (^completion_handler)(UIContextMenuConfiguration*))
-    API_AVAILABLE(ios(13.0)) {}
+    API_AVAILABLE(ios(13.0)) {
+  completion_handler(nil);
+}
 
 void WebStateDelegate::ContextMenuDidEnd(WebState* source, const GURL& link_url)
     API_AVAILABLE(ios(13.0)) {}
@@ -98,5 +105,10 @@ void WebStateDelegate::ContextMenuWillCommitWithAnimator(
 void WebStateDelegate::ContextMenuWillPresent(WebState* source,
                                               const GURL& link_url)
     API_AVAILABLE(ios(13.0)) {}
+
+id<CRWResponderInputView> WebStateDelegate::GetResponderInputView(
+    WebState* source) {
+  return nil;
+}
 
 }  // web

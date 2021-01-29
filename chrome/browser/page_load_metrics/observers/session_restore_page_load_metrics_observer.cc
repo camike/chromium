@@ -42,12 +42,10 @@ SessionRestorePageLoadMetricsObserver::OnStart(
     return STOP_OBSERVING;
   }
 
-  // The navigation should be from the last session.
-  DCHECK(navigation_handle->GetRestoreType() ==
-             content::RestoreType::LAST_SESSION_EXITED_CLEANLY ||
-         navigation_handle->GetRestoreType() ==
-             content::RestoreType::LAST_SESSION_CRASHED);
-
+  // The navigation should be from restoring the last session or restoring a
+  // tab.
+  DCHECK_EQ(content::RestoreType::kRestored,
+            navigation_handle->GetRestoreType());
   return CONTINUE_OBSERVING;
 }
 
@@ -74,7 +72,7 @@ void SessionRestorePageLoadMetricsObserver::OnFirstPaintInPage(
     // is no need to record again in FCP or FMP, because FP comes first.
     ukm::builders::
         TabManager_Experimental_SessionRestore_ForegroundTab_PageLoad(
-            GetDelegate().GetSourceId())
+            GetDelegate().GetPageUkmSourceId())
             .SetSessionRestoreTabCount(
                 g_browser_process->GetTabManager()->restored_tab_count())
             .SetSystemTabCount(

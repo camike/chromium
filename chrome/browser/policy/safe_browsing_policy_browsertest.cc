@@ -15,7 +15,9 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_service.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "components/safe_browsing/core/features.h"
+#include "content/public/test/browser_test.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "url/gurl.h"
 
@@ -24,59 +26,36 @@ using testing::Return;
 
 namespace policy {
 
-// Test that when extended reporting opt-in is disabled by policy, the
-// opt-in checkbox does not appear on SSL blocking pages.
-// Note: SafeBrowsingExtendedReportingOptInAllowed policy is being deprecated.
-IN_PROC_BROWSER_TEST_F(PolicyTest, SafeBrowsingExtendedReportingOptInAllowed) {
-  net::EmbeddedTestServer https_server_expired(
-      net::EmbeddedTestServer::TYPE_HTTPS);
-  https_server_expired.SetSSLConfig(net::EmbeddedTestServer::CERT_EXPIRED);
-  https_server_expired.ServeFilesFromSourceDirectory("chrome/test/data");
-  ASSERT_TRUE(https_server_expired.Start());
+int PolicyTest::IsEnhancedProtectionMessageVisibleOnInterstitial() {
+  const std::string command = base::StringPrintf(
+      "var node = document.getElementById('enhanced-protection-message');"
+      "if (node) {"
+      "  window.domAutomationController.send(node.offsetWidth > 0 || "
+      "      node.offsetHeight > 0 ? %d : %d);"
+      "} else {"
+      // The node should be present but not visible, so trigger an error
+      // by sending false if it's not present.
+      "  window.domAutomationController.send(%d);"
+      "}",
+      security_interstitials::CMD_TEXT_FOUND,
+      security_interstitials::CMD_TEXT_NOT_FOUND,
+      security_interstitials::CMD_ERROR);
 
-  // First, navigate to an SSL error page and make sure the checkbox appears by
-  // default.
-  ui_test_utils::NavigateToURL(browser(), https_server_expired.GetURL("/"));
-  EXPECT_EQ(security_interstitials::CMD_TEXT_FOUND,
-            IsExtendedReportingCheckboxVisibleOnInterstitial());
-
-  // Set the enterprise policy to disallow opt-in.
-  const PrefService* const prefs = browser()->profile()->GetPrefs();
-  EXPECT_TRUE(
-      prefs->GetBoolean(prefs::kSafeBrowsingExtendedReportingOptInAllowed));
-  PolicyMap policies;
-  policies.Set(key::kSafeBrowsingExtendedReportingOptInAllowed,
-               POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-               base::WrapUnique(new base::Value(false)), nullptr);
-  UpdateProviderPolicy(policies);
-  EXPECT_FALSE(
-      prefs->GetBoolean(prefs::kSafeBrowsingExtendedReportingOptInAllowed));
-
-  // Navigate to an SSL error page, the checkbox should not appear.
-  ui_test_utils::NavigateToURL(browser(), https_server_expired.GetURL("/"));
-  EXPECT_EQ(security_interstitials::CMD_TEXT_NOT_FOUND,
-            IsExtendedReportingCheckboxVisibleOnInterstitial());
+  content::WebContents* tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  WaitForInterstitial(tab);
+  int result = 0;
+  EXPECT_TRUE(content::ExecuteScriptAndExtractInt(tab->GetMainFrame(), command,
+                                                  &result));
+  return result;
 }
 
-// Test that when extended reporting is managed by policy, the opt-in checkbox
-// does not appear on SSL blocking pages.
+// Test extended reporting is managed by policy.
 IN_PROC_BROWSER_TEST_F(PolicyTest, SafeBrowsingExtendedReportingPolicyManaged) {
-  net::EmbeddedTestServer https_server_expired(
-      net::EmbeddedTestServer::TYPE_HTTPS);
-  https_server_expired.SetSSLConfig(net::EmbeddedTestServer::CERT_EXPIRED);
-  https_server_expired.ServeFilesFromSourceDirectory("chrome/test/data");
-  ASSERT_TRUE(https_server_expired.Start());
-
   // Set the extended reporting pref to True and ensure the enterprise policy
   // can overwrite it.
   PrefService* prefs = browser()->profile()->GetPrefs();
   prefs->SetBoolean(prefs::kSafeBrowsingScoutReportingEnabled, true);
-
-  // First, navigate to an SSL error page and make sure the checkbox appears by
-  // default.
-  ui_test_utils::NavigateToURL(browser(), https_server_expired.GetURL("/"));
-  EXPECT_EQ(security_interstitials::CMD_TEXT_FOUND,
-            IsExtendedReportingCheckboxVisibleOnInterstitial());
 
   // Set the enterprise policy to disable extended reporting.
   EXPECT_TRUE(
@@ -84,7 +63,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SafeBrowsingExtendedReportingPolicyManaged) {
   PolicyMap policies;
   policies.Set(key::kSafeBrowsingExtendedReportingEnabled,
                POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-               base::WrapUnique(new base::Value(false)), nullptr);
+               base::Value(false), nullptr);
   UpdateProviderPolicy(policies);
   // Policy should have overwritten the pref, and it should be managed.
   EXPECT_FALSE(prefs->GetBoolean(prefs::kSafeBrowsingScoutReportingEnabled));
@@ -99,11 +78,46 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SafeBrowsingExtendedReportingPolicyManaged) {
   // deprecated, then SBER's policy management will imply whether the checkbox
   // is visible.
   EXPECT_TRUE(safe_browsing::IsExtendedReportingOptInAllowed(*prefs));
+}
 
-  // Navigate to an SSL error page, the checkbox should not appear.
+// Test that when Safe Browsing state is managed by policy, the enhanced
+// protection message does not appear on SSL blocking pages.
+IN_PROC_BROWSER_TEST_F(PolicyTest, SafeBrowsingStatePolicyManaged) {
+  net::EmbeddedTestServer https_server_expired(
+      net::EmbeddedTestServer::TYPE_HTTPS);
+  https_server_expired.SetSSLConfig(net::EmbeddedTestServer::CERT_EXPIRED);
+  https_server_expired.ServeFilesFromSourceDirectory("chrome/test/data");
+  ASSERT_TRUE(https_server_expired.Start());
+
+  // Set the Safe Browsing state to standard protection.
+  PrefService* prefs = browser()->profile()->GetPrefs();
+  safe_browsing::SetSafeBrowsingState(
+      prefs, safe_browsing::SafeBrowsingState::STANDARD_PROTECTION);
+
+  // First, navigate to an SSL error page and make sure the enhanced protection
+  // message appears by default.
+  ui_test_utils::NavigateToURL(browser(), https_server_expired.GetURL("/"));
+  EXPECT_EQ(security_interstitials::CMD_TEXT_FOUND,
+            IsEnhancedProtectionMessageVisibleOnInterstitial());
+
+  // Set the enterprise policy to force standard protection.
+  PolicyMap policies;
+  policies.Set(policy::key::kSafeBrowsingProtectionLevel,
+               policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
+               policy::POLICY_SOURCE_CLOUD,
+               base::Value(/* standard protection */ 1), nullptr);
+  UpdateProviderPolicy(policies);
+  // Policy should have overwritten the pref, and it should be managed.
+  EXPECT_EQ(safe_browsing::SafeBrowsingState::STANDARD_PROTECTION,
+            safe_browsing::GetSafeBrowsingState(*prefs));
+  EXPECT_TRUE(prefs->IsManagedPreference(prefs::kSafeBrowsingEnabled));
+  EXPECT_TRUE(prefs->IsManagedPreference(prefs::kSafeBrowsingEnhanced));
+
+  // Navigate to an SSL error page, the enhanced protection message should not
+  // appear.
   ui_test_utils::NavigateToURL(browser(), https_server_expired.GetURL("/"));
   EXPECT_EQ(security_interstitials::CMD_TEXT_NOT_FOUND,
-            IsExtendedReportingCheckboxVisibleOnInterstitial());
+            IsEnhancedProtectionMessageVisibleOnInterstitial());
 }
 
 // Test that when safe browsing whitelist domains are set by policy, safe
@@ -113,9 +127,9 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SafeBrowsingWhitelistDomains) {
   // |GetSafeBrowsingDomainsPref(..) should return empty list.
   const PrefService* const prefs = browser()->profile()->GetPrefs();
   EXPECT_FALSE(
-      prefs->FindPreference(prefs::kSafeBrowsingWhitelistDomains)->IsManaged());
+      prefs->FindPreference(prefs::kSafeBrowsingAllowlistDomains)->IsManaged());
   std::vector<std::string> canonicalized_domains;
-  safe_browsing::GetSafeBrowsingWhitelistDomainsPref(*prefs,
+  safe_browsing::GetSafeBrowsingAllowlistDomainsPref(*prefs,
                                                      &canonicalized_domains);
   EXPECT_TRUE(canonicalized_domains.empty());
 
@@ -126,11 +140,11 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SafeBrowsingWhitelistDomains) {
   whitelist_domains.AppendString("mydomain.net");
   policies.Set(key::kSafeBrowsingWhitelistDomains, POLICY_LEVEL_MANDATORY,
                POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-               whitelist_domains.CreateDeepCopy(), nullptr);
+               whitelist_domains.Clone(), nullptr);
   UpdateProviderPolicy(policies);
   EXPECT_TRUE(
-      prefs->FindPreference(prefs::kSafeBrowsingWhitelistDomains)->IsManaged());
-  safe_browsing::GetSafeBrowsingWhitelistDomainsPref(*prefs,
+      prefs->FindPreference(prefs::kSafeBrowsingAllowlistDomains)->IsManaged());
+  safe_browsing::GetSafeBrowsingAllowlistDomainsPref(*prefs,
                                                      &canonicalized_domains);
   EXPECT_EQ(2u, canonicalized_domains.size());
   EXPECT_EQ("mydomain.com", canonicalized_domains[0]);
@@ -141,12 +155,12 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SafeBrowsingWhitelistDomains) {
   whitelist_domains.AppendString(std::string("%EF%BF%BDzyx.com"));
   policies.Set(key::kSafeBrowsingWhitelistDomains, POLICY_LEVEL_MANDATORY,
                POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-               whitelist_domains.CreateDeepCopy(), nullptr);
+               whitelist_domains.Clone(), nullptr);
   UpdateProviderPolicy(policies);
   EXPECT_TRUE(
-      prefs->FindPreference(prefs::kSafeBrowsingWhitelistDomains)->IsManaged());
+      prefs->FindPreference(prefs::kSafeBrowsingAllowlistDomains)->IsManaged());
   canonicalized_domains.clear();
-  safe_browsing::GetSafeBrowsingWhitelistDomainsPref(*prefs,
+  safe_browsing::GetSafeBrowsingAllowlistDomainsPref(*prefs,
                                                      &canonicalized_domains);
   EXPECT_TRUE(canonicalized_domains.empty());
 }
@@ -169,8 +183,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, PasswordProtectionLoginURLs) {
   login_url_values.AppendString("https://login.mydomain.com");
   login_url_values.AppendString("https://mydomian.com/login.html");
   policies.Set(key::kPasswordProtectionLoginURLs, POLICY_LEVEL_MANDATORY,
-               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-               login_url_values.CreateDeepCopy(), nullptr);
+               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, login_url_values.Clone(),
+               nullptr);
   UpdateProviderPolicy(policies);
   EXPECT_TRUE(
       prefs->FindPreference(prefs::kPasswordProtectionLoginURLs)->IsManaged());
@@ -184,8 +198,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, PasswordProtectionLoginURLs) {
   login_url_values.AppendString(std::string("invalid"));
   login_url_values.AppendString(std::string("ftp://login.mydomain.com"));
   policies.Set(key::kPasswordProtectionLoginURLs, POLICY_LEVEL_MANDATORY,
-               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-               login_url_values.CreateDeepCopy(), nullptr);
+               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, login_url_values.Clone(),
+               nullptr);
   UpdateProviderPolicy(policies);
   EXPECT_TRUE(
       prefs->FindPreference(prefs::kPasswordProtectionLoginURLs)->IsManaged());
@@ -213,11 +227,9 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, PasswordProtectionChangePasswordURL) {
 
   // Add change password URL to this enterprise policy .
   PolicyMap policies;
-  policies.Set(
-      key::kPasswordProtectionChangePasswordURL, POLICY_LEVEL_MANDATORY,
-      POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-      base::WrapUnique(new base::Value("https://changepassword.mydomain.com")),
-      nullptr);
+  policies.Set(key::kPasswordProtectionChangePasswordURL,
+               POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
+               base::Value("https://changepassword.mydomain.com"), nullptr);
   UpdateProviderPolicy(policies);
   EXPECT_TRUE(prefs->FindPreference(prefs::kPasswordProtectionChangePasswordURL)
                   ->IsManaged());
@@ -227,8 +239,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, PasswordProtectionChangePasswordURL) {
   // Verify non-http/https change password URL will be skipped.
   policies.Set(key::kPasswordProtectionChangePasswordURL,
                POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-               base::WrapUnique(new base::Value("data:text/html,login page")),
-               nullptr);
+               base::Value("data:text/html,login page"), nullptr);
   UpdateProviderPolicy(policies);
   EXPECT_TRUE(prefs->FindPreference(prefs::kPasswordProtectionChangePasswordURL)
                   ->IsManaged());
@@ -272,8 +283,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest,
   // Sets the enterprise policy to 1 (a.k.a PASSWORD_REUSE).
   PolicyMap policies;
   policies.Set(key::kPasswordProtectionWarningTrigger, POLICY_LEVEL_MANDATORY,
-               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-               std::make_unique<base::Value>(1), nullptr);
+               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, base::Value(1), nullptr);
   UpdateProviderPolicy(policies);
   EXPECT_TRUE(prefs->FindPreference(prefs::kPasswordProtectionWarningTrigger)
                   ->IsManaged());
@@ -282,8 +292,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest,
                 ReusedPasswordAccountType()));
   // Sets the enterprise policy to 2 (a.k.a PHISHING_REUSE).
   policies.Set(key::kPasswordProtectionWarningTrigger, POLICY_LEVEL_MANDATORY,
-               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-               std::make_unique<base::Value>(2), nullptr);
+               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, base::Value(2), nullptr);
   UpdateProviderPolicy(policies);
   EXPECT_EQ(safe_browsing::PHISHING_REUSE,
             mock_service.GetPasswordProtectionWarningTriggerPref(
@@ -314,8 +323,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, PasswordProtectionWarningTriggerGmail) {
   // to.
   PolicyMap policies;
   policies.Set(key::kPasswordProtectionWarningTrigger, POLICY_LEVEL_MANDATORY,
-               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-               std::make_unique<base::Value>(1), nullptr);
+               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, base::Value(1), nullptr);
   UpdateProviderPolicy(policies);
   EXPECT_TRUE(prefs->FindPreference(prefs::kPasswordProtectionWarningTrigger)
                   ->IsManaged());
@@ -323,8 +331,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, PasswordProtectionWarningTriggerGmail) {
             mock_service.GetPasswordProtectionWarningTriggerPref(account_type));
   // Sets the enterprise policy to 2 (a.k.a PHISHING_REUSE).
   policies.Set(key::kPasswordProtectionWarningTrigger, POLICY_LEVEL_MANDATORY,
-               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-               std::make_unique<base::Value>(2), nullptr);
+               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, base::Value(2), nullptr);
   UpdateProviderPolicy(policies);
   EXPECT_EQ(safe_browsing::PHISHING_REUSE,
             mock_service.GetPasswordProtectionWarningTriggerPref(account_type));
@@ -347,8 +354,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, PasswordProtectionWarningTriggerGSuite) {
                 ReusedPasswordAccountType()));
   // Sets the enterprise policy to 1 (a.k.a PASSWORD_REUSE).
   policies.Set(key::kPasswordProtectionWarningTrigger, POLICY_LEVEL_MANDATORY,
-               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-               std::make_unique<base::Value>(1), nullptr);
+               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, base::Value(1), nullptr);
   UpdateProviderPolicy(policies);
   EXPECT_TRUE(prefs->FindPreference(prefs::kPasswordProtectionWarningTrigger)
                   ->IsManaged());
@@ -357,8 +363,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, PasswordProtectionWarningTriggerGSuite) {
                 ReusedPasswordAccountType()));
   // Sets the enterprise policy to 2 (a.k.a PHISHING_REUSE).
   policies.Set(key::kPasswordProtectionWarningTrigger, POLICY_LEVEL_MANDATORY,
-               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-               std::make_unique<base::Value>(2), nullptr);
+               POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, base::Value(2), nullptr);
   UpdateProviderPolicy(policies);
   EXPECT_EQ(safe_browsing::PHISHING_REUSE,
             mock_service.GetPasswordProtectionWarningTriggerPref(

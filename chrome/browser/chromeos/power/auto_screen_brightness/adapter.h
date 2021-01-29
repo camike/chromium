@@ -182,9 +182,9 @@ class Adapter : public AlsReader::Observer,
 
   // chromeos::PowerManagerClient::Observer overrides:
   void PowerManagerBecameAvailable(bool service_is_ready) override;
-  void SuspendDone(const base::TimeDelta& sleep_duration) override;
+  void SuspendDone(base::TimeDelta sleep_duration) override;
   void LidEventReceived(chromeos::PowerManagerClient::LidState state,
-                        const base::TimeTicks& timestamp) override;
+                        base::TimeTicks timestamp) override;
 
   Status GetStatusForTesting() const;
 
@@ -391,6 +391,10 @@ class Adapter : public AlsReader::Observer,
   // If lid is closed then we do not record any ambient light. If a device
   // has no lid, it is considered as open.
   base::Optional<bool> is_lid_closed_;
+
+  // Ignored ALS due to closed lid is only recorded once: the 1st time when
+  // ALS changes.
+  bool lid_closed_message_reported_ = false;
 
   // Recent lid reopen time following a lid-closed event. Unset after the first
   // brightness change after a recent lid-open event.

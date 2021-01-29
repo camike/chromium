@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/stl_util.h"
@@ -17,6 +18,7 @@
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "components/security_state/content/content_utils.h"
 #include "components/security_state/core/security_state.h"
 #include "content/public/browser/browser_thread.h"
@@ -29,6 +31,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/renderer_preferences_util.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/bindings_policy.h"
@@ -40,8 +43,10 @@
 #include "headless/lib/browser/protocol/headless_handler.h"
 #include "headless/public/internal/headless_devtools_client_impl.h"
 #include "printing/buildflags/buildflags.h"
-#include "third_party/blink/public/mojom/renderer_preferences.mojom.h"
+#include "third_party/blink/public/common/renderer_preferences/renderer_preferences.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/compositor/compositor.h"
 #include "ui/gfx/switches.h"
 
@@ -50,6 +55,28 @@
 #endif
 
 namespace headless {
+
+namespace {
+
+void UpdatePrefsFromSystemSettings(blink::RendererPreferences* prefs) {
+#if defined(OS_LINUX) || defined(OS_WIN)
+  content::UpdateFontRendererPreferencesFromSystemSettings(prefs);
+#endif
+
+  // The values were copied from chrome/browser/renderer_preferences_util.cc.
+#if defined(USE_AURA)
+  prefs->focus_ring_color = SkColorSetRGB(0x4D, 0x90, 0xFE);
+#endif
+  if (::features::IsFormControlsRefreshEnabled()) {
+#if defined(OS_MAC)
+    prefs->focus_ring_color = SkColorSetRGB(0x00, 0x5F, 0xCC);
+#else
+    prefs->focus_ring_color = SkColorSetRGB(0x10, 0x10, 0x10);
+#endif
+  }
+}
+
+}  // namespace
 
 // static
 HeadlessWebContentsImpl* HeadlessWebContentsImpl::From(
@@ -89,8 +116,14 @@ class HeadlessWebContentsImpl::Delegate : public content::WebContentsDelegate {
         *visible_security_state.get(), security_style_explanations);
   }
 
+  void BeforeUnloadFired(content::WebContents* web_contents,
+                         bool proceed,
+                         bool* proceed_to_fire_unload) override {
+    *proceed_to_fire_unload = proceed;
+  }
+
   void ActivateContents(content::WebContents* contents) override {
-    contents->GetRenderViewHost()->GetWidget()->Focus();
+    contents->GetMainFrame()->GetRenderViewHost()->GetWidget()->Focus();
   }
 
   void CloseContents(content::WebContents* source) override {
@@ -102,6 +135,7 @@ class HeadlessWebContentsImpl::Delegate : public content::WebContentsDelegate {
 
   void AddNewContents(content::WebContents* source,
                       std::unique_ptr<content::WebContents> new_contents,
+                      const GURL& target_url,
                       WindowOpenDisposition disposition,
                       const gfx::Rect& initial_rect,
                       bool user_gesture,
@@ -168,6 +202,13 @@ class HeadlessWebContentsImpl::Delegate : public content::WebContentsDelegate {
     return headless_web_contents_->browser_context()
         ->options()
         ->block_new_web_contents();
+  }
+
+  void RequestToLockMouse(content::WebContents* web_contents,
+                          bool user_gesture,
+                          bool last_unlocked_by_target) override {
+    web_contents->GotResponseToLockMouseRequest(
+        blink::mojom::PointerLockResult::kSuccess);
   }
 
  private:
@@ -278,16 +319,17 @@ HeadlessWebContentsImpl::HeadlessWebContentsImpl(
     std::unique_ptr<content::WebContents> web_contents,
     HeadlessBrowserContextImpl* browser_context)
     : content::WebContentsObserver(web_contents.get()),
+      browser_context_(browser_context),
+      render_process_host_(web_contents->GetMainFrame()->GetProcess()),
       web_contents_delegate_(new HeadlessWebContentsImpl::Delegate(this)),
       web_contents_(std::move(web_contents)),
       agent_host_(
-          content::DevToolsAgentHost::GetOrCreateFor(web_contents_.get())),
-      browser_context_(browser_context),
-      render_process_host_(web_contents_->GetMainFrame()->GetProcess()) {
+          content::DevToolsAgentHost::GetOrCreateFor(web_contents_.get())) {
 #if BUILDFLAG(ENABLE_PRINTING)
   HeadlessPrintManager::CreateForWebContents(web_contents_.get());
 // TODO(weili): Add support for printing OOPIFs.
 #endif
+  UpdatePrefsFromSystemSettings(web_contents_->GetMutableRendererPrefs());
   web_contents_->GetMutableRendererPrefs()->accept_languages =
       browser_context->options()->accept_language();
   web_contents_->GetMutableRendererPrefs()->hinting =

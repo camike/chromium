@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
@@ -41,7 +41,6 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/sandbox_init.h"
-#include "content/public/test/browser_test.h"
 #include "gpu/config/gpu_switches.h"
 #include "net/base/escape.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -55,10 +54,10 @@
 #if defined(OS_WIN)
 #include "base/base_switches.h"
 #include "content/public/app/sandbox_helper_win.h"
+#include "sandbox/policy/win/sandbox_win.h"
 #include "sandbox/win/src/sandbox_factory.h"
 #include "sandbox/win/src/sandbox_types.h"
-#include "services/service_manager/sandbox/win/sandbox_win.h"
-#elif defined(OS_MACOSX)
+#elif defined(OS_MAC)
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "sandbox/mac/seatbelt_exec.h"
 #endif
@@ -267,11 +266,9 @@ bool WrapperTestLauncherDelegate::ShouldRunTest(
 void AppendCommandLineSwitches() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
-  // Always disable the unsandbox GPU process for DX12 and Vulkan Info
-  // collection to avoid interference. This GPU process is launched 120
-  // seconds after chrome starts.
-  command_line->AppendSwitch(
-      switches::kDisableGpuProcessForDX12VulkanInfoCollection);
+  // Always disable the unsandbox GPU process for DX12 Info collection to avoid
+  // interference. This GPU process is launched 120 seconds after chrome starts.
+  command_line->AppendSwitch(switches::kDisableGpuProcessForDX12InfoCollection);
 }
 
 }  // namespace
@@ -326,12 +323,12 @@ int LaunchTests(TestLauncherDelegate* launcher_delegate,
 #endif
 
 #if defined(OS_WIN)
-  sandbox::SandboxInterfaceInfo sandbox_info = {0};
+  sandbox::SandboxInterfaceInfo sandbox_info = {nullptr};
   InitializeSandboxInfo(&sandbox_info);
 
   params.instance = GetModuleHandle(NULL);
   params.sandbox_info = &sandbox_info;
-#elif defined(OS_MACOSX)
+#elif defined(OS_MAC)
   sandbox::SeatbeltExecServer::CreateFromArgumentsResult seatbelt =
       sandbox::SeatbeltExecServer::CreateFromArguments(
           command_line->GetProgram().value().c_str(), argc, argv);
@@ -348,6 +345,10 @@ int LaunchTests(TestLauncherDelegate* launcher_delegate,
   // end up being launched as a test, which leads to rerunning the test.
   if (command_line->HasSwitch(switches::kProcessType) ||
       command_line->HasSwitch(switches::kLaunchAsBrowser)) {
+    // The main test process has this initialized by the base::TestSuite. But
+    // child processes don't have a TestSuite, and must initialize this
+    // explicitly before ContentMain.
+    TestTimeouts::Initialize();
     return ContentMain(params);
   }
 #endif
@@ -377,6 +378,11 @@ int LaunchTests(TestLauncherDelegate* launcher_delegate,
 
   base::AtExitManager at_exit;
   testing::InitGoogleTest(&argc, argv);
+
+  // The main test process has this initialized by the base::TestSuite. But
+  // this process is just sharding the test off to each main test process, and
+  // doesn't have a TestSuite, so must initialize this explicitly as the
+  // timeouts are used in the TestLauncher.
   TestTimeouts::Initialize();
 
   fprintf(stdout,

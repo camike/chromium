@@ -3,7 +3,9 @@
 // found in the LICENSE file.
 
 #include "content/browser/accessibility/browser_accessibility_win.h"
+
 #include "content/browser/accessibility/browser_accessibility_manager.h"
+#include "content/browser/accessibility/browser_accessibility_manager_win.h"
 #include "content/browser/accessibility/browser_accessibility_state_impl.h"
 
 #include "ui/base/win/atl_module.h"
@@ -40,22 +42,17 @@ void BrowserAccessibilityWin::UpdatePlatformAttributes() {
   GetCOM()->UpdateStep3FireEvents();
 }
 
-bool BrowserAccessibilityWin::PlatformIsLeafIncludingIgnored() const {
-  // On Windows, we want to hide the subtree of a collapsed <select> element.
-  // Otherwise, ATs are always going to announce its options whether it's
-  // collapsed or expanded. In the AXTree, this element corresponds to a node
-  // with role ax::mojom::Role::kPopUpButton parent of a node with role
-  // ax::mojom::Role::kMenuListPopup.
-  if (IsCollapsedMenuListPopUpButton())
-    return true;
-
-  return BrowserAccessibility::PlatformIsLeafIncludingIgnored();
-}
-
 bool BrowserAccessibilityWin::CanFireEvents() const {
   // On Windows, we want to hide the subtree of a collapsed <select> element but
   // we still need to fire events on those hidden nodes.
   if (!IsIgnored() && GetCollapsedMenuListPopUpButtonAncestor())
+    return true;
+
+  // If the node changed its ignored state this frame then some events should be
+  // allowed, such as hide/show/structure events. If a node with no siblings
+  // changes aria-hidden value, this would affect whether it would be considered
+  // a "child of leaf" node which affects BrowserAccessibility::CanFireEvents.
+  if (manager()->ToBrowserAccessibilityManagerWin()->IsIgnoredChangedNode(this))
     return true;
 
   return BrowserAccessibility::CanFireEvents();

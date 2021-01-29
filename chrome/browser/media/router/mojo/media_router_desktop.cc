@@ -5,10 +5,9 @@
 #include "chrome/browser/media/router/mojo/media_router_desktop.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/media/router/media_router_factory.h"
 #include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/media/router/mojo/media_router_mojo_metrics.h"
 #include "chrome/browser/media/router/providers/cast/cast_media_route_provider.h"
@@ -16,9 +15,9 @@
 #include "chrome/browser/media/router/providers/wired_display/wired_display_media_route_provider.h"
 #include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_features.h"
-#include "chrome/common/media_router/media_source.h"
 #include "components/cast_channel/cast_socket_service.h"
+#include "components/media_router/browser/media_router_factory.h"
+#include "components/media_router/common/media_source.h"
 #include "components/openscreen_platform/network_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/common/extension.h"
@@ -29,6 +28,10 @@
 #endif
 
 namespace media_router {
+
+#if defined(OS_WIN)
+constexpr char kLoggerComponent[] = "MediaRouterDesktop";
+#endif
 
 MediaRouterDesktop::~MediaRouterDesktop() = default;
 
@@ -50,11 +53,16 @@ void MediaRouterDesktop::OnUserGesture() {
   MediaRouterMojoImpl::OnUserGesture();
   // Allow MRPM to intelligently update sinks and observers by passing in a
   // media source.
-  UpdateMediaSinks(MediaSource::ForDesktop().id());
+  UpdateMediaSinks(MediaSource::ForUnchosenDesktop().id());
 
   media_sink_service_->OnUserGesture();
 
 #if defined(OS_WIN)
+  if (!media_sink_service_->MdnsDiscoveryStarted()) {
+    GetLogger()->LogInfo(
+        mojom::LogCategory::kDiscovery, kLoggerComponent,
+        "The user interacted with MR. mDNS discovery is enabled.", "", "", "");
+  }
   EnsureMdnsDiscoveryEnabled();
 #endif
 }
@@ -103,6 +111,7 @@ MediaRouterDesktop::MediaRouterDesktop(content::BrowserContext* context,
       cast_provider_(nullptr, base::OnTaskRunnerDeleter(nullptr)),
       dial_provider_(nullptr, base::OnTaskRunnerDeleter(nullptr)),
       media_sink_service_(media_sink_service) {
+  media_sink_service_->BindLogger(GetLogger());
   InitializeMediaRouteProviders();
 }
 
@@ -123,8 +132,6 @@ void MediaRouterDesktop::RegisterMediaRouteProvider(
   config->use_mirroring_service = true;
   std::move(callback).Run(instance_id(), std::move(config));
 
-  SyncStateToMediaRouteProvider(provider_id);
-
   if (provider_id == MediaRouteProviderId::EXTENSION) {
     RegisterExtensionMediaRouteProvider(std::move(media_route_provider_remote));
   } else {
@@ -135,6 +142,8 @@ void MediaRouterDesktop::RegisterMediaRouteProvider(
                        weak_factory_.GetWeakPtr(), provider_id));
     media_route_providers_[provider_id] = std::move(bound_remote);
   }
+
+  SyncStateToMediaRouteProvider(provider_id);
 }
 
 void MediaRouterDesktop::OnSinksReceived(
@@ -183,7 +192,6 @@ void MediaRouterDesktop::BindToMojoReceiver(
 
 void MediaRouterDesktop::ProvideSinksToExtension() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  DVLOG(1) << "ProvideSinksToExtension";
   // If calling |ProvideSinksToExtension| for the first time, add a callback to
   // be notified of sink updates.
   if (!media_sink_service_subscription_) {
@@ -201,8 +209,11 @@ void MediaRouterDesktop::ProvideSinks(
     const std::string& provider_name,
     const std::vector<MediaSinkInternal>& sinks) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  DVLOG(1) << "Provider [" << provider_name << "] found " << sinks.size()
-           << " devices...";
+  // We no longer provide DIAL sources to the extension.
+  constexpr char kDialSourceName[] = "dial";
+  if (provider_name == kDialSourceName) {
+    return;
+  }
   media_route_providers_[MediaRouteProviderId::EXTENSION]->ProvideSinks(
       provider_name, sinks);
 
@@ -243,13 +254,10 @@ void MediaRouterDesktop::OnExtensionProviderError() {
   // The message pipe for |extension_provider_proxy_| might error out due to
   // Media Router extension causing dropped callbacks. Detect this case and
   // recover by re-creating the pipe.
-  DVLOG(2) << "Extension MRP encountered error.";
   if (extension_provider_error_count_ >= kMaxMediaRouteProviderErrorCount)
     return;
 
   ++extension_provider_error_count_;
-  DVLOG(2) << "Reconnecting to extension MRP: "
-           << extension_provider_error_count_;
   InitializeExtensionMediaRouteProviderProxy();
 }
 
@@ -324,8 +332,18 @@ void MediaRouterDesktop::EnsureMdnsDiscoveryEnabled() {
 
 void MediaRouterDesktop::OnFirewallCheckComplete(
     bool firewall_can_use_local_ports) {
-  if (firewall_can_use_local_ports)
+  if (firewall_can_use_local_ports) {
+    GetLogger()->LogInfo(
+        mojom::LogCategory::kDiscovery, kLoggerComponent,
+        "Windows firewall allows mDNS. Ensuring mDNS discovery is enabled.", "",
+        "", "");
     EnsureMdnsDiscoveryEnabled();
+  } else {
+    GetLogger()->LogInfo(mojom::LogCategory::kDiscovery, kLoggerComponent,
+                         "Windows firewall does not allows mDNS. mDNS "
+                         "discovery can be enabled by user gesture.",
+                         "", "", "");
+  }
 }
 #endif
 

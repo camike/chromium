@@ -45,19 +45,23 @@ AudioWorkletHandler::AudioWorkletHandler(
                              audio_utilities::kRenderQuantumFrames));
   }
 
-  for (unsigned i = 0; i < options->numberOfInputs(); ++i) {
+  for (unsigned i = 0; i < options->numberOfInputs(); ++i)
     AddInput();
-  }
+  // The number of inputs does not change after the construnction, so it is
+  // safe to reserve the array capacity and size.
+  inputs_.ReserveInitialCapacity(options->numberOfInputs());
+  inputs_.resize(options->numberOfInputs());
 
-  if (options->hasOutputChannelCount()) {
-    is_output_channel_count_given_ = true;
-  }
+  is_output_channel_count_given_ = options->hasOutputChannelCount();
 
   for (unsigned i = 0; i < options->numberOfOutputs(); ++i) {
     // If |options->outputChannelCount| unspecified, all outputs are mono.
     AddOutput(is_output_channel_count_given_ ? options->outputChannelCount()[i]
                                              : 1);
   }
+  // Same for the outputs as well.
+  outputs_.ReserveInitialCapacity(options->numberOfOutputs());
+  outputs_.resize(options->numberOfOutputs());
 
   if (Context()->GetExecutionContext()) {
     // Cross-thread tasks between AWN/AWP is okay to be throttled, thus
@@ -71,6 +75,10 @@ AudioWorkletHandler::AudioWorkletHandler(
 }
 
 AudioWorkletHandler::~AudioWorkletHandler() {
+  inputs_.clear();
+  outputs_.clear();
+  param_handler_map_.clear();
+  param_value_map_.clear();
   Uninitialize();
 }
 
@@ -93,45 +101,39 @@ void AudioWorkletHandler::Process(uint32_t frames_to_process) {
   // Render and update the node state when the processor is ready with no error.
   // We also need to check if the global scope is valid before we request
   // the rendering in the AudioWorkletGlobalScope.
-  if (processor_ && !processor_->hasErrorOccured()) {
-    Vector<scoped_refptr<AudioBus>> input_buses;
-    Vector<AudioBus*> output_buses;
-    for (unsigned i = 0; i < NumberOfInputs(); ++i) {
-      // If the input is not connected, inform the processor of that
-      // fact by setting the bus to null.
-      scoped_refptr<AudioBus> bus =
-          Input(i).IsConnected() ? Input(i).Bus() : nullptr;
-      input_buses.push_back(bus);
-    }
+  if (processor_ && !processor_->hasErrorOccurred()) {
+    // If the input is not connected, inform the processor with nullptr.
+    for (unsigned i = 0; i < NumberOfInputs(); ++i)
+      inputs_[i] = Input(i).IsConnected() ? Input(i).Bus() : nullptr;
     for (unsigned i = 0; i < NumberOfOutputs(); ++i)
-      output_buses.push_back(Output(i).Bus());
+      outputs_[i] = WrapRefCounted(Output(i).Bus());
 
     for (const auto& param_name : param_value_map_.Keys()) {
       auto* const param_handler = param_handler_map_.at(param_name);
       AudioFloatArray* param_values = param_value_map_.at(param_name);
-      if (param_handler->HasSampleAccurateValues()) {
+      if (param_handler->HasSampleAccurateValues() &&
+          param_handler->IsAudioRate()) {
         param_handler->CalculateSampleAccurateValues(
             param_values->Data(), static_cast<uint32_t>(frames_to_process));
       } else {
         std::fill(param_values->Data(),
                   param_values->Data() + frames_to_process,
-                  param_handler->Value());
+                  param_handler->FinalValue());
       }
     }
 
     // Run the render code and check the state of processor. Finish the
     // processor if needed.
-    if (!processor_->Process(&input_buses, &output_buses, &param_value_map_) ||
-        processor_->hasErrorOccured()) {
+    if (!processor_->Process(inputs_, outputs_, param_value_map_) ||
+        processor_->hasErrorOccurred()) {
       FinishProcessorOnRenderThread();
     }
   } else {
     // The initialization of handler or the associated processor might not be
     // ready yet or it is in the error state. If so, zero out the connected
     // output.
-    for (unsigned i = 0; i < NumberOfOutputs(); ++i) {
+    for (unsigned i = 0; i < NumberOfOutputs(); ++i)
       Output(i).Bus()->Zero();
-    }
   }
 }
 
@@ -244,9 +246,13 @@ AudioWorkletNode::AudioWorkletNode(
   HashMap<String, scoped_refptr<AudioParamHandler>> param_handler_map;
   for (const auto& param_info : param_info_list) {
     String param_name = param_info.Name().IsolatedCopy();
+    AudioParamHandler::AutomationRate
+        param_automation_rate(AudioParamHandler::AutomationRate::kAudio);
+    if (param_info.AutomationRate() == "k-rate")
+      param_automation_rate = AudioParamHandler::AutomationRate::kControl;
     AudioParam* audio_param = AudioParam::Create(
         context, Uuid(), AudioParamHandler::kParamTypeAudioWorklet,
-        param_info.DefaultValue(), AudioParamHandler::AutomationRate::kAudio,
+        param_info.DefaultValue(), param_automation_rate,
         AudioParamHandler::AutomationRateMode::kVariable, param_info.MinValue(),
         param_info.MaxValue());
     audio_param->SetCustomParamName("AudioWorkletNode(\"" + name + "\")." +
@@ -436,7 +442,7 @@ scoped_refptr<AudioWorkletHandler> AudioWorkletNode::GetWorkletHandler() const {
   return WrapRefCounted(&static_cast<AudioWorkletHandler&>(Handler()));
 }
 
-void AudioWorkletNode::Trace(Visitor* visitor) {
+void AudioWorkletNode::Trace(Visitor* visitor) const {
   visitor->Trace(parameter_map_);
   visitor->Trace(node_port_);
   AudioNode::Trace(visitor);

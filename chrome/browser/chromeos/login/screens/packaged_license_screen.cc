@@ -46,7 +46,7 @@ PackagedLicenseScreen::~PackagedLicenseScreen() {
     view_->Unbind();
 }
 
-bool PackagedLicenseScreen::MaybeSkip() {
+bool PackagedLicenseScreen::MaybeSkip(WizardContext* context) {
   policy::EnrollmentConfig enrollment_config =
       g_browser_process->platform_part()
           ->browser_policy_connector_chromeos()
@@ -78,6 +78,15 @@ void PackagedLicenseScreen::OnUserAction(const std::string& action_id) {
     exit_callback_.Run(Result::DONT_ENROLL);
   else
     BaseScreen::OnUserAction(action_id);
+}
+
+bool PackagedLicenseScreen::HandleAccelerator(
+    ash::LoginAcceleratorAction action) {
+  if (action == ash::LoginAcceleratorAction::kStartEnrollment) {
+    exit_callback_.Run(Result::ENROLL);
+    return true;
+  }
+  return false;
 }
 
 }  // namespace chromeos

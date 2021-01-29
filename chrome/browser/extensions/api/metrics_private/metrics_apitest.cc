@@ -13,6 +13,7 @@
 #include "base/test/metrics/user_action_tester.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "components/variations/variations_associated_data.h"
+#include "content/public/test/browser_test.h"
 
 namespace extensions {
 
@@ -130,18 +131,39 @@ void ValidateHistograms(const RecordedHistogram* recorded,
 
 }  // namespace
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Metrics) {
+using ContextType = ExtensionBrowserTest::ContextType;
+
+class ExtensionMetricsApiTest
+    : public ExtensionApiTest,
+      public testing::WithParamInterface<ContextType> {
+ public:
+  bool RunComponentTestWithParamFlag(const std::string& extension_name) {
+    int flags = kFlagNone;
+    if (GetParam() == ContextType::kServiceWorker)
+      flags |= ExtensionBrowserTest::kFlagRunAsServiceWorkerBasedExtension;
+
+    return RunExtensionTestWithFlags(extension_name, flags,
+                                     kFlagLoadAsComponent);
+  }
+};
+
+INSTANTIATE_TEST_SUITE_P(PersistentBackground,
+                         ExtensionMetricsApiTest,
+                         ::testing::Values(ContextType::kPersistentBackground));
+
+INSTANTIATE_TEST_SUITE_P(ServiceWorker,
+                         ExtensionMetricsApiTest,
+                         ::testing::Values(ContextType::kServiceWorker));
+
+IN_PROC_BROWSER_TEST_P(ExtensionMetricsApiTest, Metrics) {
   base::UserActionTester user_action_tester;
 
   base::FieldTrialList::CreateFieldTrial("apitestfieldtrial2", "group1");
 
-  std::map<std::string, std::string> params;
-  params["a"] = "aa";
-  params["b"] = "bb";
   ASSERT_TRUE(variations::AssociateVariationParams(
-      "apitestfieldtrial2", "group1", params));
+      "apitestfieldtrial2", "group1", {{"a", "aa"}, {"b", "bb"}}));
 
-  ASSERT_TRUE(RunComponentExtensionTest("metrics")) << message_;
+  ASSERT_TRUE(RunComponentTestWithParamFlag("metrics")) << message_;
 
   ValidateUserActions(user_action_tester, g_user_actions,
                       base::size(g_user_actions));

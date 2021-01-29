@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "base/values.h"
+#include "build/chromeos_buildflags.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/policy_constants.h"
@@ -14,10 +15,10 @@
 #include "components/sync/base/pref_names.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "base/test/scoped_feature_list.h"
 #include "chromeos/constants/chromeos_features.h"
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace syncer {
 namespace {
@@ -34,7 +35,7 @@ TEST(SyncPolicyHandlerTest, Enabled) {
   policy::PolicyMap policy;
   policy.Set(policy::key::kSyncDisabled, policy::POLICY_LEVEL_MANDATORY,
              policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
-             std::make_unique<base::Value>(false), nullptr);
+             base::Value(false), nullptr);
   SyncPolicyHandler handler;
   PrefValueMap prefs;
   handler.ApplyPolicySettings(policy, &prefs);
@@ -47,7 +48,7 @@ TEST(SyncPolicyHandlerTest, Disabled) {
   policy::PolicyMap policy;
   policy.Set(policy::key::kSyncDisabled, policy::POLICY_LEVEL_MANDATORY,
              policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
-             std::make_unique<base::Value>(true), nullptr);
+             base::Value(true), nullptr);
   SyncPolicyHandler handler;
   PrefValueMap prefs;
   handler.ApplyPolicySettings(policy, &prefs);
@@ -66,6 +67,7 @@ TEST(SyncPolicyHandlerTest, SyncTypesListDisabled) {
   // Start with prefs enabled so we can sense that they have changed.
   PrefValueMap prefs;
   prefs.SetBoolean(prefs::kSyncBookmarks, true);
+  prefs.SetBoolean(prefs::kSyncReadingList, true);
   prefs.SetBoolean(prefs::kSyncPreferences, true);
   prefs.SetBoolean(prefs::kSyncAutofill, true);
   prefs.SetBoolean(prefs::kSyncThemes, true);
@@ -74,17 +76,19 @@ TEST(SyncPolicyHandlerTest, SyncTypesListDisabled) {
   policy::PolicyMap policy;
   base::ListValue disabled_types;
   disabled_types.AppendString("bookmarks");
+  disabled_types.AppendString("readingList");
   disabled_types.AppendString("preferences");
   policy.Set(policy::key::kSyncTypesListDisabled,
              policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-             policy::POLICY_SOURCE_CLOUD, disabled_types.CreateDeepCopy(),
-             nullptr);
+             policy::POLICY_SOURCE_CLOUD, disabled_types.Clone(), nullptr);
   SyncPolicyHandler handler;
   handler.ApplyPolicySettings(policy, &prefs);
 
   // Prefs in the policy should be disabled.
   bool enabled;
   ASSERT_TRUE(prefs.GetBoolean(prefs::kSyncBookmarks, &enabled));
+  EXPECT_FALSE(enabled);
+  ASSERT_TRUE(prefs.GetBoolean(prefs::kSyncReadingList, &enabled));
   EXPECT_FALSE(enabled);
   ASSERT_TRUE(prefs.GetBoolean(prefs::kSyncPreferences, &enabled));
   EXPECT_FALSE(enabled);
@@ -96,7 +100,7 @@ TEST(SyncPolicyHandlerTest, SyncTypesListDisabled) {
   EXPECT_TRUE(enabled);
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 class SyncPolicyHandlerOsTest : public testing::Test {
  public:
   SyncPolicyHandlerOsTest() {
@@ -118,11 +122,10 @@ TEST_F(SyncPolicyHandlerOsTest, SyncTypesListDisabled_OsTypes) {
   base::ListValue disabled_types;
   disabled_types.AppendString("osApps");
   disabled_types.AppendString("osPreferences");
-  disabled_types.AppendString("wifiConfigurations");
+  disabled_types.AppendString("osWifiConfigurations");
   policy.Set(policy::key::kSyncTypesListDisabled,
              policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-             policy::POLICY_SOURCE_CLOUD, disabled_types.CreateDeepCopy(),
-             nullptr);
+             policy::POLICY_SOURCE_CLOUD, disabled_types.Clone(), nullptr);
   SyncPolicyHandler handler;
   handler.ApplyPolicySettings(policy, &prefs);
 
@@ -147,11 +150,11 @@ TEST_F(SyncPolicyHandlerOsTest, SyncTypesListDisabled_MigratedTypes) {
   policy::PolicyMap policy;
   base::ListValue disabled_types;
   disabled_types.AppendString("apps");
+  disabled_types.AppendString("wifiConfigurations");
   disabled_types.AppendString("preferences");
   policy.Set(policy::key::kSyncTypesListDisabled,
              policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-             policy::POLICY_SOURCE_CLOUD, disabled_types.CreateDeepCopy(),
-             nullptr);
+             policy::POLICY_SOURCE_CLOUD, disabled_types.Clone(), nullptr);
   SyncPolicyHandler handler;
   handler.ApplyPolicySettings(policy, &prefs);
 
@@ -159,10 +162,12 @@ TEST_F(SyncPolicyHandlerOsTest, SyncTypesListDisabled_MigratedTypes) {
   bool enabled;
   ASSERT_TRUE(prefs.GetBoolean(prefs::kSyncOsApps, &enabled));
   EXPECT_FALSE(enabled);
+  ASSERT_TRUE(prefs.GetBoolean(prefs::kSyncWifiConfigurations, &enabled));
+  EXPECT_FALSE(enabled);
   ASSERT_TRUE(prefs.GetBoolean(prefs::kSyncOsPreferences, &enabled));
   EXPECT_FALSE(enabled);
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace
 }  // namespace syncer

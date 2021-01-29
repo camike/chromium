@@ -57,8 +57,9 @@ public class LayerTitleCache implements TitleCache {
     /**
      * Builds an instance of the LayerTitleCache.
      */
-    public LayerTitleCache(Context context) {
+    public LayerTitleCache(Context context, ResourceManager resourceManager) {
         mContext = context;
+        mResourceManager = resourceManager;
         Resources res = context.getResources();
         final int fadeWidthPx = res.getDimensionPixelOffset(R.dimen.border_texture_title_fade);
         final int faviconStartPaddingPx =
@@ -67,19 +68,11 @@ public class LayerTitleCache implements TitleCache {
                 res.getDimensionPixelSize(R.dimen.tab_title_favicon_end_padding);
         mNativeLayerTitleCache = LayerTitleCacheJni.get().init(LayerTitleCache.this, fadeWidthPx,
                 faviconStartPaddingPx, faviconEndPaddingPx, R.drawable.spinner,
-                R.drawable.spinner_white);
+                R.drawable.spinner_white, mResourceManager);
         mFaviconSize = res.getDimensionPixelSize(R.dimen.compositor_tab_title_favicon_size);
         mStandardTitleBitmapFactory = new TitleBitmapFactory(context, false);
         mDarkTitleBitmapFactory = new TitleBitmapFactory(context, true);
         mDefaultFaviconHelper = new DefaultFaviconHelper();
-    }
-
-    /**
-     * @param resourceManager The {@link ResourceManager} for registering title
-     *                        resources.
-     */
-    public void setResourceManager(ResourceManager resourceManager) {
-        mResourceManager = resourceManager;
     }
 
     /**
@@ -162,13 +155,13 @@ public class LayerTitleCache implements TitleCache {
     private void fetchFaviconForTab(final Tab tab) {
         if (mFaviconHelper == null) mFaviconHelper = new FaviconHelper();
 
-        // Since tab#getProfile() is not available by this time, we will use whatever last used
-        // profile.
-        // TODO (https://crbug.com/1048632): Use the current profile (i.e., regular profile or
-        // incognito profile) instead of always using regular profile. It works correctly now, but
-        // it is not safe.
-        mFaviconHelper.getLocalFaviconImageForURL(Profile.getLastUsedRegularProfile(),
-                tab.getUrlString(), mFaviconSize, new FaviconImageCallback() {
+        // Since tab#getProfile() is not available by this time, we will use tab#isIncognito boolean
+        // to get the correct profile.
+        Profile profile = !tab.isIncognito()
+                ? Profile.getLastUsedRegularProfile()
+                : Profile.getLastUsedRegularProfile().getPrimaryOTRProfile();
+        mFaviconHelper.getLocalFaviconImageForURL(
+                profile, tab.getUrlString(), mFaviconSize, new FaviconImageCallback() {
                     @Override
                     public void onFaviconAvailable(Bitmap favicon, String iconUrl) {
                         updateFaviconFromHistory(tab, favicon);
@@ -287,7 +280,8 @@ public class LayerTitleCache implements TitleCache {
     @NativeMethods
     interface Natives {
         long init(LayerTitleCache caller, int fadeWidth, int faviconStartlPadding,
-                int faviconEndPadding, int spinnerResId, int spinnerIncognitoResId);
+                int faviconEndPadding, int spinnerResId, int spinnerIncognitoResId,
+                ResourceManager resourceManager);
         void destroy(long nativeLayerTitleCache);
         void clearExcept(long nativeLayerTitleCache, LayerTitleCache caller, int exceptId);
         void updateLayer(long nativeLayerTitleCache, LayerTitleCache caller, int tabId,

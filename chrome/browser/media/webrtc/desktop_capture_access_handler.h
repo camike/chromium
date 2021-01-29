@@ -12,6 +12,7 @@
 
 #include "base/containers/flat_map.h"
 #include "base/macros.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/media/capture_access_handler_base.h"
 #include "chrome/browser/media/media_access_handler.h"
 #include "chrome/browser/media/webrtc/desktop_media_list.h"
@@ -20,6 +21,12 @@
 #include "content/public/browser/desktop_media_id.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+namespace aura {
+class Window;
+}
+#endif
 
 namespace extensions {
 class Extension;
@@ -70,7 +77,7 @@ class DesktopCaptureAccessHandler : public CaptureAccessHandlerBase,
       const extensions::Extension* extension);
 
   // Returns whether desktop capture is always approved for |extension|.
-  // Currently component extensions and some whitelisted extensions are default
+  // Currently component extensions and some external extensions are default
   // approved.
   static bool IsDefaultApproved(const extensions::Extension* extension);
 
@@ -98,6 +105,10 @@ class DesktopCaptureAccessHandler : public CaptureAccessHandlerBase,
   bool display_notification_;
   RequestsQueues pending_requests_;
   content::NotificationRegistrar notifications_registrar_;
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  aura::Window* primary_root_window_for_testing_ = nullptr;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(DesktopCaptureAccessHandler);
 };

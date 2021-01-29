@@ -8,6 +8,7 @@
 #include <functional>
 #include <vector>
 
+#include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
@@ -19,8 +20,10 @@
 #include "components/omnibox/browser/autocomplete_result.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/titled_url_match_utils.h"
+#include "components/omnibox/common/omnibox_features.h"
 #include "components/prefs/pref_service.h"
 #include "components/query_parser/snippet.h"
+#include "components/search_engines/omnibox_focus_type.h"
 #include "third_party/metrics_proto/omnibox_input_type.pb.h"
 #include "url/url_constants.h"
 
@@ -40,7 +43,7 @@ void BookmarkProvider::Start(const AutocompleteInput& input,
   TRACE_EVENT0("omnibox", "BookmarkProvider::Start");
   matches_.clear();
 
-  if (input.from_omnibox_focus() || input.text().empty())
+  if (input.focus_type() != OmniboxFocusType::DEFAULT || input.text().empty())
     return;
 
   DoAutocomplete(input);
@@ -53,7 +56,6 @@ void BookmarkProvider::DoAutocomplete(const AutocompleteInput& input) {
   if (!bookmark_model_)
     return;
 
-  TitledUrlMatches matches;
   // Retrieve enough bookmarks so that we have a reasonable probability of
   // suggesting the one that the user desires.
   const size_t kMaxBookmarkMatches = 50;
@@ -77,16 +79,22 @@ void BookmarkProvider::DoAutocomplete(const AutocompleteInput& input) {
   // Please refer to the code for TitledUrlIndex::GetResultsMatching for
   // complete details of how searches are performed against the user's
   // bookmarks.
-  bookmark_model_->GetBookmarksMatching(
+  std::vector<TitledUrlMatch> matches = bookmark_model_->GetBookmarksMatching(
       input.text(), kMaxBookmarkMatches,
       OmniboxFieldTrial::IsShortBookmarkSuggestionsEnabled()
           ? query_parser::MatchingAlgorithm::ALWAYS_PREFIX_SEARCH
           : query_parser::MatchingAlgorithm::DEFAULT,
-      &matches);
+      base::FeatureList::IsEnabled(omnibox::kBookmarkPaths));
   if (matches.empty())
     return;  // There were no matches.
   const base::string16 fixed_up_input(FixupUserInput(input).second);
-  for (const auto& bookmark_match : matches) {
+  for (auto& bookmark_match : matches) {
+    if (OmniboxFieldTrial::ShouldDisableCGIParamMatching()) {
+      RemoveQueryParamKeyMatches(bookmark_match);
+      if (bookmark_match.title_match_positions.empty() &&
+          bookmark_match.url_match_positions.empty())
+        continue;
+    }
     // Score the TitledUrlMatch. If its score is greater than 0 then the
     // AutocompleteMatch is created and added to matches_.
     int relevance = CalculateBookmarkMatchRelevance(bookmark_match);
@@ -233,4 +241,22 @@ int BookmarkProvider::CalculateBookmarkMatchRelevance(
       kURLCountBoost[std::min(base::size(kURLCountBoost), nodes.size()) - 1];
   relevance = std::min(kMaxBookmarkScore, relevance);
   return relevance;
+}
+
+void BookmarkProvider::RemoveQueryParamKeyMatches(TitledUrlMatch& match) {
+  const GURL& url = match.node->GetTitledUrlNodeUrl();
+  if (!url.has_query())
+    return;
+
+  // Remove any matches that are for query param keys. Since bookmark provider
+  // match positions are always at the beginning of words, we can just look at
+  // the preceding character for a '?' or '&' character.
+  base::EraseIf(match.url_match_positions,
+                [url](TitledUrlMatch::MatchPosition& position) {
+                  size_t query_begin =
+                      url.parsed_for_possibly_invalid_spec().query.begin;
+                  return ((query_begin <= position.first) &&
+                          (url.spec().at(position.first - 1) == '?' ||
+                           url.spec().at(position.first - 1) == '&'));
+                });
 }

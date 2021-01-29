@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/browser_process.h"
@@ -59,6 +59,7 @@ bool AreOnlyAffiliatedUsersLoggedIn() {
       user_manager::UserManager::Get()->GetLoggedInUsers();
   for (user_manager::User* user : logged_in_users) {
     if (!user->IsAffiliated()) {
+      VLOG(2) << "Non-affiliated user is logged in";
       return false;
     }
   }
@@ -84,7 +85,7 @@ WilcoDtcSupportdManager::WilcoDtcSupportdManager(
   DCHECK(delegate_);
   DCHECK(!g_wilco_dtc_supportd_manager_instance);
   g_wilco_dtc_supportd_manager_instance = this;
-  wilco_dtc_allowed_observer_ = CrosSettings::Get()->AddSettingsObserver(
+  wilco_dtc_allowed_subscription_ = CrosSettings::Get()->AddSettingsObserver(
       kDeviceWilcoDtcAllowed,
       base::BindRepeating(&WilcoDtcSupportdManager::StartOrStopWilcoDtc,
                           weak_ptr_factory_.GetWeakPtr()));

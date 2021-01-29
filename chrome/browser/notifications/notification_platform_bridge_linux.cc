@@ -224,14 +224,14 @@ class ResourceFile {
     DCHECK(!file_path.empty());
     DCHECK(file_path.IsAbsolute());
   }
-  ~ResourceFile() { base::DeleteFile(file_path_, false); }
+  ResourceFile(const ResourceFile&) = delete;
+  ResourceFile& operator=(const ResourceFile&) = delete;
+  ~ResourceFile() { base::DeleteFile(file_path_); }
 
   const base::FilePath& file_path() const { return file_path_; }
 
  private:
   const base::FilePath file_path_;
-
-  DISALLOW_COPY_AND_ASSIGN(ResourceFile);
 };
 
 // Writes |data| to a new temporary file and returns the ResourceFile
@@ -309,6 +309,10 @@ class NotificationPlatformBridgeLinuxImpl
     registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
                    content::NotificationService::AllSources());
   }
+  NotificationPlatformBridgeLinuxImpl(
+      const NotificationPlatformBridgeLinuxImpl&) = delete;
+  NotificationPlatformBridgeLinuxImpl& operator=(
+      const NotificationPlatformBridgeLinuxImpl&) = delete;
 
   // InitOnTaskRunner() cannot be posted from within the constructor
   // because of a race condition.  The reference count for |this|
@@ -428,7 +432,10 @@ class NotificationPlatformBridgeLinuxImpl
   };
 
   ~NotificationPlatformBridgeLinuxImpl() override {
-    DCHECK(clean_up_on_task_runner_called_);
+    // TODO(crbug/859061): This should DCHECK, but doing so makes tests in
+    // components unrelated to notifications flaky. Log instead so that those
+    // tests can retain test coverage.
+    DLOG_IF(ERROR, !clean_up_on_task_runner_called_) << "Not cleaned up";
   }
 
   void Observe(int type,
@@ -487,8 +494,8 @@ class NotificationPlatformBridgeLinuxImpl
           ConnectionInitializationStatusCode::MISSING_REQUIRED_CAPABILITIES);
       return;
     }
-    base::PostTask(
-        FROM_HERE, {content::BrowserThread::UI},
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(
             &NotificationPlatformBridgeLinuxImpl::SetBodyImagesSupported, this,
             base::Contains(capabilities_, kCapabilityBodyImages)));
@@ -810,8 +817,8 @@ class NotificationPlatformBridgeLinuxImpl
       if (data->profile_id == profile_id && data->is_incognito == incognito)
         displayed.insert(data->notification_id);
     }
-    base::PostTask(
-        FROM_HERE, {content::BrowserThread::UI},
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(std::move(callback), std::move(displayed), true));
   }
 
@@ -945,8 +952,8 @@ class NotificationPlatformBridgeLinuxImpl
       CleanUpOnTaskRunner();
     }
 
-    base::PostTask(
-        FROM_HERE, {content::BrowserThread::UI},
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&NotificationPlatformBridgeLinuxImpl::
                            OnConnectionInitializationFinishedOnUiThread,
                        this, success));
@@ -1011,7 +1018,8 @@ class NotificationPlatformBridgeLinuxImpl
     // long-running Chrome process.
     product_logo_file_watcher_ = std::make_unique<base::FilePathWatcher>();
     if (!product_logo_file_watcher_->Watch(
-            product_logo_file_->file_path(), false,
+            product_logo_file_->file_path(),
+            base::FilePathWatcher::Type::kNonRecursive,
             base::Bind(
                 &NotificationPlatformBridgeLinuxImpl::OnProductLogoFileChanged,
                 this))) {
@@ -1048,7 +1056,7 @@ class NotificationPlatformBridgeLinuxImpl
   std::string server_name_;
   base::Version server_version_;
 
-  base::Closure connected_signals_barrier_;
+  base::RepeatingClosure connected_signals_barrier_;
 
   // Whether ConnectToSignal() is in progress.
   bool connect_signals_in_progress_ = false;
@@ -1070,8 +1078,6 @@ class NotificationPlatformBridgeLinuxImpl
   UnorderedUniqueSet<NotificationData> notifications_;
 
   bool clean_up_on_task_runner_called_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(NotificationPlatformBridgeLinuxImpl);
 };
 
 NotificationPlatformBridgeLinux::NotificationPlatformBridgeLinux()

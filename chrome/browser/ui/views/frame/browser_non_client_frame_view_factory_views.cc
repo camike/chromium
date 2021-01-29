@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -13,7 +14,9 @@
 #include "chrome/browser/ui/views/frame/glass_browser_frame_view.h"
 #endif
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
 #include "chrome/browser/ui/views/frame/desktop_linux_browser_frame_view.h"
 #include "chrome/browser/ui/views/frame/desktop_linux_browser_frame_view_layout.h"
 #include "ui/views/linux_ui/linux_ui.h"
@@ -24,38 +27,39 @@ namespace chrome {
 
 namespace {
 
-OpaqueBrowserFrameView* CreateOpaqueBrowserFrameView(
+std::unique_ptr<OpaqueBrowserFrameView> CreateOpaqueBrowserFrameView(
     BrowserFrame* frame,
     BrowserView* browser_view) {
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
   auto* linux_ui = views::LinuxUI::instance();
   auto* profile = browser_view->browser()->profile();
   auto* theme_service_factory = ThemeServiceFactory::GetForProfile(profile);
   if (linux_ui && theme_service_factory->UsingSystemTheme()) {
     auto nav_button_provider = linux_ui->CreateNavButtonProvider();
     if (nav_button_provider) {
-      return new DesktopLinuxBrowserFrameView(
+      return std::make_unique<DesktopLinuxBrowserFrameView>(
           frame, browser_view,
           new DesktopLinuxBrowserFrameViewLayout(nav_button_provider.get()),
           std::move(nav_button_provider));
     }
   }
 #endif
-  return new OpaqueBrowserFrameView(frame, browser_view,
-                                    new OpaqueBrowserFrameViewLayout());
+  return std::make_unique<OpaqueBrowserFrameView>(
+      frame, browser_view, new OpaqueBrowserFrameViewLayout());
 }
 
 }  // namespace
 
-BrowserNonClientFrameView* CreateBrowserNonClientFrameView(
+std::unique_ptr<BrowserNonClientFrameView> CreateBrowserNonClientFrameView(
     BrowserFrame* frame,
     BrowserView* browser_view) {
 #if defined(OS_WIN)
   if (frame->ShouldUseNativeFrame())
-    return new GlassBrowserFrameView(frame, browser_view);
+    return std::make_unique<GlassBrowserFrameView>(frame, browser_view);
 #endif
-  OpaqueBrowserFrameView* view =
-      CreateOpaqueBrowserFrameView(frame, browser_view);
+  auto view = CreateOpaqueBrowserFrameView(frame, browser_view);
   view->InitViews();
   return view;
 }

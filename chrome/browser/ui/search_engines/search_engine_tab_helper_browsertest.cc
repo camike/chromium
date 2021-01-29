@@ -17,6 +17,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
+#include "content/public/test/browser_test.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
@@ -32,8 +33,9 @@ class TemplateURLServiceObserver {
   TemplateURLServiceObserver(TemplateURLService* service, base::RunLoop* loop)
       : runner_(loop) {
     DCHECK(loop);
-    template_url_sub_ = service->RegisterOnLoadedCallback(base::Bind(
-        &TemplateURLServiceObserver::StopLoop, base::Unretained(this)));
+    template_url_subscription_ =
+        service->RegisterOnLoadedCallback(base::BindOnce(
+            &TemplateURLServiceObserver::StopLoop, base::Unretained(this)));
     service->Load();
   }
   ~TemplateURLServiceObserver() {}
@@ -41,7 +43,7 @@ class TemplateURLServiceObserver {
  private:
   void StopLoop() { runner_->Quit(); }
   base::RunLoop* runner_;
-  std::unique_ptr<TemplateURLService::Subscription> template_url_sub_;
+  base::CallbackListSubscription template_url_subscription_;
 
   DISALLOW_COPY_AND_ASSIGN(TemplateURLServiceObserver);
 };
@@ -92,8 +94,8 @@ class SearchEngineTabHelperBrowserTest : public InProcessBrowserTest {
         base::FilePath(),
         base::FilePath().AppendASCII("simple_open_search.xml"));
     embedded_test_server()->RegisterRequestHandler(
-        base::Bind(&SearchEngineTabHelperBrowserTest::HandleRequest,
-                   base::Unretained(this), file_url));
+        base::BindRepeating(&SearchEngineTabHelperBrowserTest::HandleRequest,
+                            base::Unretained(this), file_url));
     return embedded_test_server()->Start();
   }
 

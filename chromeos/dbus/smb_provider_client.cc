@@ -7,8 +7,9 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_util.h"
+#include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
@@ -611,6 +612,7 @@ class SmbProviderClientImpl : public SmbProviderClient {
       LOG(ERROR) << "StartCopy: parse failure.";
       std::move(callback).Run(smbprovider::ERROR_DBUS_PARSE_FAILED,
                               -1 /* copy_token*/);
+      return;
     }
 
     if (error != smbprovider::ERROR_COPY_PENDING) {

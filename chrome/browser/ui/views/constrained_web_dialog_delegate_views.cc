@@ -42,7 +42,7 @@ class InitiatorWebContentsObserver
 };
 
 gfx::Size RestrictToPlatformMinimumSize(const gfx::Size& min_size) {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   // http://crbug.com/78973 - MacOS does not handle zero-sized windows well.
   gfx::Size adjusted_min_size(1, 1);
   adjusted_min_size.SetToMax(min_size);
@@ -85,10 +85,9 @@ class ConstrainedDialogWebView : public views::WebView,
   base::string16 GetWindowTitle() const override;
   base::string16 GetAccessibleWindowTitle() const override;
   views::View* GetContentsView() override;
-  views::NonClientFrameView* CreateNonClientFrameView(
+  std::unique_ptr<views::NonClientFrameView> CreateNonClientFrameView(
       views::Widget* widget) override;
   bool ShouldShowCloseButton() const override;
-  ui::ModalType GetModalType() const override;
 
   // views::WebView:
   bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
@@ -130,7 +129,7 @@ class WebDialogWebContentsDelegateViews
     // Forward shortcut keys in dialog to our initiator's delegate.
     // http://crbug.com/104586
     // Disabled on Mac due to http://crbug.com/112173
-#if !defined(OS_MACOSX)
+#if !defined(OS_MAC)
     if (!initiator_observer_->web_contents())
       return false;
 
@@ -283,8 +282,7 @@ ConstrainedWebDialogDelegateViews::ConstrainedWebDialogDelegateViews(
   WebContentsObserver::Observe(web_contents_);
   zoom::ZoomController::CreateForWebContents(web_contents_);
   web_contents_->SetDelegate(override_tab_delegate_.get());
-  blink::mojom::RendererPreferences* prefs =
-      web_contents_->GetMutableRendererPrefs();
+  blink::RendererPreferences* prefs = web_contents_->GetMutableRendererPrefs();
   renderer_preferences_util::UpdateFromSystemSettings(
       prefs, Profile::FromBrowserContext(browser_context));
 
@@ -376,6 +374,7 @@ ConstrainedDialogWebView::ConstrainedDialogWebView(
           std::move(delegate),
           &initiator_observer_,
           this)) {
+  SetModalType(ui::MODAL_TYPE_CHILD);
   SetWebContents(GetWebContents());
   AddAccelerator(ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_NONE));
   if (!max_size.IsEmpty()) {
@@ -456,18 +455,14 @@ views::View* ConstrainedDialogWebView::GetContentsView() {
   return this;
 }
 
-views::NonClientFrameView* ConstrainedDialogWebView::CreateNonClientFrameView(
-    views::Widget* widget) {
+std::unique_ptr<views::NonClientFrameView>
+ConstrainedDialogWebView::CreateNonClientFrameView(views::Widget* widget) {
   return views::DialogDelegate::CreateDialogFrameView(widget);
 }
 
 bool ConstrainedDialogWebView::ShouldShowCloseButton() const {
   // No close button if the dialog doesn't want a title bar.
   return impl_->GetWebDialogDelegate()->ShouldShowDialogTitle();
-}
-
-ui::ModalType ConstrainedDialogWebView::GetModalType() const {
-  return ui::MODAL_TYPE_CHILD;
 }
 
 bool ConstrainedDialogWebView::AcceleratorPressed(

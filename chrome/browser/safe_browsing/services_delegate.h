@@ -34,14 +34,11 @@ class TrackedPreferenceValidationDelegate;
 
 namespace safe_browsing {
 
-class ClientSideDetectionService;
 #if !defined(OS_ANDROID)
 class DownloadProtectionService;
 #endif
 class IncidentReportingService;
 class PasswordProtectionService;
-class ResourceRequestDetector;
-struct ResourceRequestInfo;
 class SafeBrowsingService;
 class SafeBrowsingDatabaseManager;
 struct V4ProtocolConfig;
@@ -65,7 +62,6 @@ class ServicesDelegate {
     virtual bool CanCreateDownloadProtectionService() = 0;
 #endif
     virtual bool CanCreateIncidentReportingService() = 0;
-    virtual bool CanCreateResourceRequestDetector() = 0;
 
     // Caller takes ownership of the returned object. Cannot use std::unique_ptr
     // because services may not be implemented for some build configs.
@@ -74,7 +70,6 @@ class ServicesDelegate {
     virtual DownloadProtectionService* CreateDownloadProtectionService() = 0;
 #endif
     virtual IncidentReportingService* CreateIncidentReportingService() = 0;
-    virtual ResourceRequestDetector* CreateResourceRequestDetector() = 0;
   };
 
   // Creates the ServicesDelegate using its's default ServicesCreator.
@@ -97,10 +92,6 @@ class ServicesDelegate {
   // Initializes internal state using the ServicesCreator.
   virtual void Initialize() = 0;
 
-  // Creates the CSD service for the given |url_loader_factory|.
-  virtual void InitializeCsdService(
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) = 0;
-
   virtual void SetDatabaseManagerForTest(
       SafeBrowsingDatabaseManager* database_manager) = 0;
 
@@ -111,21 +102,23 @@ class ServicesDelegate {
   virtual void RefreshState(bool enable) = 0;
 
   // See the SafeBrowsingService methods of the same name.
-  virtual void ProcessResourceRequest(const ResourceRequestInfo* request) = 0;
   virtual std::unique_ptr<prefs::mojom::TrackedPreferenceValidationDelegate>
   CreatePreferenceValidationDelegate(Profile* profile) = 0;
   virtual void RegisterDelayedAnalysisCallback(
-      const DelayedAnalysisCallback& callback) = 0;
+      DelayedAnalysisCallback callback) = 0;
   virtual void AddDownloadManager(
       content::DownloadManager* download_manager) = 0;
 
   // Returns nullptr for any service that is not available.
-  virtual ClientSideDetectionService* GetCsdService() = 0;
 #if !defined(OS_ANDROID)
   virtual DownloadProtectionService* GetDownloadService() = 0;
 #endif
+
+  // Takes a SharedURLLoaderFactory with the Safe Browsing NetworkContext and
+  // one from the BrowserProcess.
   virtual void StartOnIOThread(
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+      scoped_refptr<network::SharedURLLoaderFactory> sb_url_loader_factory,
+      scoped_refptr<network::SharedURLLoaderFactory> browser_url_loader_factory,
       const V4ProtocolConfig& v4_config) = 0;
   virtual void StopOnIOThread(bool shutdown) = 0;
 

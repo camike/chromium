@@ -7,11 +7,13 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/sequence_checker.h"
 #include "base/sequenced_task_runner.h"
+#include "chrome/browser/chromeos/crosapi/browser_manager.h"
 #include "chrome/browser/chromeos/policy/cached_policy_key_loader_chromeos.h"
 #include "chrome/browser/chromeos/policy/value_validation/onc_user_policy_value_validator.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -58,6 +60,7 @@ UserCloudPolicyStoreChromeOS::~UserCloudPolicyStoreChromeOS() {}
 
 void UserCloudPolicyStoreChromeOS::Store(
     const em::PolicyFetchResponse& policy) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!is_active_directory_);
 
   // Cancel all pending requests.
@@ -71,6 +74,8 @@ void UserCloudPolicyStoreChromeOS::Store(
 }
 
 void UserCloudPolicyStoreChromeOS::Load() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   // Cancel all pending requests.
   weak_factory_.InvalidateWeakPtrs();
 
@@ -91,6 +96,8 @@ UserCloudPolicyStoreChromeOS::CreateValidator(
 }
 
 void UserCloudPolicyStoreChromeOS::LoadImmediately() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   // This blocking D-Bus call is in the startup path and will block the UI
   // thread. This only happens when the Profile is created synchronously, which
   // on Chrome OS happens whenever the browser is restarted into the same
@@ -275,6 +282,17 @@ void UserCloudPolicyStoreChromeOS::OnRetrievedPolicyValidated(
                 std::move(validator->payload()),
                 cached_policy_key_loader_->cached_policy_key());
   status_ = STATUS_OK;
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  if (crosapi::BrowserManager::Get()) {
+    std::string policy_blob;
+    // Since the policy have passed all the validations, the serialization must
+    // succeed.
+    bool success = validator->policy()->SerializeToString(&policy_blob);
+    DCHECK(success);
+    crosapi::BrowserManager::Get()->SetDeviceAccountPolicy(policy_blob);
+  }
+#endif
 
   NotifyStoreLoaded();
 }

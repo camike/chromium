@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_ASH_LAUNCHER_CHROME_LAUNCHER_CONTROLLER_H_
 #define CHROME_BROWSER_UI_ASH_LAUNCHER_CHROME_LAUNCHER_CONTROLLER_H_
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -17,8 +18,6 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/app_icon_loader_delegate.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
-#include "chrome/browser/ui/ash/launcher/arc_app_window_launcher_controller.h"
-#include "chrome/browser/ui/ash/launcher/discover_window_observer.h"
 #include "chrome/browser/ui/ash/launcher/launcher_app_updater.h"
 #include "chrome/browser/ui/ash/launcher/settings_window_observer.h"
 #include "components/account_id/account_id.h"
@@ -31,7 +30,6 @@ class AppWindowLauncherController;
 class BrowserShortcutLauncherItemController;
 class BrowserStatusMonitor;
 class ChromeLauncherControllerUserSwitchObserver;
-class CrostiniAppWindowShelfController;
 class GURL;
 class Profile;
 class LauncherControllerHelper;
@@ -53,10 +51,8 @@ namespace ui {
 class BaseWindow;
 }
 
-namespace chromeos {
 FORWARD_DECLARE_TEST(SpokenFeedbackTest, ShelfIconFocusForward);
 FORWARD_DECLARE_TEST(SpokenFeedbackTest, SpeakingTextUnderMouseForShelfItem);
-}
 
 // ChromeLauncherController helps manage Ash's shelf for Chrome prefs and apps.
 // It helps synchronize shelf state with profile preferences and app content.
@@ -82,11 +78,6 @@ class ChromeLauncherController
 
   AppServiceAppWindowLauncherController* app_service_app_window_controller() {
     return app_service_app_window_controller_;
-  }
-
-  CrostiniAppWindowShelfController* crostini_app_window_shelf_controller()
-      const {
-    return crostini_app_window_shelf_controller_;
   }
 
   // Initializes this ChromeLauncherController.
@@ -275,6 +266,9 @@ class ChromeLauncherController
   // CanDoShowAppInfoFlow() returns true.
   void DoShowAppInfoFlow(Profile* profile, const std::string& app_id);
 
+  SkColor CalculateNotificationBadgeColorForApp(const std::string& app_id,
+                                                const gfx::ImageSkia& icon);
+
   // LauncherAppUpdater::Delegate:
   void OnAppInstalled(content::BrowserContext* browser_context,
                       const std::string& app_id) override;
@@ -293,8 +287,8 @@ class ChromeLauncherController
   friend class ShelfAppBrowserTest;
   friend class TestChromeLauncherController;
 
-  FRIEND_TEST_ALL_PREFIXES(chromeos::SpokenFeedbackTest, ShelfIconFocusForward);
-  FRIEND_TEST_ALL_PREFIXES(chromeos::SpokenFeedbackTest,
+  FRIEND_TEST_ALL_PREFIXES(SpokenFeedbackTest, ShelfIconFocusForward);
+  FRIEND_TEST_ALL_PREFIXES(SpokenFeedbackTest,
                            SpeakingTextUnderMouseForShelfItem);
 
   using WebContentsToAppIDMap = std::map<content::WebContents*, std::string>;
@@ -363,6 +357,9 @@ class ChromeLauncherController
   void CloseWindowedAppsFromRemovedExtension(const std::string& app_id,
                                              const Profile* profile);
 
+  // Add the app updater and the app icon loder for a specific profile.
+  void AddAppUpdaterAndIconLoader(Profile* profile);
+
   // Attach to a specific profile.
   void AttachProfile(Profile* profile_to_attach);
 
@@ -398,15 +395,16 @@ class ChromeLauncherController
   // multi-profile use cases this might change over time.
   Profile* profile_ = nullptr;
 
+  // The profile used to load icons and get the app update information. This is
+  // the latest active user's profile when switch users in multi-profile use
+  // cases.
+  Profile* latest_active_profile_ = nullptr;
+
   // The ShelfModel instance owned by ash::Shell's ShelfController.
   ash::ShelfModel* model_;
 
   // The AppService app window launcher controller.
   AppServiceAppWindowLauncherController* app_service_app_window_controller_ =
-      nullptr;
-
-  // The shelf controller for Crostini apps.
-  CrostiniAppWindowShelfController* crostini_app_window_shelf_controller_ =
       nullptr;
 
   // When true, changes to pinned shelf items should update the sync model.
@@ -420,14 +418,9 @@ class ChromeLauncherController
   // An observer that manages the shelf title and icon for settings windows.
   std::unique_ptr<SettingsWindowObserver> settings_window_observer_;
 
-  // TODO(crbug.com/836128): Remove this once SystemWebApps are enabled by
-  // default.
-  // An observer that manages the shelf title and icon for Chrome OS Discover
-  // windows.
-  std::unique_ptr<DiscoverWindowObserver> discover_window_observer_;
-
   // Used to load the images for app items.
-  std::vector<std::unique_ptr<AppIconLoader>> app_icon_loaders_;
+  std::map<Profile*, std::vector<std::unique_ptr<AppIconLoader>>>
+      app_icon_loaders_;
 
   // Direct access to app_id for a web contents.
   // NOTE: This tracks all WebContents, not just those associated with an app.
@@ -437,11 +430,9 @@ class ChromeLauncherController
   std::vector<std::unique_ptr<AppWindowLauncherController>>
       app_window_controllers_;
 
-  // Pointer to the ARC app window controller owned by app_window_controllers_.
-  ArcAppWindowLauncherController* arc_app_window_controller_ = nullptr;
-
   // Used to handle app load/unload events.
-  std::vector<std::unique_ptr<LauncherAppUpdater>> app_updaters_;
+  std::map<Profile*, std::vector<std::unique_ptr<LauncherAppUpdater>>>
+      app_updaters_;
 
   PrefChangeRegistrar pref_change_registrar_;
 
@@ -459,6 +450,9 @@ class ChromeLauncherController
   using RunningAppListIds = std::vector<std::string>;
   using RunningAppListIdMap = std::map<std::string, RunningAppListIds>;
   RunningAppListIdMap last_used_running_application_order_;
+
+  using AppIdBadgeColor = std::map<std::string, SkColor>;
+  AppIdBadgeColor app_id_badge_color_map_;
 
   base::WeakPtrFactory<ChromeLauncherController> weak_ptr_factory_{this};
 

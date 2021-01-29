@@ -14,17 +14,15 @@
 #include "base/sequenced_task_runner.h"
 #include "base/values.h"
 #include "components/invalidation/public/ack_handle.h"
-#include "components/invalidation/public/invalidation.h"
 #include "components/invalidation/public/invalidation_export.h"
 #include "components/invalidation/public/invalidation_util.h"
 
-namespace syncer {
+namespace invalidation {
 
 class AckHandler;
 
-// Represents a local invalidation, and is roughly analogous to
-// invalidation::Invalidation.  Unlike invalidation::Invalidation, this class
-// supports "local" ack-tracking and simple serialization to pref values.
+// Represents a local invalidation. This class supports "local" ack-tracking
+// and simple serialization to pref values.
 class INVALIDATION_EXPORT Invalidation {
  public:
   // Factory functions.
@@ -35,6 +33,7 @@ class INVALIDATION_EXPORT Invalidation {
   static Invalidation InitFromDroppedInvalidation(const Invalidation& dropped);
 
   Invalidation(const Invalidation& other);
+  Invalidation& operator=(const Invalidation& other);
   ~Invalidation();
 
   // Compares two invalidations.  The comparison ignores ack-tracking state.
@@ -122,6 +121,6 @@ class INVALIDATION_EXPORT Invalidation {
   scoped_refptr<base::SequencedTaskRunner> ack_handler_task_runner_;
 };
 
-}  // namespace syncer
+}  // namespace invalidation
 
 #endif  // COMPONENTS_INVALIDATION_PUBLIC_INVALIDATION_H_

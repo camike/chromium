@@ -8,6 +8,7 @@
 #include <tuple>
 
 #include "base/json/json_reader.h"
+#include "base/optional.h"
 #include "base/values.h"
 #include "components/policy/core/browser/policy_error_map.h"
 #include "components/policy/core/common/policy_map.h"
@@ -21,6 +22,8 @@ namespace enterprise_connectors {
 namespace {
 
 const char kTestPref[] = "enterprise_connectors.test_pref";
+
+const char kTestScopePref[] = "enterprise_connectors.scope.test_pref";
 
 const char kPolicyName[] = "PolicyForTesting";
 
@@ -87,9 +90,8 @@ class EnterpriseConnectorsPolicyHandlerTest
             source() == policy::PolicySource::POLICY_SOURCE_PRIORITY_CLOUD);
   }
 
-  std::unique_ptr<base::Value> policy_value() const {
-    return base::Value::ToUniquePtrValue(
-        *base::JSONReader::Read(policy(), base::JSON_ALLOW_TRAILING_COMMAS));
+  base::Optional<base::Value> policy_value() const {
+    return base::JSONReader::Read(policy(), base::JSON_ALLOW_TRAILING_COMMAS);
   }
 };
 
@@ -106,7 +108,7 @@ TEST_P(EnterpriseConnectorsPolicyHandlerTest, Test) {
   }
 
   auto handler = std::make_unique<EnterpriseConnectorsPolicyHandler>(
-      kPolicyName, kTestPref, validation_schema);
+      kPolicyName, kTestPref, kTestScopePref, validation_schema);
   policy::PolicyErrorMap errors;
   ASSERT_EQ(expect_valid_policy(),
             handler->CheckPolicySettings(policy_map, &errors));
@@ -117,16 +119,21 @@ TEST_P(EnterpriseConnectorsPolicyHandlerTest, Test) {
   // false, this is just to test that it applies the pref correctly.
   PrefValueMap prefs;
   base::Value* value_set_in_pref;
+  int pref_scope = -1;
   handler->ApplyPolicySettings(policy_map, &prefs);
 
   bool policy_is_set = policy() != kEmptyPolicy;
   ASSERT_EQ(policy_is_set, prefs.GetValue(kTestPref, &value_set_in_pref));
+  EXPECT_EQ(policy_is_set, prefs.GetInteger(kTestScopePref, &pref_scope));
 
   auto* value_set_in_map = policy_map.GetValue(kPolicyName);
-  if (value_set_in_map)
+  if (value_set_in_map) {
     ASSERT_TRUE(value_set_in_map->Equals(value_set_in_pref));
-  else
+    ASSERT_EQ(policy::POLICY_SCOPE_MACHINE, pref_scope);
+  } else {
     ASSERT_FALSE(policy_is_set);
+    ASSERT_EQ(-1, pref_scope);
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(

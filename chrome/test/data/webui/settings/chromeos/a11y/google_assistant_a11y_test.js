@@ -13,8 +13,10 @@ GEN_INCLUDE([
   'os_settings_accessibility_test.js',
 ]);
 
+GEN('#include "content/public/test/browser_test.h"');
+
 // eslint-disable-next-line no-var
-var GoogleAssistantA11yTest = class extends PolymerTest {
+var GoogleAssistantA11yTest = class extends Polymer2DeprecatedTest {
   /** @override */
   get browsePreload() {
     return 'chrome://os-settings/';

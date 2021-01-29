@@ -8,6 +8,7 @@
 
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/task_environment.h"
+#include "build/chromeos_buildflags.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "components/signin/public/identity_manager/accounts_mutator.h"
@@ -282,7 +283,7 @@ TEST_F(AdvancedProtectionStatusManagerTest, StayInAdvancedProtection) {
   aps_manager.UnsubscribeFromSigninEvents();
 }
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 // Not applicable to Chrome OS.
 TEST_F(AdvancedProtectionStatusManagerTest, SignInAndSignOutEvent) {
   AdvancedProtectionStatusManager aps_manager(
@@ -329,9 +330,7 @@ TEST_F(AdvancedProtectionStatusManagerTest, AccountRemoval) {
   // This call is necessary to ensure that the account removal is fully
   // processed in this testing context.
   identity_test_env_.EnableRemovalOfExtendedAccountInfo();
-  identity_test_env_.identity_manager()->GetAccountsMutator()->RemoveAccount(
-      account_id,
-      signin_metrics::SourceForRefreshTokenOperation::kUserMenu_RemoveAccount);
+  identity_test_env_.RemoveRefreshTokenForAccount(account_id);
   EXPECT_FALSE(aps_manager.IsUnderAdvancedProtection());
   EXPECT_TRUE(
       pref_service_.HasPrefPath(prefs::kAdvancedProtectionLastRefreshInUs));
@@ -396,7 +395,7 @@ TEST_F(AdvancedProtectionStatusManagerTest,
 
 // On ChromeOS, there is no unconsented primary account. We can only track the
 // primary account.
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 TEST_F(AdvancedProtectionStatusManagerTest, TracksUnconsentedPrimaryAccount) {
   AdvancedProtectionStatusManager aps_manager(
       &pref_service_, identity_test_env_.identity_manager(),
@@ -406,10 +405,9 @@ TEST_F(AdvancedProtectionStatusManagerTest, TracksUnconsentedPrimaryAccount) {
 
   // Sign in, but don't set this as the primary account.
   AccountInfo account_info =
-      identity_test_env_.MakeAccountAvailable("test@test.com");
+      identity_test_env_.MakeUnconsentedPrimaryAccountAvailable(
+          "test@test.com");
   account_info.is_under_advanced_protection = true;
-  identity_test_env_.SetCookieAccounts(
-      {{account_info.email, account_info.gaia}});
   identity_test_env_.UpdateAccountInfoForAccount(account_info);
 
   EXPECT_TRUE(aps_manager.IsUnderAdvancedProtection());

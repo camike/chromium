@@ -2,8 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "third_party/blink/renderer/modules/accessibility/ax_object_cache_impl.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_virtual_object.h"
+#include "third_party/blink/renderer/modules/accessibility/ax_object_cache_impl.h"
+#include "third_party/blink/renderer/modules/accessibility/ax_sparse_attribute_setter.h"
 
 namespace blink {
 
@@ -26,11 +27,30 @@ bool AXVirtualObject::ComputeAccessibilityIsIgnored(
 }
 
 void AXVirtualObject::AddChildren() {
+#if DCHECK_IS_ON()
+  DCHECK(!IsDetached());
+  DCHECK(!is_adding_children_) << " Reentering method on " << GetNode();
+  base::AutoReset<bool> reentrancy_protector(&is_adding_children_, true);
+  DCHECK_EQ(children_.size(), 0U)
+      << "Parent still has " << children_.size() << " children before adding:"
+      << "\nParent is " << ToString(true, true) << "\nFirst child is "
+      << children_[0]->ToString(true, true);
+#endif
   if (!accessible_node_)
     return;
 
-  for (const auto& child : accessible_node_->GetChildren())
-    children_.push_back(AXObjectCache().GetOrCreate(child));
+  DCHECK(children_dirty_);
+  children_dirty_ = false;
+
+  for (const auto& child : accessible_node_->GetChildren()) {
+    AXObject* ax_child = AXObjectCache().GetOrCreate(child, this);
+    if (!ax_child)
+      continue;
+    DCHECK(!ax_child->IsDetached());
+    DCHECK(ax_child->AccessibilityIsIncludedInTree());
+
+    children_.push_back(ax_child);
+  }
 }
 
 void AXVirtualObject::ChildrenChanged() {
@@ -75,9 +95,8 @@ String AXVirtualObject::TextAlternative(bool recursive,
                              &found_text_alternative);
 }
 
-void AXVirtualObject::Trace(Visitor* visitor) {
+void AXVirtualObject::Trace(Visitor* visitor) const {
   visitor->Trace(accessible_node_);
   AXObject::Trace(visitor);
 }
-
 }  // namespace blink

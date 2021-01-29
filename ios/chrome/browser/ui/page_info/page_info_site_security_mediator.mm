@@ -12,11 +12,15 @@
 #include "components/strings/grit/components_google_chrome_strings.h"
 #include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/reading_list/offline_page_tab_helper.h"
 #import "ios/chrome/browser/ui/page_info/page_info_site_security_description.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/components/webui/web_ui_url_constants.h"
+#include "ios/web/public/navigation/navigation_item.h"
+#include "ios/web/public/navigation/navigation_manager.h"
 #include "ios/web/public/security/ssl_status.h"
+#import "ios/web/public/web_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
@@ -25,6 +29,10 @@
 #endif
 
 namespace {
+
+NSString* kSecurityIconDangerous = @"security_icon_dangerous";
+NSString* kSecurityIconNotSecure = @"security_icon_not_secure";
+NSString* kSecurityIconSecure = @"security_icon_secure";
 
 // Build the certificate details based on the |SSLStatus| and the |URL|.
 NSString* BuildCertificateDetailString(web::SSLStatus& SSLStatus,
@@ -64,45 +72,54 @@ NSString* BuildMessage(NSArray<NSString*>* messageComponents) {
 
 @implementation PageInfoSiteSecurityMediator
 
-+ (PageInfoSiteSecurityDescription*)configurationForURL:(const GURL&)URL
-                                              SSLStatus:(web::SSLStatus&)status
-                                            offlinePage:(BOOL)offlinePage {
++ (PageInfoSiteSecurityDescription*)configurationForWebState:
+    (web::WebState*)webState {
+  web::NavigationItem* navItem =
+      webState->GetNavigationManager()->GetVisibleItem();
+  const GURL& URL = navItem->GetURL();
+  web::SSLStatus& status = navItem->GetSSL();
+  bool offlinePage =
+      OfflinePageTabHelper::FromWebState(webState)->presenting_offline_page();
+
   PageInfoSiteSecurityDescription* dataHolder =
       [[PageInfoSiteSecurityDescription alloc] init];
+
   if (offlinePage) {
-    dataHolder.title = l10n_util::GetNSString(IDS_IOS_PAGE_INFO_OFFLINE_TITLE);
+    dataHolder.siteURL =
+        l10n_util::GetNSString(IDS_IOS_PAGE_INFO_OFFLINE_PAGE_LABEL);
+
     dataHolder.message = l10n_util::GetNSString(IDS_IOS_PAGE_INFO_OFFLINE_PAGE);
-    dataHolder.image = [UIImage imageNamed:@"page_info_offline"];
-    dataHolder.buttonAction = PageInfoSiteSecurityButtonActionReload;
+    dataHolder.isEmpty = YES;
     return dataHolder;
   }
 
   if (URL.SchemeIs(kChromeUIScheme)) {
-    dataHolder.title = base::SysUTF8ToNSString(URL.spec());
+    dataHolder.siteURL =
+        l10n_util::GetNSString(IDS_IOS_PAGE_INFO_CHROME_PAGE_LABEL);
     dataHolder.message = l10n_util::GetNSString(IDS_PAGE_INFO_INTERNAL_PAGE);
-    dataHolder.image = nil;
-    dataHolder.buttonAction = PageInfoSiteSecurityButtonActionNone;
+    dataHolder.isEmpty = YES;
     return dataHolder;
   }
 
   // At this point, this is a web page.
-  dataHolder.title = base::SysUTF8ToNSString(URL.host());
-  dataHolder.buttonAction = PageInfoSiteSecurityButtonActionShowHelp;
+  dataHolder.siteURL = base::SysUTF8ToNSString(URL.host());
+  dataHolder.isEmpty = NO;
+  dataHolder.status =
+      l10n_util::GetNSString(IDS_IOS_PAGE_INFO_SECURITY_STATUS_NOT_SECURE);
 
   // Summary and details.
   if (!status.certificate) {
     // Not HTTPS. This maps to the WARNING security level. Show the grey
     // triangle icon in page info based on the same logic used to determine
     // the iconography in the omnibox.
-    if (security_state::ShouldShowDangerTriangleForWarningLevel()) {
-      dataHolder.image = [UIImage imageNamed:@"page_info_bad"];
-    } else {
-      dataHolder.image = [UIImage imageNamed:@"page_info_info"];
-    }
-    dataHolder.message = BuildMessage(@[
-      l10n_util::GetNSString(IDS_PAGE_INFO_NOT_SECURE_SUMMARY),
-      l10n_util::GetNSString(IDS_PAGE_INFO_NOT_SECURE_DETAILS)
-    ]);
+    dataHolder.iconImageName = kSecurityIconDangerous;
+
+    dataHolder.message =
+        [NSString stringWithFormat:@"%@ BEGIN_LINK %@ END_LINK",
+                                   l10n_util::GetNSString(
+                                       IDS_PAGE_INFO_NOT_SECURE_DETAILS),
+                                   l10n_util::GetNSString(IDS_LEARN_MORE)];
+
     return dataHolder;
   }
 
@@ -114,13 +131,15 @@ NSString* BuildMessage(NSArray<NSString*>* messageComponents) {
   if (net::IsCertStatusError(status.cert_status) ||
       status.security_style == web::SECURITY_STYLE_AUTHENTICATION_BROKEN) {
     // HTTPS with major errors
-    dataHolder.image = [UIImage imageNamed:@"page_info_bad"];
+    dataHolder.iconImageName = kSecurityIconDangerous;
 
     NSString* certificateDetails = BuildCertificateDetailString(status, URL);
 
     dataHolder.message = BuildMessage(@[
-      l10n_util::GetNSString(IDS_PAGE_INFO_NOT_SECURE_SUMMARY),
-      l10n_util::GetNSString(IDS_PAGE_INFO_NOT_SECURE_DETAILS),
+      [NSString stringWithFormat:@"%@ BEGIN_LINK %@ END_LINK",
+                                 l10n_util::GetNSString(
+                                     IDS_PAGE_INFO_NOT_SECURE_DETAILS),
+                                 l10n_util::GetNSString(IDS_LEARN_MORE)],
       certificateDetails
     ]);
 
@@ -145,14 +164,13 @@ NSString* BuildMessage(NSArray<NSString*>* messageComponents) {
     // so assume the WARNING state when determining whether to swap the icon for
     // a grey triangle. This will result in an inconsistency between the omnibox
     // and page info if the mixed content WARNING feature is disabled.
-    if (security_state::ShouldShowDangerTriangleForWarningLevel()) {
-      dataHolder.image = [UIImage imageNamed:@"page_info_bad"];
-    } else {
-      dataHolder.image = [UIImage imageNamed:@"page_info_info"];
-    }
+    dataHolder.iconImageName = kSecurityIconDangerous;
+
     dataHolder.message = BuildMessage(@[
-      l10n_util::GetNSString(IDS_PAGE_INFO_MIXED_CONTENT_SUMMARY),
-      l10n_util::GetNSString(IDS_PAGE_INFO_MIXED_CONTENT_DETAILS),
+      [NSString stringWithFormat:@"%@ BEGIN_LINK %@ END_LINK",
+                                 l10n_util::GetNSString(
+                                     IDS_PAGE_INFO_MIXED_CONTENT_DETAILS),
+                                 l10n_util::GetNSString(IDS_LEARN_MORE)],
       certificateDetails
     ]);
 
@@ -160,10 +178,16 @@ NSString* BuildMessage(NSArray<NSString*>* messageComponents) {
   }
 
   // Valid HTTPS
-  dataHolder.image = [UIImage imageNamed:@"page_info_good"];
+  dataHolder.status =
+      l10n_util::GetNSString(IDS_IOS_PAGE_INFO_SECURITY_STATUS_SECURE);
+  dataHolder.iconImageName = kSecurityIconSecure;
+
   dataHolder.message = BuildMessage(@[
-    l10n_util::GetNSString(IDS_PAGE_INFO_SECURE_SUMMARY),
-    l10n_util::GetNSString(IDS_PAGE_INFO_SECURE_DETAILS), certificateDetails
+    [NSString
+        stringWithFormat:@"%@ BEGIN_LINK %@ END_LINK",
+                         l10n_util::GetNSString(IDS_PAGE_INFO_SECURE_DETAILS),
+                         l10n_util::GetNSString(IDS_LEARN_MORE)],
+    certificateDetails
   ]);
 
   DCHECK(!(status.cert_status & net::CERT_STATUS_IS_EV))

@@ -6,8 +6,10 @@ package org.chromium.chrome.browser.performance_hints;
 
 import androidx.annotation.IntDef;
 
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.url.GURL;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -15,6 +17,7 @@ import java.lang.annotation.RetentionPolicy;
 /**
  * Provide access to PerformanceClass.
  */
+@JNINamespace("performance_hints")
 public class PerformanceHintsObserver {
     // From components/optimization_guide/proto/performance_hints_metadata.proto:PerformanceClass.
     @IntDef({PerformanceClass.PERFORMANCE_UNKNOWN, PerformanceClass.PERFORMANCE_SLOW,
@@ -28,14 +31,19 @@ public class PerformanceHintsObserver {
     }
 
     public static @PerformanceClass int getPerformanceClassForURL(
-            WebContents webContents, String url) {
+            WebContents webContents, GURL url) {
         return PerformanceHintsObserverJni.get().getPerformanceClassForURL(webContents, url);
+    }
+
+    public static boolean isContextMenuPerformanceInfoEnabled() {
+        return PerformanceHintsObserverJni.get().isContextMenuPerformanceInfoEnabled();
     }
 
     private PerformanceHintsObserver() {}
 
     @NativeMethods
-    interface Natives {
-        int getPerformanceClassForURL(WebContents webContents, String url);
+    public interface Natives {
+        int getPerformanceClassForURL(WebContents webContents, GURL url);
+        boolean isContextMenuPerformanceInfoEnabled();
     }
 }

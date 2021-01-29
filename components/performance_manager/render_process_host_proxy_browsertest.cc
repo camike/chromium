@@ -4,18 +4,19 @@
 
 #include "components/performance_manager/public/render_process_host_proxy.h"
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
-#include "base/task/post_task.h"
+#include "base/run_loop.h"
 #include "base/task/task_traits.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "components/performance_manager/graph/process_node_impl.h"
 #include "components/performance_manager/performance_manager_impl.h"
 #include "components/performance_manager/render_process_user_data.h"
 #include "components/performance_manager/test_support/performance_manager_browsertest_harness.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -64,8 +65,8 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostProxyTest,
         FROM_HERE,
         base::BindLambdaForTesting(
             [&deref_proxy, process_node, quit_loop = run_loop.QuitClosure()]() {
-              base::PostTask(
-                  FROM_HERE, {content::BrowserThread::UI},
+              content::GetUIThreadTaskRunner({})->PostTask(
+                  FROM_HERE,
                   base::BindOnce(deref_proxy,
                                  process_node->GetRenderProcessHostProxy(),
                                  std::move(quit_loop)));
@@ -84,11 +85,11 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostProxyTest,
         base::BindLambdaForTesting([&deref_proxy, process_node,
                                     shell = this->shell(),
                                     quit_loop = run_loop.QuitClosure()]() {
-          base::PostTask(
-              FROM_HERE, {content::BrowserThread::UI},
+          content::GetUIThreadTaskRunner({})->PostTask(
+              FROM_HERE,
               base::BindLambdaForTesting([shell]() { shell->Close(); }));
-          base::PostTask(
-              FROM_HERE, {content::BrowserThread::UI},
+          content::GetUIThreadTaskRunner({})->PostTask(
+              FROM_HERE,
               base::BindOnce(deref_proxy,
                              process_node->GetRenderProcessHostProxy(),
                              std::move(quit_loop)));

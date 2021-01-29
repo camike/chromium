@@ -13,8 +13,8 @@
 #import "ios/chrome/browser/overlays/public/common/infobars/infobar_overlay_request_config.h"
 #include "ios/chrome/browser/overlays/public/overlay_request.h"
 #include "ios/chrome/browser/overlays/public/overlay_request_queue.h"
-#import "ios/web/public/test/fakes/test_navigation_manager.h"
-#import "ios/web/public/test/fakes/test_web_state.h"
+#import "ios/web/public/test/fakes/fake_navigation_manager.h"
+#import "ios/web/public/test/fakes/fake_web_state.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -38,7 +38,7 @@ class InfobarOverlayRequestInserterTest : public PlatformTest {
  public:
   InfobarOverlayRequestInserterTest() {
     web_state_.SetNavigationManager(
-        std::make_unique<web::TestNavigationManager>());
+        std::make_unique<web::FakeNavigationManager>());
     InfobarOverlayRequestInserter::CreateForWebState(
         &web_state_, std::make_unique<FakeInfobarOverlayRequestFactory>());
     InfoBarManagerImpl::CreateForWebState(&web_state_);
@@ -70,7 +70,7 @@ class InfobarOverlayRequestInserterTest : public PlatformTest {
   }
 
  private:
-  web::TestWebState web_state_;
+  web::FakeWebState web_state_;
 };
 
 // Tests that the inserter adds banner OverlayRequests to the correct queue.
@@ -80,7 +80,11 @@ TEST_F(InfobarOverlayRequestInserterTest, InsertBanner) {
   // Insert |infobar| at front of queue and check that the queue is updated
   // correctly.
   InfoBar* infobar = CreateInfobar(kFirstInfobarMessageText);
-  inserter()->AddOverlayRequest(infobar, InfobarOverlayType::kBanner);
+  InsertParams params(static_cast<InfoBarIOS*>(infobar));
+  params.overlay_type = InfobarOverlayType::kBanner;
+  params.insertion_index = 0;
+  params.source = InfobarOverlayInsertionSource::kInfoBarManager;
+  inserter()->InsertOverlayRequest(params);
   EXPECT_EQ(1U, queue->size());
   EXPECT_EQ(infobar, queue->front_request()
                          ->GetConfig<InfobarOverlayRequestConfig>()
@@ -88,8 +92,8 @@ TEST_F(InfobarOverlayRequestInserterTest, InsertBanner) {
   // Insert |inserted_infobar| in front of |infobar| and check that it is now
   // the front request.
   InfoBar* inserted_infobar = CreateInfobar(kSecondInfobarMessageText);
-  inserter()->InsertOverlayRequest(inserted_infobar,
-                                   InfobarOverlayType::kBanner, 0);
+  params.infobar = static_cast<InfoBarIOS*>(inserted_infobar);
+  inserter()->InsertOverlayRequest(params);
   EXPECT_EQ(2U, queue->size());
   EXPECT_EQ(inserted_infobar, queue->front_request()
                                   ->GetConfig<InfobarOverlayRequestConfig>()
@@ -103,7 +107,11 @@ TEST_F(InfobarOverlayRequestInserterTest, AddBanner) {
   // Add |infobar| to the back of the queue and check that the it is updated
   // correctly.
   InfoBar* infobar = CreateInfobar(kFirstInfobarMessageText);
-  inserter()->AddOverlayRequest(infobar, InfobarOverlayType::kBanner);
+  InsertParams params(static_cast<InfoBarIOS*>(infobar));
+  params.overlay_type = InfobarOverlayType::kBanner;
+  params.insertion_index = 0;
+  params.source = InfobarOverlayInsertionSource::kInfoBarManager;
+  inserter()->InsertOverlayRequest(params);
   EXPECT_EQ(1U, queue->size());
   EXPECT_EQ(infobar, queue->front_request()
                          ->GetConfig<InfobarOverlayRequestConfig>()
@@ -111,7 +119,9 @@ TEST_F(InfobarOverlayRequestInserterTest, AddBanner) {
   // Add |second_infobar| in to the queue and check that it is second in the
   // queue.
   InfoBar* second_infobar = CreateInfobar(kSecondInfobarMessageText);
-  inserter()->AddOverlayRequest(second_infobar, InfobarOverlayType::kBanner);
+  params.infobar = static_cast<InfoBarIOS*>(second_infobar);
+  params.insertion_index = 1;
+  inserter()->InsertOverlayRequest(params);
   EXPECT_EQ(2U, queue->size());
   EXPECT_EQ(second_infobar, queue->GetRequest(1)
                                 ->GetConfig<InfobarOverlayRequestConfig>()

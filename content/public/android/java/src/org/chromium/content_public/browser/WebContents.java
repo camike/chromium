@@ -149,6 +149,13 @@ public interface WebContents extends Parcelable {
     RenderFrameHost getFocusedFrame();
 
     /**
+     * @return The frame associated with renderProcessId and renderFrameId. Will be null if the IDs
+     *         do not correspond to a live RenderFrameHost.
+     */
+    @Nullable
+    RenderFrameHost getRenderFrameHostFromId(int renderProcessId, int renderFrameId);
+
+    /**
      * @return The root level view from the renderer, or {@code null} in some cases where there is
      *         none.
      */
@@ -175,14 +182,6 @@ public interface WebContents extends Parcelable {
      * @return The URL for the current visible page.
      */
     GURL getVisibleUrl();
-
-    /**
-     * @return The URL for the current visible page.
-     *
-     * @deprecated Please use {@link #getVisibleUrl} instead.
-     */
-    @Deprecated
-    String getVisibleUrlString();
 
     /**
      * @return The character encoding for the current visible page.
@@ -245,11 +244,6 @@ public interface WebContents extends Parcelable {
     void setAudioMuted(boolean mute);
 
     /**
-     * @return Whether the page is currently showing an interstitial, such as a bad HTTPS page.
-     */
-    boolean isShowingInterstitialPage();
-
-    /**
      * @return Whether the location bar should be focused by default for this page.
      */
     boolean focusLocationBarByDefault();
@@ -298,7 +292,7 @@ public interface WebContents extends Parcelable {
      *
      * @return The last committed URL.
      */
-    String getLastCommittedUrl();
+    GURL getLastCommittedUrl();
 
     /**
      * Get the InCognito state of WebContents.

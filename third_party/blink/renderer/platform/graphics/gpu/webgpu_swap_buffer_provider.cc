@@ -78,7 +78,7 @@ void WebGPUSwapBufferProvider::Neuter() {
     layer_ = nullptr;
   }
 
-  if (current_swap_buffer_ && !dawn_control_client_->IsDestroyed()) {
+  if (current_swap_buffer_) {
     // Ensure we wait for previous WebGPU commands before destroying the shared
     // image.
     gpu::webgpu::WebGPUInterface* webgpu = dawn_control_client_->GetInterface();
@@ -92,7 +92,7 @@ void WebGPUSwapBufferProvider::Neuter() {
 }
 
 WGPUTexture WebGPUSwapBufferProvider::GetNewTexture(const IntSize& size) {
-  DCHECK(!current_swap_buffer_ && !dawn_control_client_->IsDestroyed());
+  DCHECK(!current_swap_buffer_);
 
   gpu::webgpu::WebGPUInterface* webgpu = dawn_control_client_->GetInterface();
   gpu::SharedImageInterface* sii =
@@ -102,9 +102,11 @@ WGPUTexture WebGPUSwapBufferProvider::GetNewTexture(const IntSize& size) {
   // TODO(cwallez@chromium.org): have some recycling mechanism.
   gpu::Mailbox mailbox = sii->CreateSharedImage(
       format_, static_cast<gfx::Size>(size), gfx::ColorSpace::CreateSRGB(),
+      kTopLeft_GrSurfaceOrigin, kPremul_SkAlphaType,
       gpu::SHARED_IMAGE_USAGE_WEBGPU |
           gpu::SHARED_IMAGE_USAGE_WEBGPU_SWAP_CHAIN_TEXTURE |
-          gpu::SHARED_IMAGE_USAGE_DISPLAY);
+          gpu::SHARED_IMAGE_USAGE_DISPLAY,
+      gpu::kNullSurfaceHandle);
   gpu::SyncToken creation_token = sii->GenUnverifiedSyncToken();
 
   current_swap_buffer_ = base::AdoptRef(new SwapBuffer(
@@ -136,7 +138,7 @@ bool WebGPUSwapBufferProvider::PrepareTransferableResource(
     cc::SharedBitmapIdRegistrar* bitmap_registrar,
     viz::TransferableResource* out_resource,
     std::unique_ptr<viz::SingleReleaseCallback>* out_release_callback) {
-  DCHECK(!neutered_ && !dawn_control_client_->IsDestroyed());
+  DCHECK(!neutered_);
 
   if (!current_swap_buffer_ || neutered_) {
     return false;
@@ -163,7 +165,7 @@ bool WebGPUSwapBufferProvider::PrepareTransferableResource(
   // eglBindTexImage (on ANGLE or system drivers) so they use the 2D texture
   // target.
   const uint32_t texture_target =
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
       GL_TEXTURE_RECTANGLE_ARB
 #else
       GL_TEXTURE_2D
@@ -211,9 +213,6 @@ WebGPUSwapBufferProvider::SwapBuffer::SwapBuffer(
       access_finished_token(creation_token) {}
 
 WebGPUSwapBufferProvider::SwapBuffer::~SwapBuffer() {
-  if (swap_buffers->dawn_control_client_->IsDestroyed()) {
-    return;
-  }
   gpu::SharedImageInterface* sii =
       swap_buffers->dawn_control_client_->GetContextProvider()
           ->SharedImageInterface();

@@ -8,7 +8,8 @@
 
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
-#include "chrome/browser/extensions/blacklist.h"
+#include "build/chromeos_buildflags.h"
+#include "chrome/browser/extensions/blocklist.h"
 #include "chrome/browser/extensions/chrome_app_sorting.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_management.h"
@@ -32,7 +33,7 @@
 #include "extensions/browser/value_store/test_value_store_factory.h"
 #include "extensions/browser/value_store/testing_value_store.h"
 #include "services/data_decoder/data_decoder_service.h"
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "components/user_manager/user_manager.h"
 #endif
 
@@ -43,10 +44,14 @@ namespace extensions {
 TestExtensionSystem::TestExtensionSystem(Profile* profile)
     : profile_(profile),
       store_factory_(new TestValueStoreFactory()),
+      state_store_(new StateStore(profile_,
+                                  store_factory_,
+                                  ValueStoreFrontend::BackendType::RULES,
+                                  false)),
       info_map_(new InfoMap()),
       quota_service_(new QuotaService()),
       app_sorting_(new ChromeAppSorting(profile_)) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (!user_manager::UserManager::IsInitialized())
     test_user_manager_.reset(new chromeos::ScopedTestUserManager);
 #endif
@@ -65,8 +70,6 @@ ExtensionService* TestExtensionSystem::CreateExtensionService(
     const base::FilePath& install_directory,
     bool autoupdate_enabled,
     bool extensions_enabled) {
-  state_store_.reset(new StateStore(
-      profile_, store_factory_, ValueStoreFrontend::BackendType::RULES, false));
   management_policy_.reset(new ManagementPolicy());
   management_policy_->RegisterProviders(
       ExtensionManagementFactory::GetForBrowserContext(profile_)
@@ -74,7 +77,7 @@ ExtensionService* TestExtensionSystem::CreateExtensionService(
   runtime_data_.reset(new RuntimeData(ExtensionRegistry::Get(profile_)));
   extension_service_.reset(new ExtensionService(
       profile_, command_line, install_directory, ExtensionPrefs::Get(profile_),
-      Blacklist::Get(profile_), autoupdate_enabled, extensions_enabled,
+      Blocklist::Get(profile_), autoupdate_enabled, extensions_enabled,
       &ready_));
 
   unzip::SetUnzipperLaunchOverrideForTesting(
@@ -106,8 +109,9 @@ ServiceWorkerManager* TestExtensionSystem::service_worker_manager() {
   return nullptr;
 }
 
-SharedUserScriptMaster* TestExtensionSystem::shared_user_script_master() {
-  return NULL;
+ExtensionUserScriptManager*
+TestExtensionSystem::extension_user_script_manager() {
+  return nullptr;
 }
 
 StateStore* TestExtensionSystem::state_store() {
@@ -134,6 +138,10 @@ AppSorting* TestExtensionSystem::app_sorting() {
 
 const base::OneShotEvent& TestExtensionSystem::ready() const {
   return ready_;
+}
+
+bool TestExtensionSystem::is_ready() const {
+  return ready_.is_signaled();
 }
 
 ContentVerifier* TestExtensionSystem::content_verifier() {

@@ -3,14 +3,11 @@
 // found in the LICENSE file.
 
 #include "content/renderer/accessibility/blink_ax_action_target.h"
-#include "third_party/blink/public/platform/web_float_rect.h"
-#include "third_party/blink/public/platform/web_rect.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/skia/include/core/SkMatrix44.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 
 using blink::WebAXObject;
-using blink::WebFloatRect;
-using blink::WebRect;
 
 namespace content {
 
@@ -61,11 +58,11 @@ bool BlinkAXActionTarget::Focus() const {
 
 gfx::Rect BlinkAXActionTarget::GetRelativeBounds() const {
   blink::WebAXObject offset_container;
-  WebFloatRect bounds;
+  gfx::RectF bounds;
   SkMatrix44 container_transform;
   web_ax_object_.GetRelativeBounds(offset_container, bounds,
                                    container_transform);
-  return gfx::Rect(bounds.x, bounds.y, bounds.width, bounds.height);
+  return gfx::ToEnclosedRect(bounds);
 }
 
 gfx::Point BlinkAXActionTarget::GetScrollOffset() const {
@@ -130,8 +127,8 @@ bool BlinkAXActionTarget::ScrollToMakeVisibleWithSubFocus(
     ax::mojom::ScrollAlignment vertical_scroll_alignment,
     ax::mojom::ScrollBehavior scroll_behavior) const {
   return web_ax_object_.ScrollToMakeVisibleWithSubFocus(
-      WebRect(rect.x(), rect.y(), rect.width(), rect.height()),
-      horizontal_scroll_alignment, vertical_scroll_alignment, scroll_behavior);
+      rect, horizontal_scroll_alignment, vertical_scroll_alignment,
+      scroll_behavior);
 }
 
 bool BlinkAXActionTarget::ScrollToGlobalPoint(const gfx::Point& point) const {

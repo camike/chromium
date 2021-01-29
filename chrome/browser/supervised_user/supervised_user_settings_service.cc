@@ -87,8 +87,7 @@ void SupervisedUserSettingsService::Init(
   store_->AddObserver(this);
 }
 
-std::unique_ptr<
-    SupervisedUserSettingsService::SettingsCallbackList::Subscription>
+base::CallbackListSubscription
 SupervisedUserSettingsService::SubscribeForSettingsChange(
     const SettingsCallback& callback) {
   if (IsReady()) {
@@ -99,8 +98,7 @@ SupervisedUserSettingsService::SubscribeForSettingsChange(
   return settings_callback_list_.Add(callback);
 }
 
-std::unique_ptr<
-    SupervisedUserSettingsService::ShutdownCallbackList::Subscription>
+base::CallbackListSubscription
 SupervisedUserSettingsService::SubscribeForShutdown(
     const ShutdownCallback& callback) {
   return shutdown_callback_list_.Add(callback);
@@ -171,7 +169,7 @@ void SupervisedUserSettingsService::SetLocalSetting(
   if (value)
     local_settings_->SetWithoutPathExpansion(key, std::move(value));
   else
-    local_settings_->RemoveWithoutPathExpansion(key, nullptr);
+    local_settings_->RemoveKey(key);
 
   InformSubscribers();
 }
@@ -350,11 +348,7 @@ SupervisedUserSettingsService::ProcessSyncChanges(
       case SyncChange::ACTION_DELETE: {
         DLOG_IF(WARNING, !dict->HasKey(key)) << "Trying to delete nonexistent "
                                              << "key " << key;
-        dict->RemoveWithoutPathExpansion(key, nullptr);
-        break;
-      }
-      case SyncChange::ACTION_INVALID: {
-        NOTREACHED();
+        dict->RemoveKey(key);
         break;
       }
     }

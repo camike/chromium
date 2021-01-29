@@ -9,12 +9,13 @@ import android.os.Bundle;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.signin.IdentityServicesProvider;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.signin.services.IdentityServicesProvider;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
 import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
 import org.chromium.components.embedder_support.util.UrlConstants;
-import org.chromium.components.sync.AndroidSyncSettings;
+import org.chromium.components.signin.identitymanager.IdentityManager;
 import org.chromium.components.sync.ModelType;
 
 import java.util.Arrays;
@@ -41,7 +42,9 @@ public class ClearBrowsingDataFragmentBasic extends ClearBrowsingDataFragment {
                     .launchUrl(UrlConstants.MY_ACTIVITY_URL_IN_CBD, TabLaunchType.FROM_CHROME_UI);
         });
 
-        if (IdentityServicesProvider.get().getIdentityManager().hasPrimaryAccount()) {
+        IdentityManager identityManager = IdentityServicesProvider.get().getIdentityManager(
+                Profile.getLastUsedRegularProfile());
+        if (identityManager.hasPrimaryAccount()) {
             historyCheckbox.setSummary(isHistorySyncEnabled()
                             ? R.string.clear_browsing_history_summary_synced
                             : R.string.clear_browsing_history_summary_signed_in);
@@ -51,9 +54,8 @@ public class ClearBrowsingDataFragmentBasic extends ClearBrowsingDataFragment {
     }
 
     private boolean isHistorySyncEnabled() {
-        boolean syncEnabled = AndroidSyncSettings.get().isSyncEnabled();
         ProfileSyncService syncService = ProfileSyncService.get();
-        return syncEnabled && syncService != null
+        return syncService != null && syncService.isSyncRequested()
                 && syncService.getActiveDataTypes().contains(ModelType.HISTORY_DELETE_DIRECTIVES);
     }
 

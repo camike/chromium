@@ -12,8 +12,8 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/containers/flat_map.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -23,7 +23,6 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
@@ -31,6 +30,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/task/cancelable_task_tracker.h"
+#include "base/task/current_thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time_to_iso8601.h"
 #include "base/values.h"
@@ -144,7 +144,7 @@ const char kDangerKey[] = "danger";
 const char kDangerSafe[] = "safe";
 const char kDangerUncommon[] = "uncommon";
 const char kDangerUnwanted[] = "unwanted";
-const char kDangerWhitelistedByPolicy[] = "whitelistedByPolicy";
+const char kDangerAllowlistedByPolicy[] = "allowlistedByPolicy";
 const char kDangerAsyncScanning[] = "asyncScanning";
 const char kDangerPasswordProtected[] = "passwordProtected";
 const char kDangerTooLarge[] = "blockedTooLarge";
@@ -185,8 +185,6 @@ const char kUrlRegexKey[] = "urlRegex";
 const char kFinalUrlKey[] = "finalUrl";
 const char kFinalUrlRegexKey[] = "finalUrlRegex";
 
-// Note: Any change to the danger type strings, should be accompanied by a
-// corresponding change to downloads.json.
 const char* const kDangerStrings[] = {kDangerSafe,
                                       kDangerFile,
                                       kDangerUrl,
@@ -196,7 +194,7 @@ const char* const kDangerStrings[] = {kDangerSafe,
                                       kDangerAccepted,
                                       kDangerHost,
                                       kDangerUnwanted,
-                                      kDangerWhitelistedByPolicy,
+                                      kDangerAllowlistedByPolicy,
                                       kDangerAsyncScanning,
                                       kDangerPasswordProtected,
                                       kDangerTooLarge,
@@ -209,8 +207,6 @@ const char* const kDangerStrings[] = {kDangerSafe,
 static_assert(base::size(kDangerStrings) == download::DOWNLOAD_DANGER_TYPE_MAX,
               "kDangerStrings should have DOWNLOAD_DANGER_TYPE_MAX elements");
 
-// Note: Any change to the state strings, should be accompanied by a
-// corresponding change to downloads.json.
 const char* const kStateStrings[] = {
   kStateInProgress,
   kStateComplete,
@@ -333,7 +329,7 @@ class DownloadFileIconExtractorImpl : public DownloadFileIconExtractor {
 
  private:
   void OnIconLoadComplete(float scale,
-                          const IconURLCallback& callback,
+                          IconURLCallback callback,
                           gfx::Image icon);
 
   base::CancelableTaskTracker cancelable_task_tracker_;
@@ -351,17 +347,16 @@ bool DownloadFileIconExtractorImpl::ExtractIconURLForPath(
   im->LoadIcon(
       path, icon_size,
       base::BindOnce(&DownloadFileIconExtractorImpl::OnIconLoadComplete,
-                     base::Unretained(this), scale, callback),
+                     base::Unretained(this), scale, std::move(callback)),
       &cancelable_task_tracker_);
   return true;
 }
 
-void DownloadFileIconExtractorImpl::OnIconLoadComplete(
-    float scale,
-    const IconURLCallback& callback,
-    gfx::Image icon) {
+void DownloadFileIconExtractorImpl::OnIconLoadComplete(float scale,
+                                                       IconURLCallback callback,
+                                                       gfx::Image icon) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  callback.Run(
+  std::move(callback).Run(
       icon.IsEmpty()
           ? std::string()
           : webui::GetBitmapDataUrl(
@@ -459,11 +454,10 @@ void GetManagers(content::BrowserContext* context,
                  DownloadManager** incognito_manager) {
   Profile* profile = Profile::FromBrowserContext(context);
   *manager = BrowserContext::GetDownloadManager(profile->GetOriginalProfile());
-  if (profile->HasOffTheRecordProfile() &&
-      (include_incognito ||
-       profile->IsOffTheRecord())) {
-    *incognito_manager = BrowserContext::GetDownloadManager(
-        profile->GetOffTheRecordProfile());
+  if (profile->HasPrimaryOTRProfile() &&
+      (include_incognito || profile->IsOffTheRecord())) {
+    *incognito_manager =
+        BrowserContext::GetDownloadManager(profile->GetPrimaryOTRProfile());
   } else {
     *incognito_manager = NULL;
   }
@@ -619,7 +613,7 @@ void RunDownloadQuery(
     if (incognito_manager)
       incognito_manager->GetAllDownloads(&all_items);
   }
-  query_out.AddFilter(base::Bind(&ShouldExport));
+  query_out.AddFilter(base::BindRepeating(&ShouldExport));
   query_out.Search(all_items.begin(), all_items.end(), results);
 }
 
@@ -692,12 +686,10 @@ class ExtensionDownloadsEventRouterData : public base::SupportsUserData::Data {
   }
 
   void BeginFilenameDetermination(
-      const base::Closure& no_change,
-      const ExtensionDownloadsEventRouter::FilenameChangedCallback& change) {
+      ExtensionDownloadsEventRouter::FilenameChangedCallback filename_changed) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     ClearPendingDeterminers();
-    filename_no_change_ = no_change;
-    filename_change_ = change;
+    filename_changed_ = std::move(filename_changed);
     determined_filename_ = creator_suggested_filename_;
     determined_conflict_action_ = creator_conflict_action_;
     // determiner_.install_time should default to 0 so that creator suggestions
@@ -718,14 +710,21 @@ class ExtensionDownloadsEventRouterData : public base::SupportsUserData::Data {
     CallFilenameCallback();
   }
 
+  void CallFilenameCallback() {
+    if (!filename_changed_)
+      return;
+
+    std::move(filename_changed_)
+        .Run(determined_filename_,
+             ConvertConflictAction(determined_conflict_action_));
+  }
+
   void ClearPendingDeterminers() {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     determined_filename_.clear();
-    determined_conflict_action_ =
-      downloads::FILENAME_CONFLICT_ACTION_UNIQUIFY;
+    determined_conflict_action_ = downloads::FILENAME_CONFLICT_ACTION_UNIQUIFY;
     determiner_ = DeterminerInfo();
-    filename_no_change_ = base::Closure();
-    filename_change_ = ExtensionDownloadsEventRouter::FilenameChangedCallback();
+    filename_changed_.Reset();
     weak_ptr_factory_.reset();
     determiners_.clear();
   }
@@ -878,32 +877,13 @@ class ExtensionDownloadsEventRouterData : public base::SupportsUserData::Data {
         base::TimeDelta::FromSeconds(15));
   }
 
-  void CallFilenameCallback() {
-    if (determined_filename_.empty() &&
-        (determined_conflict_action_ ==
-         downloads::FILENAME_CONFLICT_ACTION_UNIQUIFY)) {
-      if (!filename_no_change_.is_null())
-        filename_no_change_.Run();
-    } else {
-      if (!filename_change_.is_null()) {
-        filename_change_.Run(determined_filename_, ConvertConflictAction(
-            determined_conflict_action_));
-      }
-    }
-    // Clear the callbacks immediately in case they aren't idempotent.
-    filename_no_change_ = base::Closure();
-    filename_change_ = ExtensionDownloadsEventRouter::FilenameChangedCallback();
-  }
-
-
   int updated_;
   int changed_fired_;
   // Dictionary representing the current state of the download. It is cleared
   // when download completes.
   std::unique_ptr<base::DictionaryValue> json_;
 
-  base::Closure filename_no_change_;
-  ExtensionDownloadsEventRouter::FilenameChangedCallback filename_change_;
+  ExtensionDownloadsEventRouter::FilenameChangedCallback filename_changed_;
 
   DeterminerInfoVector determiners_;
 
@@ -1046,8 +1026,8 @@ ExtensionFunction::ResponseAction DownloadsDownloadFunction::Run() {
             "This feature cannot be disabled in settings, but disabling all "
             "extensions will prevent it."
           chrome_policy {
-            ExtensionInstallBlacklist {
-              ExtensionInstallBlacklist: {
+            ExtensionInstallBlocklist {
+              ExtensionInstallBlocklist: {
                 entries: '*'
               }
             }
@@ -1056,8 +1036,8 @@ ExtensionFunction::ResponseAction DownloadsDownloadFunction::Run() {
   std::unique_ptr<download::DownloadUrlParameters> download_params(
       new download::DownloadUrlParameters(
           download_url, source_process_id(),
-          render_frame_host()->GetRenderViewHost()->GetRoutingID(),
-          render_frame_host()->GetRoutingID(), traffic_annotation));
+          render_frame_host() ? render_frame_host()->GetRoutingID() : -1,
+          traffic_annotation));
 
   base::FilePath creator_suggested_filename;
   if (options.filename.get()) {
@@ -1132,8 +1112,7 @@ void DownloadsDownloadFunction::OnStarted(
   VLOG(1) << __func__ << " " << item << " " << interrupt_reason;
   if (item) {
     DCHECK_EQ(download::DOWNLOAD_INTERRUPT_REASON_NONE, interrupt_reason);
-    Respond(OneArgument(
-        std::make_unique<base::Value>(static_cast<int>(item->GetId()))));
+    Respond(OneArgument(base::Value(static_cast<int>(item->GetId()))));
     if (!creator_suggested_filename.empty() ||
         (creator_conflict_action !=
          downloads::FILENAME_CONFLICT_ACTION_UNIQUIFY)) {
@@ -1194,12 +1173,13 @@ ExtensionFunction::ResponseAction DownloadsSearchFunction::Run() {
                        (incognito_manager->GetDownload(download_id) != NULL));
     Profile* profile = Profile::FromBrowserContext(browser_context());
     std::unique_ptr<base::DictionaryValue> json_item(
-        DownloadItemToJSON(*it, off_record ? profile->GetOffTheRecordProfile()
+        DownloadItemToJSON(*it, off_record ? profile->GetPrimaryOTRProfile()
                                            : profile->GetOriginalProfile()));
     json_results->Append(std::move(json_item));
   }
   RecordApiFunctions(DOWNLOADS_FUNCTION_SEARCH);
-  return RespondNow(OneArgument(std::move(json_results)));
+  return RespondNow(
+      OneArgument(base::Value::FromUniquePtrValue(std::move(json_results))));
 }
 
 DownloadsPauseFunction::DownloadsPauseFunction() {}
@@ -1291,7 +1271,8 @@ ExtensionFunction::ResponseAction DownloadsEraseFunction::Run() {
     (*it)->Remove();
   }
   RecordApiFunctions(DOWNLOADS_FUNCTION_ERASE);
-  return RespondNow(OneArgument(std::move(json_results)));
+  return RespondNow(
+      OneArgument(base::Value::FromUniquePtrValue(std::move(json_results))));
 }
 
 DownloadsRemoveFileFunction::DownloadsRemoveFileFunction() {
@@ -1375,14 +1356,12 @@ void DownloadsAcceptDangerFunction::PromptOrWait(int download_id, int retries) {
   // DownloadDangerPrompt displays a modal dialog using native widgets that the
   // user must either accept or cancel. It cannot be scripted.
   DownloadDangerPrompt* prompt = DownloadDangerPrompt::Create(
-      download_item,
-      web_contents,
-      true,
-      base::Bind(&DownloadsAcceptDangerFunction::DangerPromptCallback,
-                 this, download_id));
+      download_item, web_contents, true,
+      base::BindOnce(&DownloadsAcceptDangerFunction::DangerPromptCallback, this,
+                     download_id));
   // DownloadDangerPrompt deletes itself
   if (on_prompt_created_ && !on_prompt_created_->is_null())
-    on_prompt_created_->Run(prompt);
+    std::move(*on_prompt_created_).Run(prompt);
   // Function finishes in DangerPromptCallback().
 }
 
@@ -1563,7 +1542,7 @@ ExtensionFunction::ResponseAction DownloadsSetShelfEnabledFunction::Run() {
            (current_service == incognito_service)) &&
           browser->window()->IsDownloadShelfVisible() &&
           !current_service->IsShelfEnabled())
-        browser->window()->GetDownloadShelf()->Close(DownloadShelf::AUTOMATIC);
+        browser->window()->GetDownloadShelf()->Close();
     }
   }
 
@@ -1615,10 +1594,9 @@ ExtensionFunction::ResponseAction DownloadsGetFileIconFunction::Run() {
   if (web_contents && web_contents->GetRenderWidgetHostView())
     scale = web_contents->GetRenderWidgetHostView()->GetDeviceScaleFactor();
   EXTENSION_FUNCTION_VALIDATE(icon_extractor_->ExtractIconURLForPath(
-      download_item->GetTargetFilePath(),
-      scale,
+      download_item->GetTargetFilePath(), scale,
       IconLoaderSizeFromPixelSize(icon_size),
-      base::Bind(&DownloadsGetFileIconFunction::OnIconURLExtracted, this)));
+      base::BindOnce(&DownloadsGetFileIconFunction::OnIconURLExtracted, this)));
   return RespondLater();
 }
 
@@ -1630,7 +1608,7 @@ void DownloadsGetFileIconFunction::OnIconURLExtracted(const std::string& url) {
     return;
   }
   RecordApiFunctions(DOWNLOADS_FUNCTION_GET_FILE_ICON);
-  Respond(OneArgument(std::make_unique<base::Value>(url)));
+  Respond(OneArgument(base::Value(url)));
 }
 
 ExtensionDownloadsEventRouter::ExtensionDownloadsEventRouter(
@@ -1682,9 +1660,9 @@ bool ExtensionDownloadsEventRouter::IsShelfEnabled() const {
 // EventListener object to ExtensionEventRouter::listeners().
 //
 // When a download's filename is being determined, DownloadTargetDeterminer (via
-// ChromeDownloadManagerDelegate (CDMD) ::NotifyExtensions()) passes 2 callbacks
+// ChromeDownloadManagerDelegate (CDMD) ::NotifyExtensions()) passes a callback
 // to ExtensionDownloadsEventRouter::OnDeterminingFilename (ODF), which stores
-// the callbacks in the item's ExtensionDownloadsEventRouterData (EDERD) along
+// the callback in the item's ExtensionDownloadsEventRouterData (EDERD) along
 // with all of the extension IDs that are listening for onDeterminingFilename
 // events. ODF dispatches chrome.downloads.onDeterminingFilename.
 //
@@ -1693,45 +1671,37 @@ bool ExtensionDownloadsEventRouter::IsShelfEnabled() const {
 // DownloadsInternalDetermineFilenameFunction::RunAsync, which calls
 // EDER::DetermineFilename, which notifies the item's EDERD.
 //
-// When the last extension's event handler returns, EDERD calls one of the two
-// callbacks that CDMD passed to ODF, allowing DownloadTargetDeterminer to
-// continue the filename determination process. If multiple extensions wish to
-// override the filename, then the extension that was last installed wins.
+// When the last extension's event handler returns, EDERD invokes the callback
+// that CDMD passed to ODF, allowing DownloadTargetDeterminer to continue the
+// filename determination process. If multiple extensions wish to override the
+// filename, then the extension that was last installed wins.
 
 void ExtensionDownloadsEventRouter::OnDeterminingFilename(
     DownloadItem* item,
     const base::FilePath& suggested_path,
-    const base::Closure& no_change,
-    const FilenameChangedCallback& change) {
+    FilenameChangedCallback filename_changed_callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ExtensionDownloadsEventRouterData* data =
       ExtensionDownloadsEventRouterData::Get(item);
   if (!data) {
-    no_change.Run();
+    std::move(filename_changed_callback)
+        .Run({}, DownloadPathReservationTracker::UNIQUIFY);
     return;
   }
-  data->BeginFilenameDetermination(no_change, change);
+  data->BeginFilenameDetermination(std::move(filename_changed_callback));
   bool any_determiners = false;
   std::unique_ptr<base::DictionaryValue> json =
       DownloadItemToJSON(item, profile_);
   json->SetString(kFilenameKey, suggested_path.LossyDisplayName());
   DispatchEvent(events::DOWNLOADS_ON_DETERMINING_FILENAME,
                 downloads::OnDeterminingFilename::kEventName, false,
-                base::Bind(&OnDeterminingFilenameWillDispatchCallback,
-                           &any_determiners, data),
+                base::BindRepeating(&OnDeterminingFilenameWillDispatchCallback,
+                                    &any_determiners, data),
                 std::move(json));
   if (!any_determiners) {
+    data->CallFilenameCallback();
     data->ClearPendingDeterminers();
-    if (!data->creator_suggested_filename().empty() ||
-        (data->creator_conflict_action() !=
-         downloads::FILENAME_CONFLICT_ACTION_UNIQUIFY)) {
-      change.Run(data->creator_suggested_filename(),
-                 ConvertConflictAction(data->creator_conflict_action()));
-      // If all listeners are removed, don't keep |data| around.
-      data->ResetCreatorSuggestion();
-    } else {
-      no_change.Run();
-    }
+    data->ResetCreatorSuggestion();
   }
 }
 

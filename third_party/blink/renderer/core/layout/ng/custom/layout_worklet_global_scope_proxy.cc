@@ -42,18 +42,19 @@ LayoutWorkletGlobalScopeProxy::LayoutWorkletGlobalScopeProxy(
       window->Url(), mojom::blink::ScriptType::kModule, global_scope_name,
       window->UserAgent(), frame->Client()->UserAgentMetadata(),
       frame->Client()->CreateWorkerFetchContext(),
-      window->GetContentSecurityPolicy()->Headers(),
+      window->GetContentSecurityPolicy()->GetParsedPolicies(),
       window->GetReferrerPolicy(), window->GetSecurityOrigin(),
       window->IsSecureContext(), window->GetHttpsState(),
       nullptr /* worker_clients */,
       frame->Client()->CreateWorkerContentSettingsClient(),
-      window->GetSecurityContext().AddressSpace(),
-      OriginTrialContext::GetTokens(window).get(),
+      window->AddressSpace(), OriginTrialContext::GetTokens(window).get(),
       base::UnguessableToken::Create(), nullptr /* worker_settings */,
-      kV8CacheOptionsDefault, module_responses_map,
+      mojom::blink::V8CacheOptions::kDefault, module_responses_map,
       mojo::NullRemote() /* browser_interface_broker */,
       BeginFrameProviderParams(), nullptr /* parent_feature_policy */,
-      base::UnguessableToken() /* agent_cluster_id */);
+      window->GetAgentClusterID(), ukm::kInvalidSourceId,
+      window->GetExecutionContextToken(),
+      window->CrossOriginIsolatedCapability());
   global_scope_ = LayoutWorkletGlobalScope::Create(
       frame, std::move(creation_params), *reporting_proxy_,
       pending_layout_registry);
@@ -92,7 +93,7 @@ CSSLayoutDefinition* LayoutWorkletGlobalScopeProxy::FindDefinition(
   return global_scope_->FindDefinition(name);
 }
 
-void LayoutWorkletGlobalScopeProxy::Trace(Visitor* visitor) {
+void LayoutWorkletGlobalScopeProxy::Trace(Visitor* visitor) const {
   visitor->Trace(global_scope_);
 }
 

@@ -7,14 +7,13 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/system/sys_info.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -22,7 +21,7 @@
 namespace chromeos {
 
 namespace {
-const char kFreezerPath[] = "/sys/fs/cgroup/freezer/chrome_renderers";
+const char kFreezerPath[] = "/sys/fs/cgroup/freezer/ui/chrome_renderers";
 const char kToBeFrozen[] = "to_be_frozen";
 const char kFreezerState[] = "freezer.state";
 const char kCgroupProcs[] = "cgroup.procs";
@@ -36,8 +35,7 @@ class FreezerCgroupProcessManager::FileWorker {
  public:
   // Called on UI thread.
   explicit FileWorker(scoped_refptr<base::SequencedTaskRunner> file_thread)
-      : ui_thread_(
-            base::CreateSingleThreadTaskRunner({content::BrowserThread::UI})),
+      : ui_thread_(content::GetUIThreadTaskRunner({})),
         file_thread_(file_thread),
         enabled_(false),
         froze_successfully_(false) {
@@ -113,13 +111,15 @@ class FreezerCgroupProcessManager::FileWorker {
     if (!result && !froze_successfully_)
       result = true;
 
-    ui_thread_->PostTask(FROM_HERE, base::BindOnce(callback, result));
+    ui_thread_->PostTask(FROM_HERE,
+                         base::BindOnce(std::move(callback), result));
   }
 
   void CheckCanFreezeRenderers(ResultCallback callback) {
     DCHECK(file_thread_->RunsTasksInCurrentSequence());
 
-    ui_thread_->PostTask(FROM_HERE, base::BindOnce(callback, enabled_));
+    ui_thread_->PostTask(FROM_HERE,
+                         base::BindOnce(std::move(callback), enabled_));
   }
 
  private:
@@ -186,18 +186,18 @@ void FreezerCgroupProcessManager::FreezeRenderers() {
 }
 
 void FreezerCgroupProcessManager::ThawRenderers(ResultCallback callback) {
-  file_thread_->PostTask(
-      FROM_HERE,
-      base::BindOnce(&FileWorker::ThawRenderers,
-                     base::Unretained(file_worker_.get()), callback));
+  file_thread_->PostTask(FROM_HERE,
+                         base::BindOnce(&FileWorker::ThawRenderers,
+                                        base::Unretained(file_worker_.get()),
+                                        std::move(callback)));
 }
 
 void FreezerCgroupProcessManager::CheckCanFreezeRenderers(
     ResultCallback callback) {
-  file_thread_->PostTask(
-      FROM_HERE,
-      base::BindOnce(&FileWorker::CheckCanFreezeRenderers,
-                     base::Unretained(file_worker_.get()), callback));
+  file_thread_->PostTask(FROM_HERE,
+                         base::BindOnce(&FileWorker::CheckCanFreezeRenderers,
+                                        base::Unretained(file_worker_.get()),
+                                        std::move(callback)));
 }
 
 }  // namespace chromeos

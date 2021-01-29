@@ -16,8 +16,10 @@ import './languages.m.js';
 import '../settings_shared_css.m.js';
 
 import {CrScrollableBehavior} from 'chrome://resources/cr_elements/cr_scrollable_behavior.m.js';
-import {FindShortcutBehavior} from 'chrome://resources/js/find_shortcut_behavior.m.js';
+import {FindShortcutBehavior} from 'chrome://resources/cr_elements/find_shortcut_behavior.m.js';
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {LanguageSettingsActionType, LanguageSettingsMetricsProxyImpl} from './languages_settings_metrics_proxy.js';
 
 Polymer({
   is: 'settings-add-languages-dialog',
@@ -78,7 +80,7 @@ Polymer({
 
   // Override FindShortcutBehavior methods.
   searchInputHasFocus() {
-    return this.$.search.getSearchInput() ==
+    return this.$.search.getSearchInput() ===
         this.$.search.shadowRoot.activeElement;
   },
 
@@ -120,7 +122,7 @@ Polymer({
   getDisplayText_(language) {
     let displayText = language.displayName;
     // If the native name is different, add it.
-    if (language.displayName != language.nativeDisplayName) {
+    if (language.displayName !== language.nativeDisplayName) {
       displayText += ' - ' + language.nativeDisplayName;
     }
     return displayText;
@@ -170,6 +172,8 @@ Polymer({
     this.$.dialog.close();
     this.languagesToAdd_.forEach(languageCode => {
       this.languageHelper.enableLanguage(languageCode);
+      LanguageSettingsMetricsProxyImpl.getInstance().recordSettingsMetric(
+          LanguageSettingsActionType.LANGUAGE_ADDED);
     });
   },
 
@@ -179,9 +183,9 @@ Polymer({
    */
   onKeydown_(e) {
     // Close dialog if 'esc' is pressed and the search box is already empty.
-    if (e.key == 'Escape' && !this.$.search.getValue().trim()) {
+    if (e.key === 'Escape' && !this.$.search.getValue().trim()) {
       this.$.dialog.close();
-    } else if (e.key != 'PageDown' && e.key != 'PageUp') {
+    } else if (e.key !== 'PageDown' && e.key !== 'PageUp') {
       this.$.search.scrollIntoViewIfNeeded();
     }
   },

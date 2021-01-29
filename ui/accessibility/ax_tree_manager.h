@@ -8,6 +8,7 @@
 #include "ui/accessibility/ax_export.h"
 #include "ui/accessibility/ax_node.h"
 #include "ui/accessibility/ax_tree_id.h"
+#include "ui/accessibility/ax_tree_observer.h"
 
 namespace ui {
 
@@ -26,6 +27,11 @@ class AX_EXPORT AXTreeManager {
   // Returns nullptr if |node_id| is not found.
   virtual AXNode* GetNodeFromTree(const AXNode::AXID node_id) const = 0;
 
+  // Use `AddObserver` and `RemoveObserver` when you want to be notified when
+  // changes happen to an `XTree`
+  virtual void AddObserver(AXTreeObserver* observer) {}
+  virtual void RemoveObserver(AXTreeObserver* observer) {}
+
   // Returns the tree id of the tree managed by this AXTreeManager.
   virtual AXTreeID GetTreeID() const = 0;
 
@@ -40,6 +46,10 @@ class AX_EXPORT AXTreeManager {
   // hosts the current tree. Returns nullptr if this tree doesn't have a parent
   // tree.
   virtual AXNode* GetParentNodeFromParentTreeAsAXNode() const = 0;
+
+  // Called when the tree manager is about to be removed from the tree map,
+  // `AXTreeManagerMap`.
+  virtual void WillBeRemovedFromMap() {}
 };
 
 }  // namespace ui

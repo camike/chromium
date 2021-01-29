@@ -37,16 +37,16 @@ class ChromeKeyboardControllerClient
       public session_manager::SessionManagerObserver {
  public:
   // Convenience observer allowing UI classes to observe the global instance of
-  // this class instead of setting up mojo bindings.
+  // this class.
   class Observer : public base::CheckedObserver {
    public:
     ~Observer() override = default;
 
-    // Forwards the 'OnKeyboardVisibilityChanged' mojo observer method.
+    // Forwards the 'OnKeyboardVisibilityChanged' observer method.
     // This is used by oobe and login to adjust the UI.
     virtual void OnKeyboardVisibilityChanged(bool visible) {}
 
-    // Forwards the 'OnKeyboardOccludedBoundsChanged' mojo observer method.
+    // Forwards the 'OnKeyboardOccludedBoundsChanged' observer method.
     // This is used to update the insets of browser and app windows when the
     // keyboard is shown.
     virtual void OnKeyboardOccludedBoundsChanged(
@@ -56,6 +56,9 @@ class ChromeKeyboardControllerClient
     // loaded. Note: if the content is already loaded when the observer is
     // added, this will not be triggered, but see is_keyboard_loaded().
     virtual void OnKeyboardLoaded() {}
+
+    // Forwards the 'OnKeyboardEnabledChanged' observer method.
+    virtual void OnKeyboardEnabledChanged(bool enabled) {}
   };
 
   // Creates the singleton instance for chrome or browser tests.
@@ -119,6 +122,7 @@ class ChromeKeyboardControllerClient
   bool SetAreaToRemainOnScreen(const gfx::Rect& bounds);
   void SetDraggableArea(const gfx::Rect& bounds);
   bool SetWindowBoundsInScreen(const gfx::Rect& bounds_in_screen);
+  void SetKeyboardConfigFromPref(bool enabled);
 
   // Returns true if overscroll is enabled by the config or command line.
   bool IsKeyboardOverscrollEnabled();
@@ -133,6 +137,12 @@ class ChromeKeyboardControllerClient
   bool is_keyboard_loaded() { return is_keyboard_loaded_; }
   bool is_keyboard_visible() { return is_keyboard_visible_; }
 
+  void set_keyboard_enabled_for_test(bool enabled) {
+    is_keyboard_enabled_ = enabled;
+  }
+  void set_keyboard_visible_for_test(bool visible) {
+    is_keyboard_visible_ = visible;
+  }
   void set_profile_for_test(Profile* profile) { profile_for_test_ = profile; }
   void set_virtual_keyboard_url_for_test(const GURL& url) {
     virtual_keyboard_url_for_test_ = url;

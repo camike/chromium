@@ -14,6 +14,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/media/webrtc/desktop_capture_devices_util.h"
 #include "chrome/browser/media/webrtc/desktop_media_picker_factory_impl.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
@@ -41,27 +42,28 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/origin_util.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/switches.h"
 #include "net/base/url_util.h"
+#include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_capture_types.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/origin.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "ash/shell.h"
+#include "chrome/browser/chromeos/policy/dlp/dlp_content_manager.h"
 #include "ui/base/ui_base_features.h"
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #include "chrome/browser/media/webrtc/system_media_capture_permissions_mac.h"
-#endif  // defined(OS_MACOSX)
+#endif  // defined(OS_MAC)
 
 using content::BrowserThread;
 
@@ -79,8 +81,9 @@ base::string16 GetApplicationTitle(content::WebContents* web_contents,
     return base::UTF8ToUTF16(title);
   }
   GURL url = web_contents->GetURL();
-  title = content::IsOriginSecure(url) ? net::GetHostAndOptionalPort(url)
-                                       : url.GetOrigin().spec();
+  title = network::IsUrlPotentiallyTrustworthy(url)
+              ? net::GetHostAndOptionalPort(url)
+              : url.GetOrigin().spec();
   return base::UTF8ToUTF16(title);
 }
 
@@ -172,11 +175,11 @@ void DesktopCaptureAccessHandler::ProcessScreenCaptureAccessRequest(
           switches::kEnableUserMediaScreenCapturing) ||
       MediaCaptureDevicesDispatcher::IsOriginForCasting(
           request.security_origin) ||
-      IsExtensionWhitelistedForScreenCapture(extension) ||
+      IsExtensionAllowedForScreenCapture(extension) ||
       IsBuiltInExtension(request.security_origin);
 
   const bool origin_is_secure =
-      content::IsOriginSecure(request.security_origin) ||
+      network::IsUrlPotentiallyTrustworthy(request.security_origin) ||
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kAllowHttpScreenCapture);
 
@@ -205,7 +208,6 @@ void DesktopCaptureAccessHandler::ProcessScreenCaptureAccessRequest(
 #else
     gfx::NativeWindow parent_window = NULL;
 #endif
-    web_contents = NULL;
 
     // Some extensions do not require user approval, because they provide their
     // own user approval UI.
@@ -230,14 +232,23 @@ void DesktopCaptureAccessHandler::ProcessScreenCaptureAccessRequest(
 
     if (is_approved) {
       content::DesktopMediaID screen_id;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
       screen_id = content::DesktopMediaID::RegisterNativeWindow(
           content::DesktopMediaID::TYPE_SCREEN,
-          ash::Shell::Get()->GetPrimaryRootWindow());
-#else   // defined(OS_CHROMEOS)
+          primary_root_window_for_testing_
+              ? primary_root_window_for_testing_
+              : ash::Shell::Get()->GetPrimaryRootWindow());
+      if (policy::DlpContentManager::Get()->IsScreenCaptureRestricted(
+              screen_id)) {
+        std::move(callback).Run(
+            devices, blink::mojom::MediaStreamRequestResult::PERMISSION_DENIED,
+            std::move(ui));
+        return;
+      }
+#else   // BUILDFLAG(IS_CHROMEOS_ASH)
       screen_id = content::DesktopMediaID(content::DesktopMediaID::TYPE_SCREEN,
                                           webrtc::kFullDesktopScreenId);
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
       bool capture_audio =
           (request.audio_type ==
@@ -272,7 +283,7 @@ bool DesktopCaptureAccessHandler::IsDefaultApproved(
   return extension &&
          (extension->location() == extensions::Manifest::COMPONENT ||
           extension->location() == extensions::Manifest::EXTERNAL_COMPONENT ||
-          IsExtensionWhitelistedForScreenCapture(extension));
+          IsExtensionAllowedForScreenCapture(extension));
 }
 
 bool DesktopCaptureAccessHandler::SupportsStreamType(
@@ -296,6 +307,7 @@ void DesktopCaptureAccessHandler::HandleRequest(
     const content::MediaStreamRequest& request,
     content::MediaResponseCallback callback,
     const extensions::Extension* extension) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   blink::MediaStreamDevices devices;
   std::unique_ptr<content::MediaStreamUI> ui;
 
@@ -325,7 +337,7 @@ void DesktopCaptureAccessHandler::HandleRequest(
   // If the device id wasn't specified then this is a screen capture request
   // (i.e. chooseDesktopMedia() API wasn't used to generate device id).
   if (request.requested_video_device_id.empty()) {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
     if (system_media_permissions::CheckSystemScreenCapturePermission() !=
         system_media_permissions::SystemPermission::kAllowed) {
       std::move(callback).Run(
@@ -367,7 +379,17 @@ void DesktopCaptureAccessHandler::HandleRequest(
         std::move(ui));
     return;
   }
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  {
+    if (policy::DlpContentManager::Get()->IsScreenCaptureRestricted(media_id)) {
+      std::move(callback).Run(
+          devices, blink::mojom::MediaStreamRequestResult::PERMISSION_DENIED,
+          std::move(ui));
+      return;
+    }
+  }
+#endif
+#if defined(OS_MAC)
   if (media_id.type != content::DesktopMediaID::TYPE_WEB_CONTENTS &&
       system_media_permissions::CheckSystemScreenCapturePermission() !=
           system_media_permissions::SystemPermission::kAllowed) {
@@ -378,6 +400,17 @@ void DesktopCaptureAccessHandler::HandleRequest(
     return;
   }
 #endif
+
+  if (media_id.type == content::DesktopMediaID::TYPE_WEB_CONTENTS &&
+      !content::WebContents::FromRenderFrameHost(
+          content::RenderFrameHost::FromID(
+              media_id.web_contents_id.render_process_id,
+              media_id.web_contents_id.main_render_frame_id))) {
+    std::move(callback).Run(
+        devices, blink::mojom::MediaStreamRequestResult::TAB_CAPTURE_FAILURE,
+        std::move(ui));
+    return;
+  }
 
   bool loopback_audio_supported = false;
 #if defined(USE_CRAS) || defined(OS_WIN)
@@ -437,7 +470,7 @@ void DesktopCaptureAccessHandler::ProcessChangeSourceRequest(
   if (!base::FeatureList::IsEnabled(
           features::kDesktopCaptureTabSharingInfobar) ||
       request.requested_video_device_id.empty()) {
-    picker = picker_factory_->CreatePicker();
+    picker = picker_factory_->CreatePicker(&request);
     if (!picker) {
       std::move(callback).Run(
           blink::MediaStreamDevices(),

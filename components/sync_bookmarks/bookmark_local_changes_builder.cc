@@ -47,6 +47,19 @@ syncer::CommitRequestDataList BookmarkLocalChangesBuilder::BuildCommitRequests(
     data->creation_time = syncer::ProtoTimeToTime(metadata->creation_time());
     data->modification_time =
         syncer::ProtoTimeToTime(metadata->modification_time());
+
+    if (entity->has_final_guid() &&
+        bookmark_tracker_->bookmark_client_tags_in_protocol_enabled()) {
+      DCHECK(!metadata->client_tag_hash().empty());
+      data->client_tag_hash =
+          syncer::ClientTagHash::FromHashed(metadata->client_tag_hash());
+      DCHECK(metadata->is_deleted() ||
+             data->client_tag_hash ==
+                 syncer::ClientTagHash::FromUnhashed(
+                     syncer::BOOKMARKS,
+                     entity->bookmark_node()->guid().AsLowercaseString()));
+    }
+
     if (!metadata->is_deleted()) {
       const bookmarks::BookmarkNode* node = entity->bookmark_node();
       // Skip current entity if its favicon is not loaded yet. It will be
@@ -56,7 +69,9 @@ syncer::CommitRequestDataList BookmarkLocalChangesBuilder::BuildCommitRequests(
           !node->is_permanent_node() &&
           base::FeatureList::IsEnabled(
               switches::kSyncDoNotCommitBookmarksWithoutFavicon)) {
-        // Force the favicon to be loaded.
+        // Force the favicon to be loaded. The worker will be nudged for commit
+        // in BookmarkModelObserverImpl::BookmarkNodeFaviconChanged() once
+        // favicon is loaded.
         bookmark_model_->GetFavicon(node);
         continue;
       }
@@ -68,7 +83,7 @@ syncer::CommitRequestDataList BookmarkLocalChangesBuilder::BuildCommitRequests(
       data->parent_id = parent_entity->metadata()->server_id();
       // TODO(crbug.com/516866): Double check that custom passphrase works well
       // with this implementation, because:
-      // 1. NonBlockingTypeCommitContribution::AdjustCommitProto() clears the
+      // 1. syncer::CommitContributionImpl::AdjustCommitProto() clears the
       //    title out.
       // 2. Bookmarks (maybe ancient legacy bookmarks only?) use/used |name| to
       //    encode the title.

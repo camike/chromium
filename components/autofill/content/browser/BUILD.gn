@@ -2,10 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/jumbo.gni")
 import("//third_party/protobuf/proto_library.gni")
 
-jumbo_static_library("browser") {
+static_library("browser") {
   sources = [
     "autofill_log_router_factory.cc",
     "autofill_log_router_factory.h",
@@ -35,6 +34,7 @@ jumbo_static_library("browser") {
     "//components/resources",
     "//components/strings",
     "//components/user_prefs",
+    "//components/version_info",
     "//content/public/browser",
     "//content/public/common",
     "//gpu/config",
@@ -78,6 +78,7 @@ source_set("unit_tests") {
     "//components/autofill/core/browser",
     "//components/autofill/core/browser:test_support",
     "//components/autofill/core/common",
+    "//components/version_info",
     "//content/public/browser",
     "//content/public/common",
     "//content/test:test_support",

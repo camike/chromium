@@ -14,13 +14,20 @@ enum class Gesture;
 }  // namespace mojom
 }  // namespace ax
 
+namespace chromeos {
+enum class Sound;
+}
+
 namespace gfx {
 class Point;
+class PointF;
+class Rect;
 }  // namespace gfx
 
 namespace ash {
 
 enum class AccessibilityAlert;
+enum class SelectToSpeakPanelAction;
 
 // Interface for Ash to request accessibility service from its client, Chrome.
 class ASH_PUBLIC_EXPORT AccessibilityControllerClient {
@@ -36,7 +43,7 @@ class ASH_PUBLIC_EXPORT AccessibilityControllerClient {
   // that their mapped event has occurred. The |sound_key| enums can be found in
   // chromeos/audio/chromeos_sounds.h. This method exists because the browser
   // owns all media playback.
-  virtual void PlayEarcon(int sound_key) = 0;
+  virtual void PlayEarcon(chromeos::Sound sound_key) = 0;
 
   // Initiates play of shutdown sound and returns sound duration. This method
   // exists because the browser owns all media playback.
@@ -44,7 +51,8 @@ class ASH_PUBLIC_EXPORT AccessibilityControllerClient {
 
   // Forwards an accessibility gesture from the touch exploration controller to
   // ChromeVox.
-  virtual void HandleAccessibilityGesture(ax::mojom::Gesture gesture) = 0;
+  virtual void HandleAccessibilityGesture(ax::mojom::Gesture gesture,
+                                          gfx::PointF location) = 0;
 
   // Starts or stops dictation (type what you speak).
   // Returns the new dictation state after the toggle.
@@ -75,10 +83,25 @@ class ASH_PUBLIC_EXPORT AccessibilityControllerClient {
   // Select-to-Speak is speaking, cancel speaking and move to inactive state.
   virtual void RequestSelectToSpeakStateChange() = 0;
 
-  // Requests that the Automatic Clicks extension get the nearest scrollable
+  // Requests that the Accessibility Common extension get the nearest scrollable
   // bounds to the given point in screen coordinates.
   virtual void RequestAutoclickScrollableBoundsForPoint(
       gfx::Point& point_in_screen) = 0;
+
+  // Dispatches update to Accessibility Common extension when magnifier bounds
+  // have changed.
+  virtual void MagnifierBoundsChanged(const gfx::Rect& bounds_in_screen) = 0;
+
+  // Called when Switch Access is fully disabled by the user accepting the
+  // disable dialog. Switch Access must be left running when the pref changes
+  // and before the disable dialog is accepted, so that users can use Switch
+  // Access to cancel or accept the dialog.
+  virtual void OnSwitchAccessDisabled() = 0;
+
+  // Called when an action occurs (such as button click) on the Select-to-speak
+  // floating control panel, with an optional value.
+  virtual void OnSelectToSpeakPanelAction(SelectToSpeakPanelAction action,
+                                          double value) = 0;
 };
 
 }  // namespace ash

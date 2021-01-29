@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/file_manager/file_manager_jstest_base.h"
+#include "content/public/test/browser_test.h"
 
 class VideoPlayerJsTest : public FileManagerJsTestBase {
  protected:
@@ -12,5 +13,5 @@ class VideoPlayerJsTest : public FileManagerJsTestBase {
 };
 
 IN_PROC_BROWSER_TEST_F(VideoPlayerJsTest, SaveResumePlaybackTest) {
-  RunTestURL("video_player_native_controls_unittest_gen.html");
+  RunTestURL("video_player_native_controls_unittest.m_gen.html");
 }

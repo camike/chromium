@@ -14,7 +14,6 @@
 #include "base/time/default_tick_clock.h"
 #include "build/build_config.h"
 #include "chrome/browser/sessions/session_restore.h"
-#include "chrome/browser/sessions/session_restore_stats_collector.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "components/favicon/content/content_favicon_driver.h"
@@ -107,9 +106,7 @@ void TabLoader::RestoreTabs(const std::vector<RestoredTab>& tabs,
   TRACE_EVENT0("browser", "TabLoader::RestoreTabs");
 
   if (!shared_tab_loader_)
-    shared_tab_loader_ = new TabLoader(restore_started);
-
-  shared_tab_loader_->stats_collector_->TrackTabs(tabs);
+    shared_tab_loader_ = new TabLoader();
 
   // TODO(chrisha): Mix overlapping session tab restore priorities. Right now
   // the lowest priority tabs from the first session restore will load before
@@ -198,14 +195,12 @@ void TabLoader::SetAllTabsScored(bool all_tabs_scored) {
     OnIsLoadingEnabledChanged();
 }
 
-TabLoader::TabLoader(base::TimeTicks restore_started)
+TabLoader::TabLoader()
     : memory_pressure_listener_(
-          base::Bind(&TabLoader::OnMemoryPressure, base::Unretained(this))),
+          FROM_HERE,
+          base::BindRepeating(&TabLoader::OnMemoryPressure,
+                              base::Unretained(this))),
       clock_(GetDefaultTickClock()) {
-  stats_collector_ = new SessionRestoreStatsCollector(
-      restore_started,
-      std::make_unique<
-          SessionRestoreStatsCollector::UmaStatsReportingDelegate>());
   shared_tab_loader_ = this;
   this_retainer_ = this;
   TabLoadTracker::Get()->AddObserver(this);
@@ -527,7 +522,6 @@ void TabLoader::MarkTabAsDeferred(content::WebContents* contents) {
   DCHECK(it != tabs_to_load_.end());
   tabs_to_load_.erase(it);
   delegate_->RemoveTabForScoring(contents);
-  stats_collector_->DeferTab(&contents->GetController());
 }
 
 void TabLoader::MaybeLoadSomeTabs() {
@@ -590,7 +584,6 @@ void TabLoader::StopLoadingTabs() {
   for (auto score_content_pair : tabs_to_load_) {
     auto* contents = score_content_pair.second;
     delegate_->RemoveTabForScoring(contents);
-    stats_collector_->DeferTab(&contents->GetController());
   }
 
   // Clear out the remaining tabs to load and clean ourselves up.
@@ -639,7 +632,6 @@ void TabLoader::LoadNextTab(bool due_to_timeout) {
   if (!contents)
     return;
 
-  stats_collector_->OnWillLoadNextTab(due_to_timeout);
   MarkTabAsLoadInitiated(contents);
   StartTimerIfNeeded();
 

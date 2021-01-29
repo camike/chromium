@@ -6,7 +6,6 @@
 
 #include <string>
 
-#include "base/logging.h"
 #include "base/strings/string16.h"
 #import "base/test/ios/wait_util.h"
 #include "base/time/time.h"
@@ -15,17 +14,17 @@
 #include "components/autofill/core/browser/test_personal_data_manager.h"
 #import "components/autofill/ios/browser/autofill_agent.h"
 #include "components/autofill/ios/browser/autofill_driver_ios.h"
+#include "components/autofill/ios/form_util/unique_id_data_tab_helper.h"
 #include "components/prefs/pref_service.h"
 #import "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #include "ios/chrome/browser/infobars/infobar_manager_impl.h"
 #include "ios/chrome/browser/ui/autofill/card_unmask_prompt_view_bridge.h"
 #import "ios/chrome/browser/ui/autofill/chrome_autofill_client_ios.h"
 #import "ios/chrome/test/scoped_key_window.h"
-#import "ios/web/public/deprecated/crw_test_js_injection_receiver.h"
 #import "ios/web/public/js_messaging/web_frames_manager.h"
 #include "ios/web/public/test/fakes/fake_web_frame.h"
 #import "ios/web/public/test/fakes/fake_web_frames_manager.h"
-#import "ios/web/public/test/fakes/test_web_state.h"
+#import "ios/web/public/test/fakes/fake_web_state.h"
 #include "ios/web/public/test/web_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -46,7 +45,9 @@ class FakeResultDelegate
       const autofill::CreditCard& card,
       const base::string16& cvc) override {}
 
-  void OnFullCardRequestFailed() override {}
+  void OnFullCardRequestFailed(
+      autofill::payments::FullCardRequest::FailureType /* failure_type */)
+      override {}
 
   base::WeakPtr<FakeResultDelegate> GetWeakPtr() {
     return weak_ptr_factory_.GetWeakPtr();
@@ -72,19 +73,15 @@ class PaymentRequestFullCardRequesterTest : public PlatformTest {
 
     AddCreditCard(autofill::test::GetCreditCard());  // Visa.
 
-    // Set up what is needed to have an instance of autofill::AutofillManager.
-    CRWTestJSInjectionReceiver* injectionReceiver =
-        [[CRWTestJSInjectionReceiver alloc] init];
-    web_state()->SetJSInjectionReceiver(injectionReceiver);
-
     auto frames_manager = std::make_unique<web::FakeWebFramesManager>();
-    auto main_frame = std::make_unique<web::FakeWebFrame>(
-        /*frame_id=*/"main", /*is_main_frame=*/true,
+    auto main_frame = std::make_unique<web::FakeMainWebFrame>(
         /*security_origin=*/GURL());
     frames_manager->AddWebFrame(std::move(main_frame));
     web_state()->SetWebFramesManager(std::move(frames_manager));
     web_state()->OnWebFrameDidBecomeAvailable(
         web_state()->GetWebFramesManager()->GetMainWebFrame());
+
+    UniqueIDDataTabHelper::CreateForWebState(web_state());
 
     autofill_agent_ =
         [[AutofillAgent alloc] initWithPrefService:browser_state()->GetPrefs()
@@ -112,7 +109,7 @@ class PaymentRequestFullCardRequesterTest : public PlatformTest {
     personal_data_manager_.AddCreditCard(card);
   }
 
-  web::TestWebState* web_state() { return &web_state_; }
+  web::FakeWebState* web_state() { return &web_state_; }
 
   TestChromeBrowserState* browser_state() {
     return chrome_browser_state_.get();
@@ -125,7 +122,7 @@ class PaymentRequestFullCardRequesterTest : public PlatformTest {
  private:
   web::WebTaskEnvironment task_environment_;
   std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
-  web::TestWebState web_state_;
+  web::FakeWebState web_state_;
   autofill::TestPersonalDataManager personal_data_manager_;
 
   std::unique_ptr<autofill::ChromeAutofillClientIOS> autofill_client_;

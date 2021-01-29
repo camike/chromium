@@ -23,8 +23,7 @@ namespace tray {
 // A header row for sections in network detailed view which contains a title and
 // a toggle button to turn on/off the section. Subclasses are given the
 // opportunity to add extra buttons before the toggle button is added.
-class NetworkSectionHeaderView : public views::View,
-                                 public views::ButtonListener {
+class NetworkSectionHeaderView : public views::View {
  public:
   explicit NetworkSectionHeaderView(int title_id);
   ~NetworkSectionHeaderView() override = default;
@@ -56,12 +55,11 @@ class NetworkSectionHeaderView : public views::View,
   // views::View:
   int GetHeightForWidth(int width) const override;
 
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
  private:
   void InitializeLayout();
   void AddToggleButton(bool enabled);
+
+  void ToggleButtonPressed();
 
   // Resource ID for the string to use as the title of the section and for the
   // accessible text on the section header toggle button.
@@ -103,6 +101,9 @@ class MobileSectionHeaderView : public NetworkSectionHeaderView {
  private:
   // NetworkListView::NetworkSectionHeaderView:
   void OnToggleToggled(bool is_on) override;
+  void AddExtraButtons(bool enabled) override;
+
+  void AddCellularButtonPressed();
 
   // When Tether is disabled because Bluetooth is off, then enabling Bluetooth
   // will enable Tether. If enabling Bluetooth takes longer than some timeout
@@ -134,7 +135,8 @@ class WifiSectionHeaderView : public NetworkSectionHeaderView {
   // NetworkSectionHeaderView:
   void OnToggleToggled(bool is_on) override;
   void AddExtraButtons(bool enabled) override;
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
+
+  void JoinButtonPressed();
 
   // A button to invoke "Join Wi-Fi network" dialog.
   views::Button* join_button_ = nullptr;

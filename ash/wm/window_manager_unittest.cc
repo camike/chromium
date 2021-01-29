@@ -5,6 +5,7 @@
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/test/test_window_builder.h"
 #include "ash/wm/test_activation_delegate.h"
 #include "ash/wm/window_util.h"
 #include "ui/aura/client/aura_constants.h"
@@ -16,8 +17,8 @@
 #include "ui/aura/test/test_windows.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/cursor/cursor_size.h"
+#include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
 #include "ui/base/hit_test.h"
-#include "ui/base/mojom/cursor_type.mojom-shared.h"
 #include "ui/display/screen.h"
 #include "ui/events/event.h"
 #include "ui/events/event_sink.h"
@@ -133,8 +134,10 @@ TEST_F(WindowManagerTest, Focus) {
   // Supplied ids are negative so as not to collide with shell ids.
   // TODO(beng): maybe introduce a MAKE_SHELL_ID() macro that generates a safe
   //             id beyond shell id max?
-  std::unique_ptr<aura::Window> w1(
-      CreateTestWindowInShell(SK_ColorWHITE, -1, gfx::Rect(10, 10, 500, 500)));
+  std::unique_ptr<aura::Window> w1 = TestWindowBuilder()
+                                         .SetColorWindowDelegate(SK_ColorWHITE)
+                                         .SetBounds(gfx::Rect(10, 10, 500, 500))
+                                         .Build();
   std::unique_ptr<aura::Window> w11(aura::test::CreateTestWindow(
       SK_ColorGREEN, -11, gfx::Rect(5, 5, 100, 100), w1.get()));
   std::unique_ptr<aura::Window> w111(aura::test::CreateTestWindow(
@@ -177,9 +180,8 @@ TEST_F(WindowManagerTest, Focus) {
   // Touch on a sub-window (w122) to focus it.
   gfx::Point click_point = w122->bounds().CenterPoint();
   aura::Window::ConvertPointToTarget(w122->parent(), root_window, &click_point);
-  ui::TouchEvent touchev(
-      ui::ET_TOUCH_PRESSED, click_point, getTime(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+  ui::TouchEvent touchev(ui::ET_TOUCH_PRESSED, click_point, getTime(),
+                         ui::PointerDetails(ui::EventPointerType::kTouch, 0));
   details = sink->OnEventFromSource(&touchev);
   ASSERT_FALSE(details.dispatcher_destroyed);
   focus_client = aura::client::GetFocusClient(w122.get());
@@ -434,9 +436,8 @@ TEST_F(WindowManagerTest, ActivateOnTouch) {
   // Touch window2.
   gfx::Point press_point = w2->bounds().CenterPoint();
   aura::Window::ConvertPointToTarget(w2->parent(), root_window, &press_point);
-  ui::TouchEvent touchev1(
-      ui::ET_TOUCH_PRESSED, press_point, getTime(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
+  ui::TouchEvent touchev1(ui::ET_TOUCH_PRESSED, press_point, getTime(),
+                          ui::PointerDetails(ui::EventPointerType::kTouch, 0));
 
   ui::EventSink* sink = root_window->GetHost()->event_sink();
   ui::EventDispatchDetails details = sink->OnEventFromSource(&touchev1);
@@ -456,9 +457,8 @@ TEST_F(WindowManagerTest, ActivateOnTouch) {
   press_point = w1->bounds().CenterPoint();
   aura::Window::ConvertPointToTarget(w1->parent(), root_window, &press_point);
   d1.set_activate(false);
-  ui::TouchEvent touchev2(
-      ui::ET_TOUCH_PRESSED, press_point, getTime(),
-      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 1));
+  ui::TouchEvent touchev2(ui::ET_TOUCH_PRESSED, press_point, getTime(),
+                          ui::PointerDetails(ui::EventPointerType::kTouch, 1));
   details = sink->OnEventFromSource(&touchev2);
   ASSERT_FALSE(details.dispatcher_destroyed);
 
@@ -650,8 +650,8 @@ TEST_F(WindowManagerTest, AdditionalFilters) {
   aura::Window* root_window = Shell::GetPrimaryRootWindow();
 
   // Creates a window and make it active
-  std::unique_ptr<aura::Window> w1(
-      CreateTestWindowInShell(SK_ColorWHITE, -1, gfx::Rect(0, 0, 100, 100)));
+  std::unique_ptr<aura::Window> w1 =
+      TestWindowBuilder().SetBounds(gfx::Rect(0, 0, 100, 100)).Build();
   wm::ActivateWindow(w1.get());
 
   // Creates two addition filters
@@ -794,8 +794,10 @@ TEST_F(WindowManagerTest, TestCursorClientObserver) {
   ui::test::EventGenerator* generator = GetEventGenerator();
   ::wm::CursorManager* cursor_manager = Shell::Get()->cursor_manager();
 
-  std::unique_ptr<aura::Window> w1(
-      CreateTestWindowInShell(SK_ColorWHITE, -1, gfx::Rect(0, 0, 100, 100)));
+  std::unique_ptr<aura::Window> w1 = TestWindowBuilder()
+                                         .SetColorWindowDelegate(SK_ColorWHITE)
+                                         .SetBounds(gfx::Rect(0, 0, 100, 100))
+                                         .Build();
   wm::ActivateWindow(w1.get());
 
   // Add two observers. Both should have OnCursorVisibilityChanged()

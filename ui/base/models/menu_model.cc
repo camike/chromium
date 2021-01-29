@@ -19,6 +19,14 @@ bool MenuModel::IsVisibleAt(int index) const {
   return true;
 }
 
+bool MenuModel::IsAlertedAt(int index) const {
+  return false;
+}
+
+bool MenuModel::IsNewFeatureAt(int index) const {
+  return false;
+}
+
 // static
 bool MenuModel::GetModelAndIndexForCommandId(int command_id,
                                              MenuModel** model,
@@ -52,8 +60,16 @@ base::string16 MenuModel::GetMinorTextAt(int index) const {
   return base::string16();
 }
 
+base::string16 MenuModel::GetSecondaryLabelAt(int index) const {
+  return base::string16();
+}
+
 ImageModel MenuModel::GetMinorIconAt(int index) const {
   return ImageModel();
+}
+
+bool MenuModel::MayHaveMnemonicsAt(int index) const {
+  return true;
 }
 
 const gfx::FontList* MenuModel::GetLabelFontListAt(int index) const {

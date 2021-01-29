@@ -91,18 +91,6 @@ void DeviceLocalAccountExternalPolicyLoader::OnExtensionListsUpdated(
     LoadFinished(std::move(prefs_));
 }
 
-void DeviceLocalAccountExternalPolicyLoader::OnExtensionLoadedInCache(
-    const std::string& id) {}
-
-void DeviceLocalAccountExternalPolicyLoader::OnExtensionDownloadFailed(
-    const std::string& id) {}
-
-std::string
-DeviceLocalAccountExternalPolicyLoader::GetInstalledExtensionVersion(
-    const std::string& id) {
-  return std::string();
-}
-
 ExternalCache*
 DeviceLocalAccountExternalPolicyLoader::GetExternalCacheForTesting() {
   return external_cache_.get();
@@ -118,7 +106,7 @@ void DeviceLocalAccountExternalPolicyLoader::UpdateExtensionListFromStore() {
   const policy::PolicyMap& policy_map = store_->policy_map();
   // TODO(binjin): Use two policy handlers here after
   // ExtensionManagementPolicyHandler is introduced.
-  extensions::ExtensionInstallForcelistPolicyHandler policy_handler;
+  extensions::ExtensionInstallForceListPolicyHandler policy_handler;
   if (policy_handler.CheckPolicySettings(policy_map, NULL)) {
     PrefValueMap pref_value_map;
     policy_handler.ApplyPolicySettings(policy_map, &pref_value_map);

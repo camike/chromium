@@ -12,16 +12,18 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/pickle.h"
-#include "base/stl_util.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/apps/app_service/launch_utils.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
@@ -31,6 +33,7 @@
 #include "chrome/browser/sessions/session_common_utils.h"
 #include "chrome/browser/sessions/session_data_deleter.h"
 #include "chrome/browser/sessions/session_restore.h"
+#include "chrome/browser/sessions/session_service_log.h"
 #include "chrome/browser/sessions/session_service_utils.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -43,23 +46,24 @@
 #include "chrome/browser/web_applications/components/web_app_helpers.h"
 #include "components/sessions/content/content_serialized_navigation_builder.h"
 #include "components/sessions/content/session_tab_helper.h"
+#include "components/sessions/core/command_storage_manager.h"
 #include "components/sessions/core/session_command.h"
 #include "components/sessions/core/session_constants.h"
 #include "components/sessions/core/session_types.h"
-#include "components/sessions/core/snapshotting_command_storage_manager.h"
 #include "components/sessions/core/tab_restore_service.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "components/tab_groups/tab_group_visual_data.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/web_contents.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/chromeos/crostini/crostini_util.h"
 #endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #include "chrome/browser/app_controller_mac.h"
 #endif
 
@@ -76,37 +80,24 @@ static const int kWritesPerReset = 250;
 
 SessionService::SessionService(Profile* profile)
     : profile_(profile),
-      should_use_delayed_save_(true),
       command_storage_manager_(
-          std::make_unique<sessions::SnapshottingCommandStorageManager>(
-              sessions::SnapshottingCommandStorageManager::SESSION_RESTORE,
+          std::make_unique<sessions::CommandStorageManager>(
+              sessions::CommandStorageManager::kSessionRestore,
               profile->GetPath(),
-              this)),
-      has_open_trackable_browsers_(false),
-      move_on_new_browser_(false),
-      force_browser_not_alive_with_no_windows_(false),
-      rebuild_on_next_save_(false) {
+              this)) {
   // We should never be created when incognito.
   DCHECK(!profile->IsOffTheRecord());
-  Init();
-}
-
-SessionService::SessionService(const base::FilePath& save_path)
-    : profile_(nullptr),
-      should_use_delayed_save_(false),
-      command_storage_manager_(
-          std::make_unique<sessions::SnapshottingCommandStorageManager>(
-              sessions::SnapshottingCommandStorageManager::SESSION_RESTORE,
-              save_path,
-              this)),
-      has_open_trackable_browsers_(false),
-      move_on_new_browser_(false),
-      force_browser_not_alive_with_no_windows_(false),
-      rebuild_on_next_save_(false) {
-  Init();
+  BrowserList::AddObserver(this);
+  registrar_.Add(this, chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST,
+                 content::NotificationService::AllSources());
 }
 
 SessionService::~SessionService() {
+  // Certain code paths explicitly destroy the SessionService as part of
+  // shutdown.
+  if (!did_log_exit_)
+    LogExitEvent();
+
   // The BrowserList should outlive the SessionService since it's static and
   // the SessionService is a KeyedService.
   BrowserList::RemoveObserver(this);
@@ -117,19 +108,19 @@ bool SessionService::ShouldNewWindowStartSession() {
   // ChromeOS and OSX have different ideas of application lifetime than
   // the other platforms.
   // On ChromeOS opening a new window should never start a new session.
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (!force_browser_not_alive_with_no_windows_)
     return false;
 #endif
   if (!has_open_trackable_browsers_ &&
       !StartupBrowserCreator::InSynchronousProfileLaunch() &&
       !SessionRestore::IsRestoring(profile())
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
       // On OSX, a new window should not start a new session if it was opened
       // from the dock or the menubar.
       && !app_controller_mac::IsOpeningNewWindow()
-#endif  // OS_MACOSX
-      ) {
+#endif  // OS_MAC
+  ) {
     return true;
   }
   return false;
@@ -149,6 +140,8 @@ void SessionService::MoveCurrentSessionToLastSession() {
   pending_window_close_ids_.clear();
 
   command_storage_manager_->MoveCurrentSessionToLastSession();
+  // TODO(https://crbug.com/1163158): this needs to call
+  // ScheduleResetCommands().
 }
 
 void SessionService::DeleteLastSession() {
@@ -272,6 +265,11 @@ void SessionService::WindowOpened(Browser* browser) {
   RestoreIfNecessary(std::vector<GURL>(), browser);
   SetWindowType(browser->session_id(), browser->type());
   SetWindowAppName(browser->session_id(), browser->app_name());
+
+  // Save a browser workspace after window is created in `Browser()`.
+  // Bento desks restore feature in ash requires this line to restore correctly
+  // after creating a new browser window in a particular desk.
+  SetWindowWorkspace(browser->session_id(), browser->window()->GetWorkspace());
 }
 
 void SessionService::WindowClosing(const SessionID& window_id) {
@@ -314,10 +312,12 @@ void SessionService::WindowClosing(const SessionID& window_id) {
       }
     }
   }
-  if (use_pending_close)
+  if (use_pending_close) {
+    LogExitEvent();
     pending_window_close_ids_.insert(window_id);
-  else
+  } else {
     window_closing_ids_.insert(window_id);
+  }
 }
 
 void SessionService::WindowClosed(const SessionID& window_id) {
@@ -337,10 +337,12 @@ void SessionService::WindowClosed(const SessionID& window_id) {
              pending_window_close_ids_.end()) {
     // We'll hit this if user closed the last tab in a window.
     has_open_trackable_browsers_ = HasOpenTrackableBrowsers(window_id);
-    if (!has_open_trackable_browsers_)
+    if (!has_open_trackable_browsers_) {
+      LogExitEvent();
       pending_window_close_ids_.insert(window_id);
-    else
+    } else {
       ScheduleCommand(sessions::CreateWindowClosedCommand(window_id));
+    }
   }
   MaybeDeleteSessionOnlyData();
 }
@@ -410,6 +412,15 @@ void SessionService::SetWindowAppName(
   ScheduleCommand(sessions::CreateSetWindowAppNameCommand(window_id, app_name));
 }
 
+void SessionService::SetWindowUserTitle(const SessionID& window_id,
+                                        const std::string& user_title) {
+  if (!ShouldTrackChangesToWindow(window_id))
+    return;
+
+  ScheduleCommand(
+      sessions::CreateSetWindowUserTitleCommand(window_id, user_title));
+}
+
 void SessionService::TabRestored(WebContents* tab, bool pinned) {
   sessions::SessionTabHelper* session_tab_helper =
       sessions::SessionTabHelper::FromWebContents(tab);
@@ -456,15 +467,12 @@ void SessionService::SetLastActiveTime(const SessionID& window_id,
       sessions::CreateLastActiveTimeCommand(tab_id, last_active_time));
 }
 
-base::CancelableTaskTracker::TaskId SessionService::GetLastSession(
-    sessions::GetLastSessionCallback callback,
-    base::CancelableTaskTracker* tracker) {
+void SessionService::GetLastSession(sessions::GetLastSessionCallback callback) {
   // OnGotSessionCommands maps the SessionCommands to browser state, then run
   // the callback.
-  return command_storage_manager_->ScheduleGetLastSessionCommands(
+  return command_storage_manager_->GetLastSessionCommands(
       base::BindOnce(&SessionService::OnGotSessionCommands,
-                     weak_factory_.GetWeakPtr(), std::move(callback)),
-      tracker);
+                     weak_factory_.GetWeakPtr(), std::move(callback)));
 }
 
 bool SessionService::ShouldUseDelayedSave() {
@@ -473,6 +481,11 @@ bool SessionService::ShouldUseDelayedSave() {
 
 void SessionService::OnWillSaveCommands() {
   RebuildCommandsIfRequired();
+}
+
+void SessionService::OnErrorWritingSessionCommands() {
+  // TODO(https://crbug.com/648266): implement this.
+  NOTIMPLEMENTED();
 }
 
 void SessionService::RebuildCommandsIfRequired() {
@@ -576,13 +589,9 @@ void SessionService::TabNavigationPathEntriesDeleted(const SessionID& window_id,
   command_storage_manager_->StartSaveTimer();
 }
 
-void SessionService::Init() {
-  BrowserList::AddObserver(this);
-}
-
 bool SessionService::ShouldRestoreWindowOfType(
     sessions::SessionWindow::WindowType window_type) const {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Restore apps and app popups for ChromeOS alone.
   if (window_type == sessions::SessionWindow::TYPE_APP ||
       window_type == sessions::SessionWindow::TYPE_APP_POPUP)
@@ -632,6 +641,14 @@ bool SessionService::RestoreIfNecessary(const std::vector<GURL>& urls_to_open,
   return false;
 }
 
+void SessionService::Observe(int type,
+                             const content::NotificationSource& source,
+                             const content::NotificationDetails& details) {
+  // NOTE: this is necessary for the session-ending code path.
+  DCHECK_EQ(type, chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST);
+  LogExitEvent();
+}
+
 void SessionService::OnBrowserSetLastActive(Browser* browser) {
   if (ShouldTrackBrowser(browser))
     ScheduleCommand(
@@ -640,7 +657,8 @@ void SessionService::OnBrowserSetLastActive(Browser* browser) {
 
 void SessionService::OnGotSessionCommands(
     sessions::GetLastSessionCallback callback,
-    std::vector<std::unique_ptr<sessions::SessionCommand>> commands) {
+    std::vector<std::unique_ptr<sessions::SessionCommand>> commands,
+    bool read_error) {
   std::vector<std::unique_ptr<sessions::SessionWindow>> valid_windows;
   SessionID active_window_id = SessionID::InvalidValue();
 
@@ -648,7 +666,8 @@ void SessionService::OnGotSessionCommands(
                                        &active_window_id);
   RemoveUnusedRestoreWindows(&valid_windows);
 
-  std::move(callback).Run(std::move(valid_windows), active_window_id);
+  std::move(callback).Run(std::move(valid_windows), active_window_id,
+                          read_error);
 }
 
 void SessionService::BuildCommandsForTab(
@@ -763,8 +782,15 @@ void SessionService::BuildCommandsForBrowser(
                                                 browser->app_name()));
   }
 
-  sessions::CreateSetWindowWorkspaceCommand(
-      browser->session_id(), browser->window()->GetWorkspace());
+  if (!browser->user_title().empty()) {
+    command_storage_manager_->AppendRebuildCommand(
+        sessions::CreateSetWindowUserTitleCommand(browser->session_id(),
+                                                  browser->user_title()));
+  }
+
+  command_storage_manager_->AppendRebuildCommand(
+      sessions::CreateSetWindowWorkspaceCommand(
+          browser->session_id(), browser->window()->GetWorkspace()));
 
   windows_to_track->insert(browser->session_id());
   TabStripModel* tab_strip = browser->tab_strip_model();
@@ -833,6 +859,7 @@ void SessionService::ScheduleCommand(
   DCHECK(command);
   if (ReplacePendingCommand(command_storage_manager_.get(), &command))
     return;
+
   bool is_closing_command = IsClosingCommand(command.get());
   command_storage_manager_->ScheduleCommand(std::move(command));
   // Don't schedule a reset on tab closed/window closed. Otherwise we may
@@ -857,12 +884,13 @@ void SessionService::CommitPendingCloses() {
     ScheduleCommand(sessions::CreateWindowClosedCommand(*i));
   }
   pending_window_close_ids_.clear();
+
+  RemoveExitEvent();
 }
 
 bool SessionService::IsOnlyOneTabLeft() const {
-  if (!profile() || profile()->AsTestingProfile()) {
+  if (profile()->AsTestingProfile())
     return is_only_one_tab_left_for_test_;
-  }
 
   int window_count = 0;
   for (auto* browser : *BrowserList::GetInstance()) {
@@ -882,9 +910,8 @@ bool SessionService::IsOnlyOneTabLeft() const {
 
 bool SessionService::HasOpenTrackableBrowsers(
     const SessionID& window_id) const {
-  if (!profile() || profile()->AsTestingProfile()) {
+  if (profile()->AsTestingProfile())
     return has_open_trackable_browser_for_test_;
-  }
 
   for (auto* browser : *BrowserList::GetInstance()) {
     const SessionID browser_id = browser->session_id();
@@ -905,12 +932,20 @@ bool SessionService::ShouldTrackChangesToWindow(
 bool SessionService::ShouldTrackBrowser(Browser* browser) const {
   if (browser->profile() != profile())
     return false;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Do not track Crostini apps or terminal.  Apps will fail since VMs are not
   // restarted on restore, and we don't want terminal to force the VM to start.
   if (crostini::CrostiniAppIdFromAppName(browser->app_name()) ||
       web_app::GetAppIdFromApplicationName(browser->app_name()) ==
-          crostini::GetTerminalId()) {
+          crostini::kCrostiniTerminalSystemAppId) {
+    return false;
+  }
+
+  // System Web App windows can't be properly restored without storing the app
+  // type. Until that is implemented we skip them for session restore.
+  // TODO(crbug.com/1003170): Enable session restore for System Web Apps.
+  if (browser->app_controller() &&
+      browser->app_controller()->is_for_system_web_app()) {
     return false;
   }
 
@@ -931,7 +966,7 @@ bool SessionService::ShouldTrackBrowser(Browser* browser) const {
 void SessionService::MaybeDeleteSessionOnlyData() {
   // Don't try anything if we're testing.  The browser_process is not fully
   // created and DeleteSession will crash if we actually attempt it.
-  if (!profile() || profile()->AsTestingProfile())
+  if (profile()->AsTestingProfile())
     return;
 
   // Clear session data if the last window for a profile has been closed and
@@ -970,4 +1005,31 @@ bool SessionService::GetAvailableRangeForTest(const SessionID& tab_id,
 
   *range = i->second;
   return true;
+}
+
+void SessionService::LogExitEvent() {
+  // If there are pending closes, then we have already logged the exit.
+  if (!pending_window_close_ids_.empty())
+    return;
+
+  RemoveExitEvent();
+  int browser_count = 0;
+  int tab_count = 0;
+  for (auto* browser : *BrowserList::GetInstance()) {
+    if (browser->profile() == profile_) {
+      ++browser_count;
+      tab_count += browser->tab_strip_model()->count();
+    }
+  }
+  did_log_exit_ = true;
+  LogSessionServiceExitEvent(profile_, browser_count, tab_count);
+}
+
+void SessionService::RemoveExitEvent() {
+  if (!did_log_exit_)
+    return;
+
+  RemoveLastSessionServiceEventOfType(profile_,
+                                      SessionServiceEventLogType::kExit);
+  did_log_exit_ = false;
 }

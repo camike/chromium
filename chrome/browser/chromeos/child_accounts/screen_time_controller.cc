@@ -90,13 +90,11 @@ ScreenTimeController::ScreenTimeController(content::BrowserContext* context)
       base::BindRepeating(&ScreenTimeController::OnPolicyChanged,
                           base::Unretained(this)));
 
-  if (base::FeatureList::IsEnabled(features::kParentAccessCode))
-    parent_access::ParentAccessService::Get().AddObserver(this);
+  parent_access::ParentAccessService::Get().AddObserver(this);
 }
 
 ScreenTimeController::~ScreenTimeController() {
-  if (base::FeatureList::IsEnabled(features::kParentAccessCode))
-    parent_access::ParentAccessService::Get().RemoveObserver(this);
+  parent_access::ParentAccessService::Get().RemoveObserver(this);
 
   session_manager::SessionManager::Get()->RemoveObserver(this);
   UsageTimeStateNotifier::GetInstance()->RemoveObserver(this);
@@ -276,17 +274,15 @@ void ScreenTimeController::OnScreenLockByPolicy(
       chromeos::ProfileHelper::Get()
           ->GetUserByProfile(Profile::FromBrowserContext(context_))
           ->GetAccountId();
-  ScreenLocker::default_screen_locker()->DisableAuthForUser(
+  ScreenLocker::default_screen_locker()->TemporarilyDisableAuthForUser(
       account_id,
       ash::AuthDisabledData(ConvertLockReason(active_policy), next_unlock_time,
                             GetScreenTimeDuration(),
                             true /*disable_lock_screen_media*/));
 
   // Add parent access code button.
-  // TODO(agawronska): Once feature flag is removed, showing shelf button could
-  // be moved to ash.
-  if (base::FeatureList::IsEnabled(features::kParentAccessCode))
-    ash::LoginScreen::Get()->ShowParentAccessButton(true);
+  // TODO(agawronska): Move showing shelf button to ash.
+  ash::LoginScreen::Get()->ShowParentAccessButton(true);
 }
 
 void ScreenTimeController::OnScreenLockByPolicyEnd() {
@@ -297,12 +293,10 @@ void ScreenTimeController::OnScreenLockByPolicyEnd() {
       chromeos::ProfileHelper::Get()
           ->GetUserByProfile(Profile::FromBrowserContext(context_))
           ->GetAccountId();
-  ScreenLocker::default_screen_locker()->EnableAuthForUser(account_id);
+  ScreenLocker::default_screen_locker()->ReenableAuthForUser(account_id);
 
-  // TODO(agawronska): Once feature flag is removed, showing shelf button could
-  // be moved to ash.
-  if (base::FeatureList::IsEnabled(features::kParentAccessCode))
-    ash::LoginScreen::Get()->ShowParentAccessButton(false);
+  // TODO(agawronska): Move showing shelf button to ash.
+  ash::LoginScreen::Get()->ShowParentAccessButton(false);
 }
 
 void ScreenTimeController::OnPolicyChanged() {

@@ -36,13 +36,14 @@
 #include "third_party/blink/renderer/core/resize_observer/resize_observation.h"
 #include "third_party/blink/renderer/core/resize_observer/resize_observer.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/platform/wtf/size_assertions.h"
 
 namespace blink {
 
 struct SameSizeAsElementRareData : NodeRareData {
   IntSize scroll_offset;
   void* pointers_or_strings[3];
-  Member<void*> members[17];
+  Member<void*> members[16];
   bool flags[1];
 };
 
@@ -106,7 +107,6 @@ void ElementRareData::TraceAfterDispatch(blink::Visitor* visitor) const {
   visitor->Trace(pseudo_element_data_);
   visitor->Trace(accessible_node_);
   visitor->Trace(display_lock_context_);
-  visitor->Trace(v0_custom_element_definition_);
   visitor->Trace(custom_element_definition_);
   visitor->Trace(element_internals_);
   visitor->Trace(intersection_observer_data_);
@@ -114,7 +114,6 @@ void ElementRareData::TraceAfterDispatch(blink::Visitor* visitor) const {
   NodeRareData::TraceAfterDispatch(visitor);
 }
 
-static_assert(sizeof(ElementRareData) == sizeof(SameSizeAsElementRareData),
-              "ElementRareData should stay small");
+ASSERT_SIZE(ElementRareData, SameSizeAsElementRareData);
 
 }  // namespace blink

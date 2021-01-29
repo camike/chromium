@@ -26,6 +26,7 @@
 #include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/autofill/autofill_popup_controller_utils.h"
 #include "chrome/common/pref_names.h"
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
@@ -61,6 +62,7 @@ using ::base::android::JavaParamRef;
 using ::base::android::JavaRef;
 using ::base::android::ScopedJavaGlobalRef;
 using ::base::android::ScopedJavaLocalRef;
+using payments::FullCardRequest;
 
 Profile* GetProfile() {
   return ProfileManager::GetActiveUserProfile()->GetOriginalProfile();
@@ -79,7 +81,7 @@ void MaybeSetRawInfo(AutofillProfile* profile,
 
 // Self-deleting requester of full card details, including full PAN and the CVC
 // number.
-class FullCardRequester : public payments::FullCardRequest::ResultDelegate,
+class FullCardRequester : public FullCardRequest::ResultDelegate,
                           public base::SupportsWeakPtr<FullCardRequester> {
  public:
   FullCardRequester() {}
@@ -93,28 +95,28 @@ class FullCardRequester : public payments::FullCardRequest::ResultDelegate,
     jdelegate_.Reset(env, jdelegate);
 
     if (!card_) {
-      OnFullCardRequestFailed();
+      OnFullCardRequestFailed(FullCardRequest::FailureType::GENERIC_FAILURE);
       return;
     }
 
     content::WebContents* contents =
         content::WebContents::FromJavaWebContents(jweb_contents);
     if (!contents) {
-      OnFullCardRequestFailed();
+      OnFullCardRequestFailed(FullCardRequest::FailureType::GENERIC_FAILURE);
       return;
     }
 
     ContentAutofillDriverFactory* factory =
         ContentAutofillDriverFactory::FromWebContents(contents);
     if (!factory) {
-      OnFullCardRequestFailed();
+      OnFullCardRequestFailed(FullCardRequest::FailureType::GENERIC_FAILURE);
       return;
     }
 
     ContentAutofillDriver* driver =
         factory->DriverForFrame(contents->GetMainFrame());
     if (!driver) {
-      OnFullCardRequestFailed();
+      OnFullCardRequestFailed(FullCardRequest::FailureType::GENERIC_FAILURE);
       return;
     }
 
@@ -140,7 +142,8 @@ class FullCardRequester : public payments::FullCardRequest::ResultDelegate,
   }
 
   // payments::FullCardRequest::ResultDelegate:
-  void OnFullCardRequestFailed() override {
+  void OnFullCardRequestFailed(
+      FullCardRequest::FailureType failure_type) override {
     JNIEnv* env = base::android::AttachCurrentThread();
     Java_FullCardRequestDelegate_onFullCardError(env, jdelegate_);
     delete this;
@@ -214,10 +217,13 @@ PersonalDataManagerAndroid::CreateJavaCreditCardFromNative(
                                card.GetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR)),
       ConvertUTF8ToJavaString(env,
                               payment_request_data.basic_card_issuer_network),
-      ResourceMapper::MapToJavaDrawableId(
-          payment_request_data.icon_resource_id),
+      ResourceMapper::MapToJavaDrawableId(autofill::GetIconResourceID(
+          card.CardIconStringForAutofillSuggestion())),
       ConvertUTF8ToJavaString(env, card.billing_address_id()),
-      ConvertUTF8ToJavaString(env, card.server_id()));
+      ConvertUTF8ToJavaString(env, card.server_id()),
+      ConvertUTF16ToJavaString(env,
+                               card.CardIdentifierStringForAutofillDisplay()),
+      ConvertUTF16ToJavaString(env, card.nickname()));
 }
 
 // static
@@ -243,6 +249,8 @@ void PersonalDataManagerAndroid::PopulateNativeCreditCardFromJava(
       ConvertJavaStringToUTF8(Java_CreditCard_getBillingAddressId(env, jcard)));
   card->set_server_id(
       ConvertJavaStringToUTF8(Java_CreditCard_getServerId(env, jcard)));
+  card->SetNickname(
+      ConvertJavaStringToUTF16(Java_CreditCard_getNickname(env, jcard)));
 
   // Only set the guid if it is an existing card (java guid not empty).
   // Otherwise, keep the generated one.
@@ -275,6 +283,9 @@ PersonalDataManagerAndroid::CreateJavaProfileFromNative(
       env, ConvertUTF8ToJavaString(env, profile.guid()),
       ConvertUTF8ToJavaString(env, profile.origin()),
       profile.record_type() == AutofillProfile::LOCAL_PROFILE,
+      ConvertUTF16ToJavaString(
+          env, profile.GetInfo(AutofillType(NAME_HONORIFIC_PREFIX),
+                               g_browser_process->GetApplicationLocale())),
       ConvertUTF16ToJavaString(
           env, profile.GetInfo(AutofillType(NAME_FULL),
                                g_browser_process->GetApplicationLocale())),
@@ -313,6 +324,8 @@ void PersonalDataManagerAndroid::PopulateNativeProfileFromJava(
       AutofillType(NAME_FULL),
       ConvertJavaStringToUTF16(Java_AutofillProfile_getFullName(env, jprofile)),
       g_browser_process->GetApplicationLocale());
+  MaybeSetRawInfo(profile, autofill::NAME_HONORIFIC_PREFIX,
+                  Java_AutofillProfile_getHonorificPrefix(env, jprofile));
   MaybeSetRawInfo(profile, autofill::COMPANY_NAME,
                   Java_AutofillProfile_getCompanyName(env, jprofile));
   MaybeSetRawInfo(profile, autofill::ADDRESS_HOME_STREET_ADDRESS,
@@ -545,7 +558,7 @@ void PersonalDataManagerAndroid::UpdateServerCardBillingAddress(
   CreditCard card;
   PopulateNativeCreditCardFromJava(jcard, env, &card);
 
-  personal_data_manager_->UpdateServerCardMetadata(card);
+  personal_data_manager_->UpdateServerCardsMetadata({card});
 }
 
 ScopedJavaLocalRef<jstring>
@@ -573,6 +586,21 @@ void PersonalDataManagerAndroid::AddServerCreditCardForTest(
   std::unique_ptr<CreditCard> card = std::make_unique<CreditCard>();
   PopulateNativeCreditCardFromJava(jcard, env, card.get());
   card->set_record_type(CreditCard::MASKED_SERVER_CARD);
+  personal_data_manager_->AddServerCreditCardForTest(std::move(card));
+  personal_data_manager_->NotifyPersonalDataObserver();
+}
+
+void PersonalDataManagerAndroid::AddServerCreditCardForTestWithAdditionalFields(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& unused_obj,
+    const base::android::JavaParamRef<jobject>& jcard,
+    const base::android::JavaParamRef<jstring>& jnickname,
+    jint jcard_issuer) {
+  std::unique_ptr<CreditCard> card = std::make_unique<CreditCard>();
+  PopulateNativeCreditCardFromJava(jcard, env, card.get());
+  card->set_record_type(CreditCard::MASKED_SERVER_CARD);
+  card->SetNickname(ConvertJavaStringToUTF16(jnickname));
+  card->set_card_issuer(static_cast<CreditCard::Issuer>(jcard_issuer));
   personal_data_manager_->AddServerCreditCardForTest(std::move(card));
   personal_data_manager_->NotifyPersonalDataObserver();
 }
@@ -621,7 +649,7 @@ void PersonalDataManagerAndroid::RecordAndLogProfileUse(
   AutofillProfile* profile = personal_data_manager_->GetProfileByGUID(
       ConvertJavaStringToUTF8(env, jguid));
   if (profile)
-    personal_data_manager_->RecordUseOf(*profile);
+    personal_data_manager_->RecordUseOf(profile);
 }
 
 void PersonalDataManagerAndroid::SetProfileUseStatsForTesting(
@@ -665,7 +693,7 @@ void PersonalDataManagerAndroid::RecordAndLogCreditCardUse(
   CreditCard* card = personal_data_manager_->GetCreditCardByGUID(
       ConvertJavaStringToUTF8(env, jguid));
   if (card)
-    personal_data_manager_->RecordUseOf(*card);
+    personal_data_manager_->RecordUseOf(card);
 }
 
 void PersonalDataManagerAndroid::SetCreditCardUseStatsForTesting(

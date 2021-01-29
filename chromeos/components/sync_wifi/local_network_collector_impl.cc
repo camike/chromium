@@ -5,6 +5,7 @@
 #include "chromeos/components/sync_wifi/local_network_collector_impl.h"
 
 #include "base/guid.h"
+#include "chromeos/components/sync_wifi/network_eligibility_checker.h"
 #include "chromeos/components/sync_wifi/network_identifier.h"
 #include "chromeos/components/sync_wifi/network_type_conversions.h"
 #include "chromeos/dbus/shill/shill_service_client.h"
@@ -13,9 +14,11 @@
 #include "chromeos/network/network_metadata_store.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
+#include "chromeos/services/network_config/public/mojom/network_types.mojom-shared.h"
 #include "components/device_event_log/device_event_log.h"
 #include "components/sync/protocol/wifi_configuration_specifics.pb.h"
 #include "dbus/object_path.h"
+#include "third_party/cros_system_api/dbus/shill/dbus-constants.h"
 
 namespace chromeos {
 
@@ -37,8 +40,10 @@ dbus::ObjectPath GetServicePathForGuid(const std::string& guid) {
 }  // namespace
 
 LocalNetworkCollectorImpl::LocalNetworkCollectorImpl(
-    network_config::mojom::CrosNetworkConfig* cros_network_config)
-    : cros_network_config_(cros_network_config) {
+    network_config::mojom::CrosNetworkConfig* cros_network_config,
+    SyncedNetworkMetricsLogger* metrics_recorder)
+    : cros_network_config_(cros_network_config),
+      metrics_recorder_(metrics_recorder) {
   cros_network_config_->AddObserver(
       cros_network_config_observer_receiver_.BindNewPipeAndPassRemote());
 
@@ -50,6 +55,13 @@ LocalNetworkCollectorImpl::~LocalNetworkCollectorImpl() = default;
 
 void LocalNetworkCollectorImpl::GetAllSyncableNetworks(
     ProtoListCallback callback) {
+  if (!is_mojo_networks_loaded_) {
+    after_networks_are_loaded_callback_queue_.push(
+        base::BindOnce(&LocalNetworkCollectorImpl::GetAllSyncableNetworks,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+    return;
+  }
+
   std::string request_guid = InitializeRequest();
   request_guid_to_list_callback_[request_guid] = std::move(callback);
 
@@ -69,6 +81,39 @@ void LocalNetworkCollectorImpl::GetAllSyncableNetworks(
   if (!count) {
     OnRequestFinished(request_guid);
   }
+}
+
+void LocalNetworkCollectorImpl::RecordZeroNetworksEligibleForSync() {
+  if (has_logged_zero_eligible_networks_metric_) {
+    return;
+  }
+
+  if (!is_mojo_networks_loaded_) {
+    after_networks_are_loaded_callback_queue_.push(base::BindOnce(
+        &LocalNetworkCollectorImpl::RecordZeroNetworksEligibleForSync,
+        weak_ptr_factory_.GetWeakPtr()));
+    return;
+  }
+
+  base::flat_set<NetworkEligibilityStatus>
+      network_eligible_for_sync_status_codes;
+  NetworkEligibilityStatus network_eligible_for_sync_status;
+  for (const network_config::mojom::NetworkStatePropertiesPtr& network :
+       mojo_networks_) {
+    if (!network ||
+        network->type != network_config::mojom::NetworkType::kWiFi) {
+      continue;
+    }
+    network_eligible_for_sync_status = GetNetworkEligibilityStatus(
+        network->guid, network->connectable,
+        network->type_state->get_wifi()->security, network->source,
+        /*log_result=*/false);
+    network_eligible_for_sync_status_codes.insert(
+        network_eligible_for_sync_status);
+  }
+  metrics_recorder_->RecordZeroNetworksEligibleForSync(
+      network_eligible_for_sync_status_codes);
+  has_logged_zero_eligible_networks_metric_ = true;
 }
 
 void LocalNetworkCollectorImpl::GetSyncableNetwork(const std::string& guid,
@@ -124,49 +169,15 @@ std::string LocalNetworkCollectorImpl::InitializeRequest() {
 
 bool LocalNetworkCollectorImpl::IsEligible(
     const network_config::mojom::NetworkStatePropertiesPtr& network) {
-  if (!network) {
-    return false;
-  }
-
-  if (network->type != network_config::mojom::NetworkType::kWiFi) {
-    return false;
-  }
-
-  if (!network->connectable) {
-    NET_LOG(EVENT) << NetworkGuidId(network->guid)
-                   << " is not eligible, it is not connectable.";
-    return false;
-  }
-
-  if (network->source != network_config::mojom::OncSource::kUser &&
-      !network_metadata_store_->GetIsCreatedByUser(network->guid)) {
-    NET_LOG(EVENT) << NetworkGuidId(network->guid)
-                   << " is not eligible, was not configured by user.";
+  if (!network || network->type != network_config::mojom::NetworkType::kWiFi) {
     return false;
   }
 
   const network_config::mojom::WiFiStatePropertiesPtr& wifi_properties =
       network->type_state->get_wifi();
-  if (wifi_properties->security !=
-          network_config::mojom::SecurityType::kWepPsk &&
-      wifi_properties->security !=
-          network_config::mojom::SecurityType::kWpaPsk) {
-    NET_LOG(EVENT) << NetworkGuidId(network->guid)
-                   << " is not eligible, security type not supported: "
-                   << wifi_properties->security;
-    return false;
-  }
-
-  base::TimeDelta timestamp =
-      network_metadata_store_->GetLastConnectedTimestamp(network->guid);
-  if (timestamp.is_zero()) {
-    NET_LOG(EVENT) << NetworkGuidId(network->guid)
-                   << " is not eligible, never connected.";
-    return false;
-  }
-
-  NET_LOG(EVENT) << NetworkGuidId(network->guid) << " is eligible for sync.";
-  return true;
+  return IsEligibleForSync(network->guid, network->connectable,
+                           wifi_properties->security, network->source,
+                           /*log_result=*/true);
 }
 
 void LocalNetworkCollectorImpl::StartGetNetworkDetails(
@@ -197,15 +208,38 @@ void LocalNetworkCollectorImpl::OnGetManagedPropertiesResult(
   proto.set_automatically_connect(AutomaticallyConnectProtoFromMojo(
       properties->type_properties->get_wifi()->auto_connect));
   proto.set_is_preferred(IsPreferredProtoFromMojo(properties->priority));
-  proto.mutable_proxy_configuration()->CopyFrom(
-      ProxyConfigurationProtoFromMojo(properties->proxy_settings));
 
+  // TODO(crbug/1128692): Restore support for the metered property when mojo
+  // networks track the "Automatic" state.
+
+  bool is_proxy_modified =
+      network_metadata_store_->GetIsFieldExternallyModified(
+          properties->guid, shill::kProxyConfigProperty);
+  sync_pb::WifiConfigurationSpecifics_ProxyConfiguration proxy_config =
+      ProxyConfigurationProtoFromMojo(properties->proxy_settings,
+                                      /*is_unspecified=*/is_proxy_modified);
+  proto.mutable_proxy_configuration()->CopyFrom(proxy_config);
+
+  bool is_dns_externally_modified =
+      network_metadata_store_->GetIsFieldExternallyModified(
+          properties->guid, shill::kNameServersProperty);
   if (properties->static_ip_config &&
-      properties->static_ip_config->name_servers) {
+      properties->static_ip_config->name_servers &&
+      (properties->source == network_config::mojom::OncSource::kUser ||
+       !is_dns_externally_modified)) {
+    proto.set_dns_option(
+        sync_pb::WifiConfigurationSpecifics_DnsOption_DNS_OPTION_CUSTOM);
     for (const std::string& nameserver :
          properties->static_ip_config->name_servers->active_value) {
       proto.add_custom_dns(nameserver);
     }
+  } else if (properties->source == network_config::mojom::OncSource::kDevice &&
+             is_dns_externally_modified) {
+    proto.set_dns_option(
+        sync_pb::WifiConfigurationSpecifics_DnsOption_DNS_OPTION_UNSPECIFIED);
+  } else {
+    proto.set_dns_option(
+        sync_pb::WifiConfigurationSpecifics_DnsOption_DNS_OPTION_DEFAULT_DHCP);
   }
 
   ShillServiceClient::Get()->GetWiFiPassphrase(
@@ -275,6 +309,13 @@ void LocalNetworkCollectorImpl::OnRequestFinished(
 }
 
 void LocalNetworkCollectorImpl::OnNetworkStateListChanged() {
+  if (!NetworkHandler::Get()
+           ->network_state_handler()
+           ->IsProfileNetworksLoaded()) {
+    is_mojo_networks_loaded_ = false;
+    return;
+  }
+
   cros_network_config_->GetNetworkStateList(
       network_config::mojom::NetworkFilter::New(
           network_config::mojom::FilterType::kConfigured,
@@ -287,6 +328,11 @@ void LocalNetworkCollectorImpl::OnNetworkStateListChanged() {
 void LocalNetworkCollectorImpl::OnGetNetworkList(
     std::vector<network_config::mojom::NetworkStatePropertiesPtr> networks) {
   mojo_networks_ = std::move(networks);
+  is_mojo_networks_loaded_ = true;
+  while (!after_networks_are_loaded_callback_queue_.empty()) {
+    std::move(after_networks_are_loaded_callback_queue_.front()).Run();
+    after_networks_are_loaded_callback_queue_.pop();
+  }
 }
 
 }  // namespace sync_wifi

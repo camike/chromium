@@ -2,11 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {ColorMode, Destination, DestinationConnectionStatus, DestinationOrigin, DestinationState, DestinationType, Margins, MarginsType, NativeLayer, PluginProxy, ScalingType} from 'chrome://print/print_preview.js';
+import {ColorMode, Destination, DestinationConnectionStatus, DestinationOrigin, DestinationState, DestinationType, Margins, MarginsType, NativeLayer, NativeLayerImpl, PluginProxyImpl, ScalingType} from 'chrome://print/print_preview.js';
 import {assert} from 'chrome://resources/js/assert.m.js';
 import {NativeLayerStub} from 'chrome://test/print_preview/native_layer_stub.js';
-import {PDFPluginStub} from 'chrome://test/print_preview/plugin_stub.js';
 import {getCddTemplate, getDefaultInitialSettings} from 'chrome://test/print_preview/print_preview_test_utils.js';
+import {TestPluginProxy} from 'chrome://test/print_preview/test_plugin_proxy.js';
+
+// <if expr="chromeos">
+import {setNativeLayerCrosInstance} from './native_layer_cros_stub.js';
+// </if>
 
 window.preview_generation_test = {};
 preview_generation_test.suiteName = 'PreviewGenerationTest';
@@ -56,8 +60,11 @@ suite(preview_generation_test.suiteName, function() {
   /** @override */
   setup(function() {
     nativeLayer = new NativeLayerStub();
-    NativeLayer.setInstance(nativeLayer);
-    PolymerTest.clearBody();
+    NativeLayerImpl.instance_ = nativeLayer;
+    // <if expr="chromeos">
+    setNativeLayerCrosInstance();
+    // </if>
+    document.body.innerHTML = '';
   });
 
   /**
@@ -68,11 +75,11 @@ suite(preview_generation_test.suiteName, function() {
    */
   function initialize() {
     nativeLayer.setInitialSettings(initialSettings);
-    nativeLayer.setLocalDestinationCapabilities(
-        getCddTemplate(initialSettings.printerName));
+    nativeLayer.setLocalDestinations(
+        [{deviceName: initialSettings.printerName, printerName: 'FooName'}]);
     nativeLayer.setPageCount(3);
-    const pluginProxy = new PDFPluginStub();
-    PluginProxy.setInstance(pluginProxy);
+    const pluginProxy = new TestPluginProxy();
+    PluginProxyImpl.instance_ = pluginProxy;
 
     page = document.createElement('print-preview-app');
     document.body.appendChild(page);
@@ -370,7 +377,7 @@ suite(preview_generation_test.suiteName, function() {
           nativeLayer.resetResolver('getPreview');
           // DEFAULT -> CUSTOM
           page.setSetting('scalingType', ScalingType.CUSTOM);
-          // Need to set custom value != 100 for preview to regenerate.
+          // Need to set custom value !== '100' for preview to regenerate.
           page.setSetting('scaling', '90');
           return nativeLayer.whenCalled('getPreview');
         })
@@ -533,7 +540,7 @@ suite(preview_generation_test.suiteName, function() {
           nativeLayer.resetResolver('getPreview');
           // DEFAULT -> CUSTOM
           page.setSetting('scalingTypePdf', ScalingType.CUSTOM);
-          // Need to set custom value != 100 for preview to regenerate.
+          // Need to set custom value !== '100' for preview to regenerate.
           page.setSetting('scaling', '120');
           return nativeLayer.whenCalled('getPreview');
         })

@@ -9,6 +9,7 @@
 #include "base/test/task_environment.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "components/account_id/account_id.h"
 #include "components/autofill/core/common/autofill_prefs.h"
@@ -29,11 +30,11 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chromeos/tpm/stub_install_attributes.h"
 #include "components/user_manager/scoped_user_manager.h"
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 using testing::Return;
 using testing::_;
@@ -119,9 +120,9 @@ class ProfilePolicyConnectorTest : public testing::Test {
   MockCloudPolicyStore cloud_policy_store_;
   std::unique_ptr<CloudPolicyManager> cloud_policy_manager_;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   chromeos::ScopedStubInstallAttributes test_install_attributes_;
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 };
 
 TEST_F(ProfilePolicyConnectorTest, IsManagedForManagedUsers) {
@@ -142,7 +143,7 @@ TEST_F(ProfilePolicyConnectorTest, IsManagedForManagedUsers) {
   connector.Shutdown();
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 TEST_F(ProfilePolicyConnectorTest, IsManagedForActiveDirectoryUsers) {
   user_manager::ScopedUserManager scoped_user_manager_enabler(
       std::make_unique<chromeos::FakeChromeUserManager>());
@@ -181,7 +182,7 @@ TEST_F(ProfilePolicyConnectorTest, PrimaryUserPoliciesProxied) {
       enterprise_management::PolicyData::ACTIVE);
   cloud_policy_store_.policy_map_.Set(
       key::kAutofillAddressEnabled, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-      POLICY_SOURCE_CLOUD, std::make_unique<base::Value>(false), nullptr);
+      POLICY_SOURCE_CLOUD, base::Value(false), nullptr);
   cloud_policy_store_.NotifyStoreLoaded();
   base::RunLoop().RunUntilIdle();
 
@@ -197,6 +198,8 @@ TEST_F(ProfilePolicyConnectorTest, PrimaryUserPoliciesProxied) {
   EXPECT_TRUE(connector.IsManaged());
 
   EXPECT_FALSE(connector.policy_service()->IsInitializationComplete(
+      POLICY_DOMAIN_CHROME));
+  EXPECT_FALSE(connector.policy_service()->IsFirstPolicyLoadComplete(
       POLICY_DOMAIN_CHROME));
 
   PolicyServiceInitializedWaiter(connector.policy_service(),
@@ -219,11 +222,13 @@ TEST_F(ProfilePolicyConnectorTest, PrimaryUserPoliciesProxied) {
   // Cleanup.
   connector.Shutdown();
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 TEST_F(ProfilePolicyConnectorTest, IsProfilePolicy) {
   MockConfigurationPolicyProvider mock_platform_provider;
   EXPECT_CALL(mock_platform_provider, IsInitializationComplete(_))
+      .WillRepeatedly(Return(true));
+  EXPECT_CALL(mock_platform_provider, IsFirstPolicyLoadComplete(_))
       .WillRepeatedly(Return(true));
 
   ProfilePolicyConnector connector;
@@ -242,7 +247,7 @@ TEST_F(ProfilePolicyConnectorTest, IsProfilePolicy) {
   // Set the policy at the cloud provider.
   cloud_policy_store_.policy_map_.Set(
       key::kAutofillAddressEnabled, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-      POLICY_SOURCE_CLOUD, std::make_unique<base::Value>(false), nullptr);
+      POLICY_SOURCE_CLOUD, base::Value(false), nullptr);
   cloud_policy_store_.NotifyStoreLoaded();
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(connector.IsProfilePolicy(key::kAutofillAddressEnabled));
@@ -255,8 +260,7 @@ TEST_F(ProfilePolicyConnectorTest, IsProfilePolicy) {
   // Now test with a higher-priority provider also setting the policy.
   PolicyMap map;
   map.Set(key::kAutofillAddressEnabled, POLICY_LEVEL_MANDATORY,
-          POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-          std::make_unique<base::Value>(true), nullptr);
+          POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD, base::Value(true), nullptr);
   mock_platform_provider.UpdateChromePolicy(map);
   EXPECT_FALSE(connector.IsProfilePolicy(key::kAutofillAddressEnabled));
   value = connector.policy_service()->GetPolicies(chrome_ns).GetValue(

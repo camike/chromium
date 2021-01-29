@@ -17,16 +17,17 @@
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/main/browser.h"
 #include "ios/chrome/browser/sync/profile_sync_service_factory.h"
 #import "ios/chrome/browser/sync/sync_observer_bridge.h"
 #import "ios/chrome/browser/ui/settings/sync/sync_create_passphrase_table_view_controller.h"
 #import "ios/chrome/browser/ui/settings/sync/sync_encryption_passphrase_table_view_controller.h"
-#import "ios/chrome/browser/ui/settings/utils/settings_utils.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_cells_constants.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_item.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_link_header_footer_item.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_text_item.h"
 #import "ios/chrome/browser/ui/table_view/table_view_model.h"
+#import "ios/chrome/browser/ui/table_view/table_view_utils.h"
 #include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/UIColor+cr_semantic_colors.h"
@@ -53,25 +54,28 @@ typedef NS_ENUM(NSInteger, ItemType) {
 }  // namespace
 
 @interface SyncEncryptionTableViewController () <SyncObserverModelBridge> {
-  ChromeBrowserState* _browserState;
   std::unique_ptr<SyncObserverBridge> _syncObserver;
   BOOL _isUsingSecondaryPassphrase;
 }
+
+@property(nonatomic, assign, readonly) Browser* browser;
+
 @end
 
 @implementation SyncEncryptionTableViewController
 
-- (instancetype)initWithBrowserState:(ChromeBrowserState*)browserState {
-  DCHECK(browserState);
-  UITableViewStyle style = base::FeatureList::IsEnabled(kSettingsRefresh)
-                               ? UITableViewStylePlain
-                               : UITableViewStyleGrouped;
-  self = [super initWithStyle:style];
+@synthesize browser = _browser;
+
+- (instancetype)initWithBrowser:(Browser*)browser {
+  DCHECK(browser);
+
+  self = [super initWithStyle:ChromeTableViewStyle()];
   if (self) {
+    _browser = browser;
+    ChromeBrowserState* browserState = self.browser->GetBrowserState();
     self.title = l10n_util::GetNSString(IDS_IOS_SYNC_ENCRYPTION_TITLE);
-    _browserState = browserState;
     syncer::SyncService* syncService =
-        ProfileSyncServiceFactory::GetForBrowserState(_browserState);
+        ProfileSyncServiceFactory::GetForBrowserState(browserState);
     _isUsingSecondaryPassphrase =
         syncService->IsEngineInitialized() &&
         syncService->GetUserSettings()->IsUsingSecondaryPassphrase();
@@ -165,13 +169,14 @@ typedef NS_ENUM(NSInteger, ItemType) {
   switch (item.type) {
     case ItemTypePassphrase: {
       DCHECK(switches::IsSyncAllowedByFlag());
+      ChromeBrowserState* browserState = self.browser->GetBrowserState();
       syncer::SyncService* service =
-          ProfileSyncServiceFactory::GetForBrowserState(_browserState);
+          ProfileSyncServiceFactory::GetForBrowserState(browserState);
       if (service->IsEngineInitialized() &&
           !service->GetUserSettings()->IsUsingSecondaryPassphrase()) {
         SyncCreatePassphraseTableViewController* controller =
             [[SyncCreatePassphraseTableViewController alloc]
-                initWithBrowserState:_browserState];
+                initWithBrowser:self.browser];
         if (controller) {
           controller.dispatcher = self.dispatcher;
           [self.navigationController pushViewController:controller
@@ -192,8 +197,9 @@ typedef NS_ENUM(NSInteger, ItemType) {
 #pragma mark SyncObserverModelBridge
 
 - (void)onSyncStateChanged {
+  ChromeBrowserState* browserState = self.browser->GetBrowserState();
   syncer::SyncService* service =
-      ProfileSyncServiceFactory::GetForBrowserState(_browserState);
+      ProfileSyncServiceFactory::GetForBrowserState(browserState);
   BOOL isNowUsingSecondaryPassphrase =
       service->IsEngineInitialized() &&
       service->GetUserSettings()->IsUsingSecondaryPassphrase();

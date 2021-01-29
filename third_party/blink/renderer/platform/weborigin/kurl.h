@@ -114,6 +114,7 @@ class PLATFORM_EXPORT KURL {
 
   ~KURL();
 
+  KURL UrlStrippedForUseAsReferrer() const;
   String StrippedForUseAsReferrer() const;
   String StrippedForUseAsHref() const;
 
@@ -243,6 +244,8 @@ class PLATFORM_EXPORT KURL {
   void Init(const KURL& base,
             const String& relative,
             const WTF::TextEncoding* query_encoding);
+
+  bool IsAboutURL(const char* allowed_path) const;
 
   StringView ComponentStringView(const url::Component&) const;
   String ComponentString(const url::Component&) const;

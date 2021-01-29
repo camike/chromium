@@ -34,6 +34,7 @@
 #include "content/public/browser/web_contents.h"
 #include "crypto/symmetric_key.h"
 #include "extensions/browser/api/lock_screen_data/lock_screen_item_storage.h"
+#include "extensions/browser/app_window/app_delegate.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/common/extension.h"
@@ -97,10 +98,10 @@ void StateController::FlushTrayActionForTesting() {
 }
 
 void StateController::SetReadyCallbackForTesting(
-    const base::Closure& ready_callback) {
+    base::OnceClosure ready_callback) {
   DCHECK(ready_callback_.is_null());
 
-  ready_callback_ = ready_callback;
+  ready_callback_ = std::move(ready_callback);
 }
 
 void StateController::SetTickClockForTesting(const base::TickClock* clock) {
@@ -265,8 +266,9 @@ void StateController::SetFocusCyclerDelegate(FocusCyclerDelegate* delegate) {
   focus_cycler_delegate_ = delegate;
 
   if (focus_cycler_delegate_ && note_app_window_) {
-    focus_cycler_delegate_->RegisterLockScreenAppFocusHandler(base::Bind(
-        &StateController::FocusAppWindow, weak_ptr_factory_.GetWeakPtr()));
+    focus_cycler_delegate_->RegisterLockScreenAppFocusHandler(
+        base::BindRepeating(&StateController::FocusAppWindow,
+                            weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -313,8 +315,8 @@ void StateController::OnSessionStateChanged() {
   // and the callback will not be invoked after |app_manager_| goes out of
   // scope.
   app_manager_->Start(
-      base::Bind(&StateController::OnNoteTakingAvailabilityChanged,
-                 base::Unretained(this)));
+      base::BindRepeating(&StateController::OnNoteTakingAvailabilityChanged,
+                          base::Unretained(this)));
   note_app_window_metrics_ =
       std::make_unique<AppWindowMetricsTracker>(tick_clock_);
   lock_screen_data_->SetSessionLocked(true);
@@ -333,8 +335,9 @@ void StateController::OnWindowVisibilityChanged(aura::Window* window,
 
   UpdateLockScreenNoteState(TrayActionState::kActive);
   if (focus_cycler_delegate_) {
-    focus_cycler_delegate_->RegisterLockScreenAppFocusHandler(base::Bind(
-        &StateController::FocusAppWindow, weak_ptr_factory_.GetWeakPtr()));
+    focus_cycler_delegate_->RegisterLockScreenAppFocusHandler(
+        base::BindRepeating(&StateController::FocusAppWindow,
+                            weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -396,7 +399,7 @@ extensions::AppWindow* StateController::CreateAppWindowForLockScreenAction(
   // Thus, it should be safe to assume lock screen profile is set at this point.
   DCHECK(lock_screen_profile_creator_->lock_screen_profile());
 
-  if (!lock_screen_profile_creator_->lock_screen_profile()->IsSameProfile(
+  if (!lock_screen_profile_creator_->lock_screen_profile()->IsSameOrParent(
           Profile::FromBrowserContext(context))) {
     return nullptr;
   }

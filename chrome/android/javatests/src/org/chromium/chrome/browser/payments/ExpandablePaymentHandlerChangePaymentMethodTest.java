@@ -5,7 +5,8 @@
 package org.chromium.chrome.browser.payments;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.MediumTest;
+
+import androidx.test.filters.MediumTest;
 
 import org.junit.After;
 import org.junit.Before;
@@ -17,7 +18,6 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.net.test.EmbeddedTestServer;
@@ -27,8 +27,7 @@ import org.chromium.ui.test.util.DisableAnimationsTestRule;
 /** An integration test for PaymentRequestEvent.changePaymentMethod(). */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        "enable-blink-features=PaymentMethodChangeEvent,PaymentHandlerChangePaymentMethod",
-        "enable-features=" + ChromeFeatureList.SCROLL_TO_EXPAND_PAYMENT_HANDLER})
+        "enable-blink-features=PaymentMethodChangeEvent,PaymentHandlerChangePaymentMethod"})
 @MediumTest
 public class ExpandablePaymentHandlerChangePaymentMethodTest {
     // Disable animations to reduce flakiness.
@@ -38,7 +37,7 @@ public class ExpandablePaymentHandlerChangePaymentMethodTest {
     // Open a tab on the blank page first to initiate the native bindings required by the test
     // server.
     @Rule
-    public PaymentRequestTestRule mRule = new PaymentRequestTestRule("about:blank");
+    public PaymentRequestTestRule mRule = new PaymentRequestTestRule("about:blank", null, true);
 
     // Host the tests on https://127.0.0.1, because file:// URLs cannot have service workers.
     private EmbeddedTestServer mServer;

@@ -4,7 +4,7 @@ Initial state:
 Application
   Manifest
   Service Workers
-  Clear storage
+  Storage
 Storage
   Local Storage
     http://127.0.0.1:8000
@@ -16,6 +16,7 @@ Storage
     database-for-test
   Cookies
     http://127.0.0.1:8000
+  Trust Tokens
 Cache
   Cache Storage
   Application Cache
@@ -28,13 +29,14 @@ Background Services
   Push Messaging
 Frames
   top
+    inspected-page.html
 Visible view is a query view: true
 Page reloaded.
 After navigation:
 Application
   Manifest
   Service Workers
-  Clear storage
+  Storage
 Storage
   Local Storage
     http://127.0.0.1:8000
@@ -45,6 +47,7 @@ Storage
   Web SQL
   Cookies
     http://127.0.0.1:8000
+  Trust Tokens
 Cache
   Cache Storage
   Application Cache
@@ -57,5 +60,6 @@ Background Services
   Push Messaging
 Frames
   top
+    inspected-page.html
 Visible view is a query view: false
 

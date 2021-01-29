@@ -16,7 +16,6 @@
 #import "ios/chrome/browser/ui/infobars/test/fake_infobar_ui_delegate.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_opener.h"
-#import "ios/web/public/test/fakes/test_web_state.h"
 #include "ios/web/public/test/web_task_environment.h"
 #include "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
@@ -41,8 +40,8 @@ class PasswordInfobarModalInteractionHandlerTest : public PlatformTest {
     [browser_.GetCommandDispatcher()
         startDispatchingToTarget:mock_command_receiver_
                      forProtocol:@protocol(ApplicationSettingsCommands)];
-    handler_ =
-        std::make_unique<PasswordInfobarModalInteractionHandler>(&browser_);
+    handler_ = std::make_unique<PasswordInfobarModalInteractionHandler>(
+        &browser_, password_modal::PasswordAction::kSave);
   }
   ~PasswordInfobarModalInteractionHandlerTest() override {
     [browser_.GetCommandDispatcher()

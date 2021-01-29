@@ -26,7 +26,6 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/system/timezone_resolver_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/constants/chromeos_switches.h"
@@ -171,19 +170,16 @@ bool CanSetSystemTimezone(const user_manager::User* user) {
 
   switch (user->GetType()) {
     case user_manager::USER_TYPE_REGULAR:
-    case user_manager::USER_TYPE_SUPERVISED:
+    case user_manager::USER_TYPE_SUPERVISED_DEPRECATED:
     case user_manager::USER_TYPE_KIOSK_APP:
     case user_manager::USER_TYPE_ARC_KIOSK_APP:
     case user_manager::USER_TYPE_ACTIVE_DIRECTORY:
     case user_manager::USER_TYPE_WEB_KIOSK_APP:
+    case user_manager::USER_TYPE_CHILD:
       return true;
 
     case user_manager::USER_TYPE_GUEST:
       return false;
-
-    case user_manager::USER_TYPE_CHILD:
-      return base::FeatureList::IsEnabled(
-          features::kParentAccessCodeForTimeChange);
 
     case user_manager::USER_TYPE_PUBLIC_ACCOUNT:
       return CanSetSystemTimezoneFromManagedGuestSession();
@@ -398,7 +394,7 @@ void SetTimezoneFromUI(Profile* profile, const std::string& timezone_id) {
   }
 
   Profile* primary_profile = ProfileManager::GetPrimaryUserProfile();
-  if (primary_profile && profile->IsSameProfile(primary_profile)) {
+  if (primary_profile && profile->IsSameOrParent(primary_profile)) {
     profile->GetPrefs()->SetString(prefs::kUserTimezone, timezone_id);
     return;
   }

@@ -68,9 +68,13 @@ class ChromeFeaturesServiceProvider
   void IsCryptohomeDistributedModelEnabled(
       dbus::MethodCall* method_call,
       dbus::ExportedObject::ResponseSender response_sender);
+  void IsCryptohomeUserDataAuthEnabled(
+      dbus::MethodCall* method_call,
+      dbus::ExportedObject::ResponseSender response_sender);
+  void IsCryptohomeUserDataAuthKillswitchEnabled(
+      dbus::MethodCall* method_call,
+      dbus::ExportedObject::ResponseSender response_sender);
   void IsPluginVmEnabled(dbus::MethodCall* method_call,
-                         dbus::ExportedObject::ResponseSender response_sender);
-  void IsUsbguardEnabled(dbus::MethodCall* method_call,
                          dbus::ExportedObject::ResponseSender response_sender);
   void IsVmManagementCliAllowed(
       dbus::MethodCall* method_call,

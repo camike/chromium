@@ -26,7 +26,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_INPUT_EVENT_HANDLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_INPUT_EVENT_HANDLER_H_
 
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/optional.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
@@ -53,6 +52,7 @@
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/hash_traits.h"
 #include "ui/base/cursor/cursor.h"
+#include "ui/base/dragdrop/mojom/drag_drop_types.mojom-blink-forward.h"
 
 namespace blink {
 
@@ -60,6 +60,7 @@ class DataTransfer;
 class PaintLayer;
 class Element;
 class Event;
+class EventHandlerRegistry;
 template <typename EventType>
 class EventWithHitTestResults;
 class HTMLFrameSetElement;
@@ -80,7 +81,9 @@ class WebMouseWheelEvent;
 class CORE_EXPORT EventHandler final : public GarbageCollected<EventHandler> {
  public:
   explicit EventHandler(LocalFrame&);
-  void Trace(Visitor*);
+  EventHandler(const EventHandler&) = delete;
+  EventHandler& operator=(const EventHandler&) = delete;
+  void Trace(Visitor*) const;
 
   void Clear();
 
@@ -202,6 +205,11 @@ class CORE_EXPORT EventHandler final : public GarbageCollected<EventHandler> {
                                            Node*& target_node);
   void CacheTouchAdjustmentResult(uint32_t, FloatPoint);
 
+  // Dispatch a context menu event. If |override_target_element| is provided,
+  // the context menu event will use that, so that the browser-generated context
+  // menu will be filled with options relevant to it, rather than the element
+  // found via hit testing the event's screen point. This is used so that a
+  // context menu generated via the keyboard reliably uses the correct target.
   WebInputEventResult SendContextMenuEvent(
       const WebMouseEvent&,
       Element* override_target_element = nullptr);
@@ -230,7 +238,7 @@ class CORE_EXPORT EventHandler final : public GarbageCollected<EventHandler> {
                             TextEventInputType = kTextEventInputKeyboard);
   void DefaultTextInputEventHandler(TextEvent*);
 
-  void DragSourceEndedAt(const WebMouseEvent&, DragOperation);
+  void DragSourceEndedAt(const WebMouseEvent&, ui::mojom::blink::DragOperation);
 
   void CapsLockStateMayHaveChanged();  // Only called by FrameSelection
 
@@ -267,6 +275,8 @@ class CORE_EXPORT EventHandler final : public GarbageCollected<EventHandler> {
   bool LongTapShouldInvokeContextMenu();
 
   void UpdateCursor();
+
+  Element* GetElementUnderMouse();
 
  private:
   WebInputEventResult HandleMouseMoveOrLeaveEvent(
@@ -359,6 +369,9 @@ class CORE_EXPORT EventHandler final : public GarbageCollected<EventHandler> {
       const HitTestRequest& request,
       const WebMouseEvent& mev);
 
+  IntRect GetFocusedElementRectForNonLocatedContextMenu(
+      Element* focused_element);
+
   // NOTE: If adding a new field to this class please ensure that it is
   // cleared in |EventHandler::clear()|.
 
@@ -367,12 +380,12 @@ class CORE_EXPORT EventHandler final : public GarbageCollected<EventHandler> {
   const Member<SelectionController> selection_controller_;
 
   // TODO(lanwei): Remove the below timers for updating hover and cursor.
-  TaskRunnerTimer<EventHandler> hover_timer_;
+  HeapTaskRunnerTimer<EventHandler> hover_timer_;
 
   // TODO(rbyers): Mouse cursor update is page-wide, not per-frame.  Page-wide
   // state should move out of EventHandler to a new PageEventHandler class.
   // crbug.com/449649
-  TaskRunnerTimer<EventHandler> cursor_update_timer_;
+  HeapTaskRunnerTimer<EventHandler> cursor_update_timer_;
 
   Member<Element> capturing_mouse_events_element_;
   // |capturing_subframe_element_| has similar functionality as
@@ -403,7 +416,7 @@ class CORE_EXPORT EventHandler final : public GarbageCollected<EventHandler> {
 
   double max_mouse_moved_duration_;
 
-  TaskRunnerTimer<EventHandler> active_interval_timer_;
+  HeapTaskRunnerTimer<EventHandler> active_interval_timer_;
 
   // last_show_press_timestamp_ prevents the active state rewrited by
   // following events too soon (less than 0.15s). It is ok we only record
@@ -453,8 +466,6 @@ class CORE_EXPORT EventHandler final : public GarbageCollected<EventHandler> {
   FRIEND_TEST_ALL_PREFIXES(EventHandlerTest,
                            CursorForInlineVerticalWritingMode);
   FRIEND_TEST_ALL_PREFIXES(EventHandlerTest, CursorForBlockVerticalWritingMode);
-
-  DISALLOW_COPY_AND_ASSIGN(EventHandler);
 };
 
 }  // namespace blink

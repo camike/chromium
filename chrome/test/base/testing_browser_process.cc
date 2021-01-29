@@ -10,6 +10,7 @@
 #include "base/time/default_clock.h"
 #include "base/time/default_tick_clock.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_impl.h"
 #include "chrome/browser/data_use_measurement/chrome_data_use_measurement.h"
@@ -27,8 +28,8 @@
 #include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_browser_process_platform_part.h"
+#include "components/federated_learning/floc_sorting_lsh_clusters_service.h"
 #include "components/network_time/network_time_tracker.h"
-#include "components/optimization_guide/optimization_guide_service.h"
 #include "components/permissions/permissions_client.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/prefs/pref_service.h"
@@ -62,6 +63,10 @@
 
 #if !defined(OS_ANDROID)
 #include "components/keep_alive_registry/keep_alive_registry.h"
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #endif
 
 // static
@@ -210,7 +215,7 @@ TestingBrowserProcess::browser_policy_connector() {
     EXPECT_FALSE(created_browser_policy_connector_);
     created_browser_policy_connector_ = true;
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MAC)
     // Make sure that the machine policy directory does not exist so that
     // machine-wide policies do not affect tests.
     // Note that passing false as last argument to OverrideAndCreateIfNeeded
@@ -222,7 +227,13 @@ TestingBrowserProcess::browser_policy_connector() {
         chrome::DIR_POLICY_FILES, local_policy_path, true, false));
 #endif
 
-    browser_policy_connector_ = platform_part_->CreateBrowserPolicyConnector();
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+    browser_policy_connector_ =
+        std::make_unique<policy::BrowserPolicyConnectorChromeOS>();
+#else
+    browser_policy_connector_ =
+        std::make_unique<policy::ChromeBrowserPolicyConnector>();
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
     // Note: creating the ChromeBrowserPolicyConnector invokes BrowserThread::
     // GetTaskRunnerForThread(), which initializes a base::LazyInstance of
@@ -250,10 +261,12 @@ BackgroundModeManager* TestingBrowserProcess::background_mode_manager() {
   return nullptr;
 }
 
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
 void TestingBrowserProcess::set_background_mode_manager_for_test(
     std::unique_ptr<BackgroundModeManager> manager) {
   NOTREACHED();
 }
+#endif
 
 StatusTray* TestingBrowserProcess::status_tray() {
   return nullptr;
@@ -264,19 +277,14 @@ TestingBrowserProcess::safe_browsing_service() {
   return sb_service_.get();
 }
 
-safe_browsing::ClientSideDetectionService*
-TestingBrowserProcess::safe_browsing_detection_service() {
-  return nullptr;
-}
-
 subresource_filter::RulesetService*
 TestingBrowserProcess::subresource_filter_ruleset_service() {
   return subresource_filter_ruleset_service_.get();
 }
 
-optimization_guide::OptimizationGuideService*
-TestingBrowserProcess::optimization_guide_service() {
-  return optimization_guide_service_.get();
+federated_learning::FlocSortingLshClustersService*
+TestingBrowserProcess::floc_sorting_lsh_clusters_service() {
+  return floc_sorting_lsh_clusters_service_.get();
 }
 
 BrowserProcessPlatformPart* TestingBrowserProcess::platform_part() {
@@ -289,7 +297,7 @@ TestingBrowserProcess::extension_event_router_forwarder() {
 }
 
 NotificationUIManager* TestingBrowserProcess::notification_ui_manager() {
-#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+#if !defined(OS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
   if (!notification_ui_manager_.get())
     notification_ui_manager_ = NotificationUIManager::Create();
   return notification_ui_manager_.get();
@@ -303,9 +311,11 @@ TestingBrowserProcess::notification_platform_bridge() {
   return notification_platform_bridge_.get();
 }
 
+#if !defined(OS_ANDROID)
 IntranetRedirectDetector* TestingBrowserProcess::intranet_redirect_detector() {
   return nullptr;
 }
+#endif
 
 void TestingBrowserProcess::CreateDevToolsProtocolHandler() {}
 
@@ -378,13 +388,6 @@ TestingBrowserProcess::component_updater() {
   return nullptr;
 }
 
-#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
-component_updater::SupervisedUserWhitelistInstaller*
-TestingBrowserProcess::supervised_user_whitelist_installer() {
-  return nullptr;
-}
-#endif
-
 MediaFileSystemRegistry* TestingBrowserProcess::media_file_system_registry() {
 #if defined(OS_ANDROID)
   NOTIMPLEMENTED();
@@ -414,9 +417,11 @@ TestingBrowserProcess::network_time_tracker() {
   return network_time_tracker_.get();
 }
 
+#if !defined(OS_ANDROID)
 gcm::GCMDriver* TestingBrowserProcess::gcm_driver() {
   return nullptr;
 }
+#endif
 
 resource_coordinator::ResourceCoordinatorParts*
 TestingBrowserProcess::resource_coordinator_parts() {
@@ -484,6 +489,11 @@ void TestingBrowserProcess::ShutdownBrowserPolicyConnector() {
   browser_policy_connector_.reset();
 }
 
+TestingBrowserProcessPlatformPart*
+TestingBrowserProcess::GetTestPlatformPart() {
+  return platform_part_.get();
+}
+
 void TestingBrowserProcess::SetSafeBrowsingService(
     safe_browsing::SafeBrowsingService* sb_service) {
   sb_service_ = sb_service;
@@ -494,10 +504,10 @@ void TestingBrowserProcess::SetRulesetService(
   subresource_filter_ruleset_service_.swap(ruleset_service);
 }
 
-void TestingBrowserProcess::SetOptimizationGuideService(
-    std::unique_ptr<optimization_guide::OptimizationGuideService>
-        optimization_guide_service) {
-  optimization_guide_service_.swap(optimization_guide_service);
+void TestingBrowserProcess::SetFlocSortingLshClustersService(
+    std::unique_ptr<federated_learning::FlocSortingLshClustersService>
+        service) {
+  floc_sorting_lsh_clusters_service_.swap(service);
 }
 
 void TestingBrowserProcess::SetRapporServiceImpl(

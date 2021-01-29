@@ -13,6 +13,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
+#include "components/policy/proto/record.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace network {
@@ -67,6 +68,7 @@ class MockCloudPolicyClient : public CloudPolicyClient {
                     const enterprise_management::ChildStatusReportRequest*,
                     StatusCallback&));
   MOCK_METHOD0(CancelAppInstallReportUpload, void(void));
+  MOCK_METHOD0(CancelExtensionInstallReportUpload, void(void));
   void UpdateGcmId(const std::string& id, StatusCallback callback) override {
     UpdateGcmId_(id, callback);
   }
@@ -98,29 +100,55 @@ class MockCloudPolicyClient : public CloudPolicyClient {
                void(enterprise_management::ChromeOsUserReportRequest*,
                     StatusCallback&));
 
-  void UploadRealtimeReport(base::Value value,
-                            StatusCallback callback) override {
-    UploadRealtimeReport_(value, callback);
+  void UploadSecurityEventReport(content::BrowserContext* context,
+                                 bool include_device_info,
+                                 base::Value value,
+                                 StatusCallback callback) override {
+    UploadSecurityEventReport_(context, include_device_info, value, callback);
   }
-  MOCK_METHOD2(UploadRealtimeReport_, void(base::Value&, StatusCallback&));
+  MOCK_METHOD4(UploadSecurityEventReport_,
+               void(content::BrowserContext* context,
+                    bool include_device_info,
+                    base::Value&,
+                    StatusCallback&));
 
-  MOCK_METHOD4(ClientCertProvisioningStartCsr,
+  MOCK_METHOD3(UploadEncryptedReport,
+               void(base::Value,
+                    base::Optional<base::Value>,
+                    ResponseCallback));
+
+  void UploadAppInstallReport(base::Value value,
+                              StatusCallback callback) override {
+    UploadAppInstallReport_(value, callback);
+  }
+  MOCK_METHOD2(UploadAppInstallReport_, void(base::Value&, StatusCallback&));
+  void UploadExtensionInstallReport(base::Value value,
+                                    StatusCallback callback) override {
+    UploadExtensionInstallReport_(value, callback);
+  }
+  MOCK_METHOD2(UploadExtensionInstallReport_,
+               void(base::Value&, StatusCallback&));
+
+  MOCK_METHOD5(ClientCertProvisioningStartCsr,
                void(const std::string& cert_scope,
                     const std::string& cert_profile_id,
+                    const std::string& cert_profile_version,
                     const std::string& public_key,
                     ClientCertProvisioningStartCsrCallback callback));
 
-  MOCK_METHOD6(ClientCertProvisioningFinishCsr,
+  MOCK_METHOD7(ClientCertProvisioningFinishCsr,
                void(const std::string& cert_scope,
                     const std::string& cert_profile_id,
+                    const std::string& cert_profile_version,
                     const std::string& public_key,
                     const std::string& va_challenge_response,
                     const std::string& signature,
                     ClientCertProvisioningFinishCsrCallback callback));
 
-  MOCK_METHOD4(ClientCertProvisioningDownloadCert,
+  MOCK_METHOD5(ClientCertProvisioningDownloadCert,
                void(const std::string& cert_scope,
                     const std::string& cert_profile_id,
+                    const std::string& cert_profile_version,
                     const std::string& public_key,
                     ClientCertProvisioningDownloadCertCallback callback));
 
@@ -133,26 +161,25 @@ class MockCloudPolicyClient : public CloudPolicyClient {
                  const enterprise_management::PolicyFetchResponse& policy);
 
   // Inject invalidation version.
-  void SetFetchedInvalidationVersion(
-      int64_t fetched_invalidation_version);
+  void SetFetchedInvalidationVersion(int64_t fetched_invalidation_version);
 
   // Sets the status field.
   void SetStatus(DeviceManagementStatus status);
 
   // Make the notification helpers public.
+  using CloudPolicyClient::NotifyClientError;
   using CloudPolicyClient::NotifyPolicyFetched;
   using CloudPolicyClient::NotifyRegistrationStateChanged;
-  using CloudPolicyClient::NotifyClientError;
 
-  using CloudPolicyClient::dm_token_;
   using CloudPolicyClient::client_id_;
+  using CloudPolicyClient::dm_token_;
+  using CloudPolicyClient::fetched_invalidation_version_;
+  using CloudPolicyClient::invalidation_payload_;
+  using CloudPolicyClient::invalidation_version_;
   using CloudPolicyClient::last_policy_timestamp_;
   using CloudPolicyClient::public_key_version_;
   using CloudPolicyClient::public_key_version_valid_;
   using CloudPolicyClient::types_to_fetch_;
-  using CloudPolicyClient::invalidation_version_;
-  using CloudPolicyClient::invalidation_payload_;
-  using CloudPolicyClient::fetched_invalidation_version_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockCloudPolicyClient);

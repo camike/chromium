@@ -29,6 +29,7 @@
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/layer_animation_observer.h"
+#include "ui/display/manager/display_manager.h"
 #include "ui/events/devices/device_data_manager_test_api.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
 
@@ -117,10 +118,6 @@ MessageCenterController* ShellTestApi::message_center_controller() {
   return shell_->message_center_controller_.get();
 }
 
-SystemGestureEventFilter* ShellTestApi::system_gesture_event_filter() {
-  return shell_->system_gesture_filter_.get();
-}
-
 WorkspaceController* ShellTestApi::workspace_controller() {
   // TODO(afakhry): Split this into two, one for root, and one for context.
   return GetActiveWorkspaceController(shell_->GetPrimaryRootWindow());
@@ -142,6 +139,10 @@ PowerPrefs* ShellTestApi::power_prefs() {
   return shell_->power_prefs_.get();
 }
 
+display::DisplayManager* ShellTestApi::display_manager() {
+  return shell_->display_manager();
+}
+
 void ShellTestApi::ResetPowerButtonControllerForTest() {
   shell_->backlights_forced_off_setter_->ResetForTest();
   shell_->power_button_controller_ = std::make_unique<PowerButtonController>(
@@ -156,13 +157,13 @@ bool ShellTestApi::IsSystemModalWindowOpen() {
   return Shell::IsSystemModalWindowOpen();
 }
 
-void ShellTestApi::SetTabletModeEnabledForTest(bool enable,
-                                               bool wait_for_completion) {
+void ShellTestApi::SetTabletModeEnabledForTest(bool enable) {
   // Detach mouse devices, so we can enter tablet mode.
   // Calling RunUntilIdle() here is necessary before setting the mouse devices
   // to prevent the callback from evdev thread from overwriting whatever we set
   // here below. See `InputDeviceFactoryEvdevProxy::OnStartupScanComplete()`.
   base::RunLoop().RunUntilIdle();
+  ui::DeviceDataManagerTestApi().OnDeviceListsComplete();
   ui::DeviceDataManagerTestApi().SetMouseDevices({});
 
   TabletMode::Waiter waiter(enable);
@@ -177,10 +178,6 @@ void ShellTestApi::EnableVirtualKeyboard() {
 
 void ShellTestApi::ToggleFullscreen() {
   accelerators::ToggleFullscreen();
-}
-
-bool ShellTestApi::IsOverviewSelecting() {
-  return shell_->overview_controller()->InOverviewSession();
 }
 
 void ShellTestApi::AddRemoveDisplay() {
@@ -254,10 +251,8 @@ PaginationModel* ShellTestApi::GetAppListPaginationModel() {
   return view->GetAppsPaginationModel();
 }
 
-std::vector<aura::Window*> ShellTestApi::GetItemWindowListInOverviewGrids() {
-  return Shell::Get()
-      ->overview_controller()
-      ->GetItemWindowListInOverviewGridsForTest();
+bool ShellTestApi::IsContextMenuShown() const {
+  return Shell::GetPrimaryRootWindowController()->IsContextMenuShown();
 }
 
 }  // namespace ash

@@ -24,13 +24,15 @@ void TestRequestPeer::OnUploadProgress(uint64_t position, uint64_t size) {
 
 bool TestRequestPeer::OnReceivedRedirect(
     const net::RedirectInfo& redirect_info,
-    network::mojom::URLResponseHeadPtr head) {
+    network::mojom::URLResponseHeadPtr head,
+    std::vector<std::string>*) {
   EXPECT_FALSE(context_->cancelled);
   EXPECT_FALSE(context_->complete);
   ++context_->seen_redirects;
   context_->last_load_timing = head->load_timing;
   if (context_->defer_on_redirect)
-    dispatcher_->SetDefersLoading(context_->request_id, true);
+    dispatcher_->SetDefersLoading(context_->request_id,
+                                  blink::WebURLLoader::DeferType::kDeferred);
   return context_->follow_redirects;
 }
 
@@ -65,7 +67,8 @@ void TestRequestPeer::OnTransferSizeUpdated(int transfer_size_diff) {
     return;
   context_->total_encoded_data_length += transfer_size_diff;
   if (context_->defer_on_transfer_size_updated)
-    dispatcher_->SetDefersLoading(context_->request_id, true);
+    dispatcher_->SetDefersLoading(context_->request_id,
+                                  blink::WebURLLoader::DeferType::kDeferred);
 }
 
 void TestRequestPeer::OnReceivedCachedMetadata(mojo_base::BigBuffer data) {
@@ -86,8 +89,15 @@ void TestRequestPeer::OnCompletedRequest(
   context_->completion_status = status;
 }
 
-scoped_refptr<base::TaskRunner> TestRequestPeer::GetTaskRunner() {
-  return blink::scheduler::GetSingleThreadTaskRunnerForTesting();
+void TestRequestPeer::EvictFromBackForwardCache(
+    blink::mojom::RendererEvictionReason reason) {
+  return;
+}
+
+void TestRequestPeer::DidBufferLoadWhileInBackForwardCache(size_t num_bytes) {}
+
+bool TestRequestPeer::CanContinueBufferingWhileInBackForwardCache() {
+  return true;
 }
 
 TestRequestPeer::Context::Context() = default;

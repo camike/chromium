@@ -14,6 +14,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
+#include "chrome/browser/chromeos/cert_provisioning/cert_provisioning_scheduler.h"
 #include "chrome/browser/chromeos/policy/server_backed_state_keys_broker.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_manager.h"
@@ -62,7 +63,7 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
     virtual void OnDeviceCloudPolicyManagerDisconnected() = 0;
   };
 
-  using UnregisterCallback = base::Callback<void(bool)>;
+  using UnregisterCallback = base::OnceCallback<void(bool)>;
 
   // |task_runner| is the runner for policy refresh, heartbeat, and status
   // upload tasks.
@@ -73,26 +74,11 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
       ServerBackedStateKeysBroker* state_keys_broker);
   ~DeviceCloudPolicyManagerChromeOS() override;
 
-  // Initializes state keys and requisition information.
+  // Initializes state keys.
   void Initialize(PrefService* local_state);
 
   void AddDeviceCloudPolicyManagerObserver(Observer* observer);
   void RemoveDeviceCloudPolicyManagerObserver(Observer* observer);
-
-  // TODO(davidyu): Move these two functions to a more appropriate place. See
-  // http://crbug.com/383695.
-  // Gets/Sets the device requisition.
-  std::string GetDeviceRequisition() const;
-  void SetDeviceRequisition(const std::string& requisition);
-  bool IsRemoraRequisition() const;
-  bool IsSharkRequisition() const;
-
-  // Gets/Sets the sub organization.
-  std::string GetSubOrganization() const;
-  void SetSubOrganization(const std::string& sub_organization);
-
-  // If set, the device will start the enterprise enrollment OOBE.
-  void SetDeviceEnrollmentAutoStart();
 
   // CloudPolicyManager:
   void Shutdown() override;
@@ -114,7 +100,7 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
 
   // Sends the unregister request. |callback| is invoked with a boolean
   // parameter indicating the result when done.
-  virtual void Unregister(const UnregisterCallback& callback);
+  virtual void Unregister(UnregisterCallback callback);
 
   // Disconnects the manager.
   virtual void Disconnect();
@@ -166,9 +152,6 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
   // Saves the state keys received from |session_manager_client_|.
   void OnStateKeysUpdated();
 
-  // Initializes requisition settings at OOBE with values from VPD.
-  void InitializeRequisition();
-
   void NotifyConnected();
   void NotifyDisconnected();
 
@@ -198,7 +181,7 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
   // The TaskRunner used to do device status and log uploads.
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
-  ServerBackedStateKeysBroker::Subscription state_keys_update_subscription_;
+  base::CallbackListSubscription state_keys_update_subscription_;
 
   // PrefService instance to read the policy refresh rate from.
   PrefService* local_state_;

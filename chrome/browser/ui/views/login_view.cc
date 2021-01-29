@@ -15,6 +15,7 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/grid_layout.h"
+#include "ui/views/metadata/metadata_impl_macros.h"
 
 namespace {
 
@@ -55,7 +56,8 @@ LoginView::LoginView(const base::string16& authority,
       SetLayoutManager(std::make_unique<views::GridLayout>());
   views::ColumnSet* column_set = layout->AddColumnSet(kHeaderColumnSetId);
   column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1.0,
-                        views::GridLayout::FIXED, kMessageWidth, 0);
+                        views::GridLayout::ColumnSize::kFixed, kMessageWidth,
+                        0);
   AddHeaderLabel(layout, authority, views::style::STYLE_PRIMARY);
   if (!explanation.empty())
     AddHeaderLabel(layout, explanation, views::style::STYLE_SECONDARY);
@@ -111,6 +113,7 @@ void LoginView::OnLoginModelDestroying() {
   http_auth_manager_ = nullptr;
 }
 
-const char* LoginView::GetClassName() const {
-  return "LoginView";
-}
+BEGIN_METADATA(LoginView, views::View)
+ADD_READONLY_PROPERTY_METADATA(base::string16, Username)
+ADD_READONLY_PROPERTY_METADATA(base::string16, Password)
+END_METADATA

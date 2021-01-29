@@ -9,7 +9,6 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.app.Activity;
-import android.content.Context;
 import android.content.DialogInterface;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
@@ -42,8 +41,8 @@ import androidx.core.view.MarginLayoutParamsCompat;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.autofill.AutofillUiUtils;
 import org.chromium.chrome.browser.autofill.settings.CreditCardNumberFormattingTextWatcher;
-import org.chromium.chrome.browser.help.HelpAndFeedback;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.browser_ui.settings.SettingsUtils;
 import org.chromium.components.browser_ui.widget.AlwaysDismissedDialog;
@@ -76,11 +75,10 @@ public class EditorDialog
 
     private static EditorObserverForTest sObserverForTest;
 
-    private final Context mContext;
+    private final Activity mActivity;
     private final Handler mHandler;
     private final TextView.OnEditorActionListener mEditorActionListener;
     private final int mHalfRowMargin;
-    private final int mDropdownTopPadding;
     private final List<EditorFieldView> mFieldViews;
     private final List<EditText> mEditableTextFields;
     private final List<Spinner> mDropdownFields;
@@ -104,17 +102,19 @@ public class EditorDialog
     @Nullable
     private Runnable mDeleteRunnable;
     private boolean mIsDismissed;
+    private Profile mProfile;
     /**
      * Builds the editor dialog.
      *
      * @param activity        The activity on top of which the UI should be displayed.
      * @param deleteRunnable  The runnable that when called will delete the profile.
+     * @param profile         The current profile that creates EditorDialog.
      */
-    public EditorDialog(Activity activity, Runnable deleteRunnable) {
+    public EditorDialog(Activity activity, Runnable deleteRunnable, Profile profile) {
         super(activity, R.style.Theme_Chromium_Fullscreen);
         // Sets transparent background for animating content view.
         getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-        mContext = activity;
+        mActivity = activity;
         mHandler = new Handler();
         mIsDismissed = false;
         mEditorActionListener = new TextView.OnEditorActionListener() {
@@ -137,8 +137,6 @@ public class EditorDialog
 
         mHalfRowMargin = activity.getResources().getDimensionPixelSize(
                 R.dimen.editor_dialog_section_large_spacing);
-        mDropdownTopPadding = activity.getResources().getDimensionPixelSize(
-                R.dimen.payments_section_dropdown_top_padding);
         mFieldViews = new ArrayList<>();
         mEditableTextFields = new ArrayList<>();
         mDropdownFields = new ArrayList<>();
@@ -163,6 +161,7 @@ public class EditorDialog
 
         mCardNumberFormatter = new CreditCardNumberFormattingTextWatcher();
         mDeleteRunnable = deleteRunnable;
+        mProfile = profile;
     }
 
     /** Prevents screenshots of this editor. */
@@ -170,16 +169,6 @@ public class EditorDialog
         WindowManager.LayoutParams attributes = getWindow().getAttributes();
         attributes.flags |= WindowManager.LayoutParams.FLAG_SECURE;
         getWindow().setAttributes(attributes);
-    }
-
-    /** Launches the Autofill help page on top of the current Context. */
-    public static void launchAutofillHelpPage(Context context) {
-        // TODO(https://crbug.com/1041781): Use the current profile (i.e., regular profile or
-        // incognito profile) instead of always using regular profile. It is wrong and need to be
-        // fixed not to cause data leakage from incognito to regular profile.
-        HelpAndFeedback.getInstance().show((Activity) context,
-                context.getString(R.string.help_context_autofill),
-                Profile.getLastUsedRegularProfile(), null);
     }
 
     /**
@@ -206,7 +195,7 @@ public class EditorDialog
                     mDeleteRunnable.run();
                     animateOutDialog();
                 } else if (item.getItemId() == R.id.help_menu_id) {
-                    launchAutofillHelpPage(mContext);
+                    AutofillUiUtils.launchAutofillHelpPage(mActivity, mProfile);
                 }
                 return true;
             }
@@ -357,6 +346,18 @@ public class EditorDialog
         cancelButton.setOnClickListener(this);
     }
 
+    private void prepareFooter() {
+        TextView requiredFieldsNotice = mLayout.findViewById(R.id.required_fields_notice);
+        int requiredFieldsNoticeVisibility = View.GONE;
+        for (int i = 0; i < mFieldViews.size(); i++) {
+            if (mFieldViews.get(i).isRequired()) {
+                requiredFieldsNoticeVisibility = View.VISIBLE;
+                break;
+            }
+        }
+        requiredFieldsNotice.setVisibility(requiredFieldsNoticeVisibility);
+    }
+
     /**
      * Create the visual representation of the EditorModel.
      *
@@ -387,11 +388,18 @@ public class EditorDialog
                 if (nextFieldModel.isFullLine()) useFullLine = true;
             }
 
+            // Always keep dropdowns and text fields on different lines because of height
+            // differences.
+            if (!isLastField && !useFullLine
+                    && fieldModel.isDropdownField() != nextFieldModel.isDropdownField()) {
+                useFullLine = true;
+            }
+
             if (useFullLine || isLastField) {
                 addFieldViewToEditor(mDataView, fieldModel);
             } else {
                 // Create a LinearLayout to put it and the next view side by side.
-                LinearLayout rowLayout = new LinearLayout(mContext);
+                LinearLayout rowLayout = new LinearLayout(mActivity);
                 mDataView.addView(rowLayout);
 
                 View firstView = addFieldViewToEditor(rowLayout, fieldModel);
@@ -407,15 +415,6 @@ public class EditorDialog
                 MarginLayoutParamsCompat.setMarginEnd(firstParams, mHalfRowMargin);
                 lastParams.width = 0;
                 lastParams.weight = 1;
-
-                // Align the text field and the dropdown field.
-                if ((fieldModel.isTextField() && nextFieldModel.isDropdownField())
-                        || (nextFieldModel.isTextField() && fieldModel.isDropdownField())) {
-                    LinearLayout.LayoutParams dropdownParams =
-                            fieldModel.isDropdownField() ? firstParams : lastParams;
-                    dropdownParams.topMargin = mDropdownTopPadding;
-                    dropdownParams.bottomMargin = 0;
-                }
 
                 i = i + 1;
             }
@@ -442,9 +441,9 @@ public class EditorDialog
         View childView = null;
 
         if (fieldModel.getInputTypeHint() == EditorFieldModel.INPUT_TYPE_HINT_ICONS) {
-            childView = new EditorIconsField(mContext, parent, fieldModel).getLayout();
+            childView = new EditorIconsField(mActivity, parent, fieldModel).getLayout();
         } else if (fieldModel.getInputTypeHint() == EditorFieldModel.INPUT_TYPE_HINT_LABEL) {
-            childView = new EditorLabelField(mContext, parent, fieldModel).getLayout();
+            childView = new EditorLabelField(mActivity, parent, fieldModel).getLayout();
         } else if (fieldModel.getInputTypeHint() == EditorFieldModel.INPUT_TYPE_HINT_DROPDOWN) {
             Runnable prepareEditorRunnable = new Runnable() {
                 @Override
@@ -454,11 +453,12 @@ public class EditorDialog
 
                     // The fields may have changed.
                     prepareEditor();
+                    prepareFooter();
                     if (sObserverForTest != null) sObserverForTest.onEditorReadyToEdit();
                 }
             };
             EditorDropdownField dropdownView =
-                    new EditorDropdownField(mContext, parent, fieldModel, prepareEditorRunnable);
+                    new EditorDropdownField(mActivity, parent, fieldModel, prepareEditorRunnable);
             mFieldViews.add(dropdownView);
             mDropdownFields.add(dropdownView.getDropdown());
 
@@ -468,6 +468,8 @@ public class EditorDialog
             checkbox.setId(R.id.payments_edit_checkbox);
             checkbox.setText(fieldModel.getLabel());
             checkbox.setChecked(fieldModel.isChecked());
+            checkbox.setMinimumHeight(mActivity.getResources().getDimensionPixelSize(
+                    R.dimen.editor_dialog_checkbox_min_height));
             checkbox.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
                 @Override
                 public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
@@ -490,7 +492,7 @@ public class EditorDialog
             }
 
             EditorTextField inputLayout = new EditorTextField(
-                    mContext, fieldModel, mEditorActionListener, filter, formatter);
+                    mActivity, fieldModel, mEditorActionListener, filter, formatter);
             mFieldViews.add(inputLayout);
 
             EditText input = inputLayout.getEditText();
@@ -518,19 +520,20 @@ public class EditorDialog
      */
     public void show(EditorModel editorModel) {
         // If an asynchronous task calls show, while the activity is already finishing, return.
-        if (((Activity) mContext).isFinishing()) return;
+        if (mActivity.isFinishing()) return;
 
         setOnShowListener(this);
         setOnDismissListener(this);
         mEditorModel = editorModel;
-        mLayout = LayoutInflater.from(mContext).inflate(R.layout.payment_request_editor, null);
+        mLayout = LayoutInflater.from(mActivity).inflate(R.layout.payment_request_editor, null);
         setContentView(mLayout);
 
-        mFooter = LayoutInflater.from(mContext).inflate(
+        mFooter = LayoutInflater.from(mActivity).inflate(
                 R.layout.editable_option_editor_footer, null, false);
 
         prepareToolbar();
         prepareEditor();
+        prepareFooter();
         prepareButtons();
         show();
     }
@@ -572,10 +575,6 @@ public class EditorDialog
                 for (int i = 0; i < mEditableTextFields.size(); i++) {
                     mEditableTextFields.get(i).setEnabled(true);
                 }
-                // Note that keyboard will not show for dropdown field since it's not necessary.
-                if (getCurrentFocus() != null) {
-                    KeyboardVisibilityDelegate.getInstance().showKeyboard(getCurrentFocus());
-                }
                 mDialogInOutAnimator = null;
                 initFocus();
             }
@@ -585,20 +584,21 @@ public class EditorDialog
     }
 
     private void initFocus() {
-        // Immediately focus the first invalid field to make it faster to edit.
-        final List<EditorFieldView> invalidViews = getViewsWithInvalidInformation(false);
-        if (!invalidViews.isEmpty()) {
-            mHandler.post(new Runnable() {
-                @Override
-                public void run() {
-                    invalidViews.get(0).scrollToAndFocus();
-                    if (sObserverForTest != null) sObserverForTest.onEditorReadyToEdit();
-                }
-            });
-        } else {
-            // The first field will be focused, we are ready to edit.
+        mHandler.post(() -> {
+            List<EditorFieldView> invalidViews = getViewsWithInvalidInformation(false);
+            if (!invalidViews.isEmpty()) {
+                // Immediately focus the first invalid field to make it faster to edit.
+                invalidViews.get(0).scrollToAndFocus();
+            } else {
+                // Trigger default focus as it is not triggered automatically on Android P+.
+                mLayout.requestFocus();
+            }
+            // Note that keyboard will not be shown for dropdown field since it's not necessary.
+            if (getCurrentFocus() != null) {
+                KeyboardVisibilityDelegate.getInstance().showKeyboard(getCurrentFocus());
+            }
             if (sObserverForTest != null) sObserverForTest.onEditorReadyToEdit();
-        }
+        });
     }
 
     private List<EditorFieldView> getViewsWithInvalidInformation(boolean findAll) {

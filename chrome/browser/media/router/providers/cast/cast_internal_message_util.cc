@@ -12,10 +12,10 @@
 #include "base/json/json_writer.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_piece.h"
-#include "chrome/common/media_router/discovery/media_sink_internal.h"
-#include "chrome/common/media_router/providers/cast/cast_media_source.h"
 #include "components/cast_channel/cast_socket.h"
 #include "components/cast_channel/enum_table.h"
+#include "components/media_router/common/discovery/media_sink_internal.h"
+#include "components/media_router/common/providers/cast/cast_media_source.h"
 #include "net/base/escape.h"
 
 namespace cast_util {
@@ -23,42 +23,48 @@ namespace cast_util {
 using media_router::CastInternalMessage;
 
 template <>
-const EnumTable<CastInternalMessage::Type>
-    EnumTable<CastInternalMessage::Type>::instance(
-        {
-            {CastInternalMessage::Type::kClientConnect, "client_connect"},
-            {CastInternalMessage::Type::kAppMessage, "app_message"},
-            {CastInternalMessage::Type::kV2Message, "v2_message"},
-            {CastInternalMessage::Type::kLeaveSession, "leave_session"},
-            {CastInternalMessage::Type::kReceiverAction, "receiver_action"},
-            {CastInternalMessage::Type::kNewSession, "new_session"},
-            {CastInternalMessage::Type::kUpdateSession, "update_session"},
-            {CastInternalMessage::Type::kError, "error"},
-            {CastInternalMessage::Type::kOther},
-        },
-        CastInternalMessage::Type::kMaxValue);
+const EnumTable<CastInternalMessage::Type>&
+EnumTable<CastInternalMessage::Type>::GetInstance() {
+  static const EnumTable<CastInternalMessage::Type> kInstance(
+      {
+          {CastInternalMessage::Type::kClientConnect, "client_connect"},
+          {CastInternalMessage::Type::kAppMessage, "app_message"},
+          {CastInternalMessage::Type::kV2Message, "v2_message"},
+          {CastInternalMessage::Type::kLeaveSession, "leave_session"},
+          {CastInternalMessage::Type::kReceiverAction, "receiver_action"},
+          {CastInternalMessage::Type::kNewSession, "new_session"},
+          {CastInternalMessage::Type::kUpdateSession, "update_session"},
+          {CastInternalMessage::Type::kError, "error"},
+          {CastInternalMessage::Type::kOther},
+      },
+      CastInternalMessage::Type::kMaxValue);
+  return kInstance;
+}
 
 template <>
-const EnumTable<CastInternalMessage::ErrorCode>
-    EnumTable<CastInternalMessage::ErrorCode>::instance(
-        {
-            {CastInternalMessage::ErrorCode::kInternalError, "internal_error"},
-            {CastInternalMessage::ErrorCode::kCancel, "cancel"},
-            {CastInternalMessage::ErrorCode::kTimeout, "timeout"},
-            {CastInternalMessage::ErrorCode::kApiNotInitialized,
-             "api_not_initialized"},
-            {CastInternalMessage::ErrorCode::kInvalidParameter,
-             "invalid_parameter"},
-            {CastInternalMessage::ErrorCode::kExtensionNotCompatible,
-             "extension_not_compatible"},
-            {CastInternalMessage::ErrorCode::kReceiverUnavailable,
-             "receiver_unavailable"},
-            {CastInternalMessage::ErrorCode::kSessionError, "session_error"},
-            {CastInternalMessage::ErrorCode::kChannelError, "channel_error"},
-            {CastInternalMessage::ErrorCode::kLoadMediaFailed,
-             "load_media_failed"},
-        },
-        CastInternalMessage::ErrorCode::kMaxValue);
+const EnumTable<CastInternalMessage::ErrorCode>&
+EnumTable<CastInternalMessage::ErrorCode>::GetInstance() {
+  static const EnumTable<CastInternalMessage::ErrorCode> kInstance(
+      {
+          {CastInternalMessage::ErrorCode::kInternalError, "internal_error"},
+          {CastInternalMessage::ErrorCode::kCancel, "cancel"},
+          {CastInternalMessage::ErrorCode::kTimeout, "timeout"},
+          {CastInternalMessage::ErrorCode::kApiNotInitialized,
+           "api_not_initialized"},
+          {CastInternalMessage::ErrorCode::kInvalidParameter,
+           "invalid_parameter"},
+          {CastInternalMessage::ErrorCode::kExtensionNotCompatible,
+           "extension_not_compatible"},
+          {CastInternalMessage::ErrorCode::kReceiverUnavailable,
+           "receiver_unavailable"},
+          {CastInternalMessage::ErrorCode::kSessionError, "session_error"},
+          {CastInternalMessage::ErrorCode::kChannelError, "channel_error"},
+          {CastInternalMessage::ErrorCode::kLoadMediaFailed,
+           "load_media_failed"},
+      },
+      CastInternalMessage::ErrorCode::kMaxValue);
+  return kInstance;
+}
 
 }  // namespace cast_util
 
@@ -391,6 +397,9 @@ std::unique_ptr<CastSession> CastSession::From(
   CopyValueWithDefault(app_value, "statusText", base::Value(), &session_value);
   CopyValueWithDefault(app_value, "appImages", base::ListValue(),
                        &session_value);
+  // Optional fields
+  CopyValue(app_value, "appType", &session_value);
+  CopyValue(app_value, "universalAppId", &session_value);
 
   const base::Value* namespaces_value =
       app_value.FindKeyOfType("namespaces", base::Value::Type::LIST);

@@ -14,6 +14,7 @@
 
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/logging.h"
 #include "base/process/launch.h"
 #include "base/process/process_info.h"
 #include "base/rand_util.h"
@@ -82,7 +83,7 @@ bool IsEnterpriseInstall(const InstallerState& installer_state) {
 #endif
 
 // Returns the delay to be used between presentation retries. The default (five
-// minutes) can be overidden via --experiment-retry-delay=SECONDS.
+// minutes) can be overridden via --experiment-retry-delay=SECONDS.
 base::TimeDelta GetRetryDelay() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   base::string16 value =
@@ -268,7 +269,7 @@ void BeginUserExperiment(const InstallerState& installer_state,
   // Prepare a command line to relaunch the installed setup.exe for the
   // experiment.
   base::CommandLine setup_command(setup_path);
-  InstallUtil::AppendModeSwitch(&setup_command);
+  InstallUtil::AppendModeAndChannelSwitches(&setup_command);
   if (installer_state.system_install())
     setup_command.AppendSwitch(switches::kSystemLevel);
   if (installer_state.verbose_logging())
@@ -333,14 +334,14 @@ void BeginUserExperiment(const InstallerState& installer_state,
 // setup.exe immediately after a successful update or following user logon as a
 // result of Active Setup.
 void RunUserExperiment(const base::CommandLine& command_line,
-                       const MasterPreferences& master_preferences,
+                       const InitialPreferences& initial_preferences,
                        InstallationState* original_state,
                        InstallerState* installer_state) {
   VLOG(1) << __func__;
 
   ExperimentStorage storage;
   std::unique_ptr<SetupSingleton> setup_singleton(SetupSingleton::Acquire(
-      command_line, master_preferences, original_state, installer_state));
+      command_line, initial_preferences, original_state, installer_state));
   if (!setup_singleton) {
     VLOG(1) << "Timed out while waiting for setup singleton";
     WriteInitialState(&storage, ExperimentMetrics::kSingletonWaitTimeout);
@@ -495,7 +496,7 @@ int PickGroup(ExperimentStorage::Study participation) {
   DCHECK(participation == ExperimentStorage::kStudyOne ||
          participation == ExperimentStorage::kStudyTwo);
   if (participation == ExperimentStorage::kStudyOne) {
-    // Evenly distrubute clients among the groups.
+    // Evenly distribute clients among the groups.
     return base::RandInt(0, ExperimentMetrics::kNumGroups - 1);
   }
 

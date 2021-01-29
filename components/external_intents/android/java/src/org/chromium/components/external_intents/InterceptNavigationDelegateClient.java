@@ -6,6 +6,7 @@ package org.chromium.components.external_intents;
 
 import android.app.Activity;
 
+import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResult;
 import org.chromium.components.navigation_interception.NavigationParams;
 import org.chromium.content_public.browser.WebContents;
 
@@ -24,9 +25,9 @@ public interface InterceptNavigationDelegateClient {
     /* Returns the time of the user's last interaction with the app. */
     long getLastUserInteractionTime();
 
-    /* Gets a RedirectHandlerImpl instance that is associated with this client, creating it if
+    /* Gets a RedirectHandler instance that is associated with this client, creating it if
      * necessary. */
-    RedirectHandlerImpl getOrCreateRedirectHandler();
+    RedirectHandler getOrCreateRedirectHandler();
 
     /* Creates an AuthenticatorNavigationInterceptor instance that is configured for this client.
      */
@@ -54,4 +55,10 @@ public interface InterceptNavigationDelegateClient {
     /* Invoked when a navigation has begun in the InterceptNavigationDelegateImpl instance
      * associated with this instance. */
     void onNavigationStarted(NavigationParams params);
+
+    /* Invoked when the InterceptNavigationDelegateImpl instance
+     * associated with this instance has reached a decision for the navigation specified by
+     * |params|. |overrideUrlLoadingResult| specifies the decision. */
+    void onDecisionReachedForNavigation(
+            NavigationParams params, OverrideUrlLoadingResult overrideUrlLoadingResult);
 }

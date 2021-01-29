@@ -106,7 +106,7 @@ suite('AddSearchEngineDialogTests', function() {
       const inputElement = dialog.$[inputId];
       browserProxy.resetResolver('validateSearchEngineInput');
       inputElement.fire('input');
-      return inputElement.value != '' ?
+      return inputElement.value !== '' ?
           // Expecting validation only on non-empty values.
           browserProxy.whenCalled('validateSearchEngineInput') :
           Promise.resolve();
@@ -253,8 +253,7 @@ suite('SearchEngineEntryTests', function() {
   });
 
   /**
-   * Checks that the given button is disabled (by being hidden), for the
-   * given search engine.
+   * Checks that the given button is disabled for the given search engine.
    * @param {!SearchEngine} searchEngine
    * @param {string} buttonId
    */
@@ -262,7 +261,7 @@ suite('SearchEngineEntryTests', function() {
     entry.engine = searchEngine;
     const button = entry.$[buttonId];
     assertTrue(!!button);
-    assertTrue(button.hidden);
+    assertTrue(button.disabled);
   }
 
   test('Remove_Disabled', function() {
@@ -278,16 +277,6 @@ suite('SearchEngineEntryTests', function() {
   test('Edit_Disabled', function() {
     testButtonDisabled(
         createSampleSearchEngine(0, 'G', true, false, true), 'edit');
-  });
-
-  test('All_Disabled', function() {
-    entry.engine = createSampleSearchEngine(0, 'G', true, false, false);
-    flush();
-    assertTrue(entry.hasAttribute('show-dots_'));
-
-    entry.engine = createSampleSearchEngine(1, 'G', false, false, false);
-    flush();
-    assertFalse(entry.hasAttribute('show-dots_'));
   });
 });
 
@@ -351,8 +340,8 @@ suite('SearchEnginePageTests', function() {
 
     // Ensure that the search engines have reverse alphabetical order in the
     // model.
-    assertGT(
-        searchEnginesInfo.others[0].name, searchEnginesInfo.others[1].name);
+    assertTrue(
+        searchEnginesInfo.others[0].name > searchEnginesInfo.others[1].name);
 
     // Ensure that they are displayed in alphabetical order.
     assertEquals(searchEnginesInfo.others[1].name, othersEntries[0].name);
@@ -420,7 +409,7 @@ suite('SearchEnginePageTests', function() {
     flush();
 
     function getListItems(listIndex) {
-      const ironList = listIndex == 2 /* extensions */ ?
+      const ironList = listIndex === 2 /* extensions */ ?
           page.shadowRoot.querySelector('iron-list') :
           page.shadowRoot
               .querySelectorAll('settings-search-engines-list')[listIndex]

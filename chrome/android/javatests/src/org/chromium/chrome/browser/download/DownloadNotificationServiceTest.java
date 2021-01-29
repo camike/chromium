@@ -8,9 +8,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-import android.support.test.annotation.UiThreadTest;
-import android.support.test.filters.SmallTest;
-import android.support.test.rule.UiThreadTestRule;
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Before;
@@ -19,10 +17,12 @@ import org.junit.Test;
 import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.test.UiThreadTest;
 import org.chromium.base.test.params.ParameterAnnotations.ClassParameter;
 import org.chromium.base.test.params.ParameterAnnotations.UseRunnerDelegate;
 import org.chromium.base.test.params.ParameterSet;
 import org.chromium.base.test.params.ParameterizedRunner;
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
@@ -35,6 +35,7 @@ import org.chromium.components.offline_items_collection.LegacyHelpers;
 import org.chromium.components.offline_items_collection.OfflineItem.Progress;
 import org.chromium.components.offline_items_collection.OfflineItemProgressUnit;
 import org.chromium.components.offline_items_collection.PendingState;
+import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 import java.util.Arrays;
 import java.util.List;
@@ -47,6 +48,7 @@ import java.util.UUID;
 @UseRunnerDelegate(ChromeJUnit4RunnerDelegate.class)
 @Features.DisableFeatures({ChromeFeatureList.DOWNLOAD_NOTIFICATION_BADGE,
         ChromeFeatureList.DOWNLOAD_OFFLINE_CONTENT_PROVIDER})
+@Batch(Batch.UNIT_TESTS)
 public class DownloadNotificationServiceTest {
     private static final ContentId ID1 =
             LegacyHelpers.buildLegacyContentId(false, UUID.randomUUID().toString());
@@ -64,9 +66,6 @@ public class DownloadNotificationServiceTest {
 
     @Rule
     public TestRule mFeaturesProcessor = new Features.JUnitProcessor();
-
-    @Rule
-    public UiThreadTestRule mUiThreadTestRule = new UiThreadTestRule();
 
     private MockDownloadNotificationService mDownloadNotificationService;
     private DownloadForegroundServiceManagerTest
@@ -102,13 +101,15 @@ public class DownloadNotificationServiceTest {
         } else {
             Features.getInstance().disable(ChromeFeatureList.OFFLINE_PAGES_DESCRIPTIVE_FAIL_STATUS);
         }
-        DownloadNotificationService.clearResumptionAttemptLeft();
-        mDownloadNotificationService = new MockDownloadNotificationService();
-        mDownloadForegroundServiceManager =
-                new DownloadForegroundServiceManagerTest.MockDownloadForegroundServiceManager();
-        mDownloadNotificationService.setDownloadForegroundServiceManager(
-                mDownloadForegroundServiceManager);
-        mDownloadSharedPreferenceHelper = DownloadSharedPreferenceHelper.getInstance();
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            DownloadNotificationService.clearResumptionAttemptLeft();
+            mDownloadNotificationService = new MockDownloadNotificationService();
+            mDownloadForegroundServiceManager =
+                    new DownloadForegroundServiceManagerTest.MockDownloadForegroundServiceManager();
+            mDownloadNotificationService.setDownloadForegroundServiceManager(
+                    mDownloadForegroundServiceManager);
+            mDownloadSharedPreferenceHelper = DownloadSharedPreferenceHelper.getInstance();
+        });
     }
 
     @After

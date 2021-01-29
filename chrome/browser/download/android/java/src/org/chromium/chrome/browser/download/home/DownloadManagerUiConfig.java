@@ -8,12 +8,16 @@ import static org.chromium.components.browser_ui.util.ConversionUtils.BYTES_PER_
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.SysUtils;
+import org.chromium.chrome.browser.profiles.OTRProfileID;
 import org.chromium.ui.base.DeviceFormFactor;
 
 /** Provides the configuration params required by the download home UI. */
 public class DownloadManagerUiConfig {
     /** Whether or not the UI should include off the record items. */
     public final boolean isOffTheRecord;
+
+    /** If not null, which off the record items to show in the UI. */
+    public final OTRProfileID otrProfileID;
 
     /** Whether or not the UI should be shown as part of a separate activity. */
     public final boolean isSeparateActivity;
@@ -56,9 +60,13 @@ public class DownloadManagerUiConfig {
     /** Whether or not to show the pagination headers in the list. */
     public final boolean showPaginationHeaders;
 
+    /** Whether or not to start the UI focused on prefetched content. */
+    public final boolean startWithPrefetchedContent;
+
     /** Constructor. */
     private DownloadManagerUiConfig(Builder builder) {
         isOffTheRecord = builder.mIsOffTheRecord;
+        otrProfileID = builder.mOtrProfileID;
         isSeparateActivity = builder.mIsSeparateActivity;
         useGenericViewTypes = builder.mUseGenericViewTypes;
         supportFullWidthImages = builder.mSupportFullWidthImages;
@@ -69,6 +77,7 @@ public class DownloadManagerUiConfig {
         justNowThresholdSeconds = builder.mJustNowThresholdSeconds;
         supportsGrouping = builder.mSupportsGrouping;
         showPaginationHeaders = builder.mShowPaginationHeaders;
+        startWithPrefetchedContent = builder.mStartWithPrefetchedContent;
     }
 
     /** Helper class for building a {@link DownloadManagerUiConfig}. */
@@ -81,6 +90,7 @@ public class DownloadManagerUiConfig {
         private static final float MAX_THUMBNAIL_SCALE_FACTOR = 1.5f; /* hdpi scale factor. */
 
         private boolean mIsOffTheRecord;
+        private OTRProfileID mOtrProfileID;
         private boolean mIsSeparateActivity;
         private boolean mUseGenericViewTypes;
         private boolean mSupportFullWidthImages;
@@ -91,6 +101,7 @@ public class DownloadManagerUiConfig {
         private long mJustNowThresholdSeconds = JUST_NOW_THRESHOLD_SECONDS;
         private boolean mSupportsGrouping;
         private boolean mShowPaginationHeaders;
+        private boolean mStartWithPrefetchedContent;
 
         public Builder() {
             mSupportFullWidthImages = !DeviceFormFactor.isNonMultiDisplayContextOnTablet(
@@ -100,6 +111,11 @@ public class DownloadManagerUiConfig {
 
         public Builder setIsOffTheRecord(boolean isOffTheRecord) {
             mIsOffTheRecord = isOffTheRecord;
+            return this;
+        }
+
+        public Builder setOTRProfileID(OTRProfileID otrProfileID) {
+            mOtrProfileID = otrProfileID;
             return this;
         }
 
@@ -145,6 +161,11 @@ public class DownloadManagerUiConfig {
 
         public Builder setSupportsGrouping(boolean supportsGrouping) {
             mSupportsGrouping = supportsGrouping;
+            return this;
+        }
+
+        public Builder setStartWithPrefetchedContent(boolean startWithPrefetchedContent) {
+            mStartWithPrefetchedContent = startWithPrefetchedContent;
             return this;
         }
 

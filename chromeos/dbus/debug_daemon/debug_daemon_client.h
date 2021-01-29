@@ -105,6 +105,15 @@ class COMPONENT_EXPORT(DEBUG_DAEMON) DebugDaemonClient
   virtual void GetScrubbedBigLogs(const cryptohome::AccountIdentifier& id,
                                   GetLogsCallback callback) = 0;
 
+  // Retrieves the ARC bug report for user identified by |userhash|
+  // and saves it in debugd daemon store.
+  // If a backup already exists, it is overwritten.
+  // If backup operation fails, an error is logged.
+  // |id|: Cryptohome Account identifier for the user to get
+  // logs for.
+  virtual void BackupArcBugReport(const cryptohome::AccountIdentifier& id,
+                                  VoidDBusMethodCallback callback) = 0;
+
   // Gets all logs collected by debugd.
   virtual void GetAllLogs(GetLogsCallback callback) = 0;
 
@@ -169,8 +178,9 @@ class COMPONENT_EXPORT(DEBUG_DAEMON) DebugDaemonClient
   // dev mode.
   virtual void RemoveRootfsVerification(EnableDebuggingCallback callback) = 0;
 
+  using UploadCrashesCallback = base::OnceCallback<void(bool succeeded)>;
   // Trigger uploading of crashes.
-  virtual void UploadCrashes() = 0;
+  virtual void UploadCrashes(UploadCrashesCallback callback) = 0;
 
   // Runs the callback as soon as the service becomes available.
   virtual void WaitForServiceToBeAvailable(
@@ -225,17 +235,6 @@ class COMPONENT_EXPORT(DEBUG_DAEMON) DebugDaemonClient
   virtual void CupsRemovePrinter(const std::string& name,
                                  CupsRemovePrinterCallback callback,
                                  base::OnceClosure error_callback) = 0;
-
-  // A callback to handle the result of StartConcierge/StopConcierge.
-  using ConciergeCallback = base::OnceCallback<void(bool success)>;
-  // Calls debugd::kStartVmConcierge, which starts the Concierge service.
-  // |callback| is called when the method finishes. If the |callback| is called
-  // with true, it is guaranteed that the service is ready to accept requests.
-  // It is not necessary for ConciergeClient to use WaitForServiceToBeAvailable.
-  virtual void StartConcierge(ConciergeCallback callback) = 0;
-  // Calls debugd::kStopVmConcierge, which stops the Concierge service.
-  // |callback| is called when the method finishes.
-  virtual void StopConcierge(ConciergeCallback callback) = 0;
 
   // A callback to handle the result of
   // StartPluginVmDispatcher/StopPluginVmDispatcher.

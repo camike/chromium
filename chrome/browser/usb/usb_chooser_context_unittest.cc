@@ -4,25 +4,24 @@
 
 #include <vector>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/no_destructor.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/usb/usb_chooser_context.h"
 #include "chrome/browser/usb/usb_chooser_context_factory.h"
 #include "chrome/browser/usb/usb_chooser_context_mock_device_observer.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/pref_names.h"
-#include "chrome/test/base/scoped_testing_local_state.h"
-#include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/permissions/test/chooser_context_base_mock_permission_observer.h"
 #include "components/prefs/pref_service.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/browser_task_environment.h"
 #include "services/device/public/cpp/test/fake_usb_device_manager.h"
 #include "services/device/public/mojom/usb_device.mojom.h"
@@ -60,7 +59,7 @@ class UsbChooserContextTest : public testing::Test {
   }
 
  protected:
-  Profile* profile() { return &profile_; }
+  TestingProfile* profile() { return &profile_; }
 
   UsbChooserContext* GetChooserContext(Profile* profile) {
     auto* chooser_context = UsbChooserContextFactory::GetForProfile(profile);
@@ -304,7 +303,7 @@ TEST_F(UsbChooserContextTest, GrantPermissionInIncognito) {
       device_manager_.CreateAndAddDevice(0, 0, "Google", "Gizmo", "");
   UsbChooserContext* store = GetChooserContext(profile());
   UsbChooserContext* incognito_store =
-      GetChooserContext(profile()->GetOffTheRecordProfile());
+      GetChooserContext(profile()->GetPrimaryOTRProfile());
 
   EXPECT_CALL(
       mock_permission_observer_,
@@ -360,9 +359,8 @@ TEST_F(UsbChooserContextTest, UsbGuardPermission) {
       device_manager_.CreateAndAddDevice(0, 0, "Google", "Gizmo", "");
 
   auto* map = HostContentSettingsMapFactory::GetForProfile(profile());
-  map->SetContentSettingDefaultScope(kFooUrl, kFooUrl,
-                                     ContentSettingsType::USB_GUARD,
-                                     std::string(), CONTENT_SETTING_BLOCK);
+  map->SetContentSettingDefaultScope(
+      kFooUrl, kFooUrl, ContentSettingsType::USB_GUARD, CONTENT_SETTING_BLOCK);
 
   auto* store = GetChooserContext(profile());
   EXPECT_CALL(
@@ -412,6 +410,96 @@ TEST_F(UsbChooserContextTest, GetObjectDisplayNameForNamelessDevice) {
   ASSERT_EQ(objects.size(), 1u);
   EXPECT_EQ(store->GetObjectDisplayName(objects[0]->value),
             base::ASCIIToUTF16("Unknown product 0x162E from Google Inc."));
+}
+
+TEST_F(UsbChooserContextTest, PolicyGuardPermission) {
+  const auto origin = url::Origin::Create(GURL("https://google.com"));
+
+  UsbDeviceInfoPtr device =
+      device_manager_.CreateAndAddDevice(0, 0, "", "", "");
+  auto* store = GetChooserContext(profile());
+  store->GrantDevicePermission(origin, origin, *device);
+
+  auto* prefs = profile()->GetTestingPrefService();
+  prefs->SetManagedPref(prefs::kManagedDefaultWebUsbGuardSetting,
+                        std::make_unique<base::Value>(CONTENT_SETTING_BLOCK));
+  EXPECT_FALSE(store->CanRequestObjectPermission(origin, origin));
+  EXPECT_FALSE(store->HasDevicePermission(origin, origin, *device));
+
+  std::vector<std::unique_ptr<permissions::ChooserContextBase::Object>>
+      objects = store->GetGrantedObjects(origin, origin);
+  EXPECT_EQ(0u, objects.size());
+
+  std::vector<std::unique_ptr<permissions::ChooserContextBase::Object>>
+      all_origin_objects = store->GetAllGrantedObjects();
+  EXPECT_EQ(0u, all_origin_objects.size());
+}
+
+TEST_F(UsbChooserContextTest, PolicyAskForUrls) {
+  const auto kFooOrigin = url::Origin::Create(GURL("https://foo.origin"));
+  const auto kBarOrigin = url::Origin::Create(GURL("https://bar.origin"));
+
+  UsbDeviceInfoPtr device =
+      device_manager_.CreateAndAddDevice(0, 0, "", "", "");
+  auto* store = GetChooserContext(profile());
+  store->GrantDevicePermission(kFooOrigin, kFooOrigin, *device);
+  store->GrantDevicePermission(kBarOrigin, kBarOrigin, *device);
+
+  // Set the default to "ask" so that the policy being tested overrides it.
+  auto* prefs = profile()->GetTestingPrefService();
+  prefs->SetManagedPref(prefs::kManagedDefaultWebUsbGuardSetting,
+                        std::make_unique<base::Value>(CONTENT_SETTING_BLOCK));
+  prefs->SetManagedPref(prefs::kManagedWebUsbAskForUrls,
+                        base::JSONReader::ReadDeprecated(R"(
+    [ "https://foo.origin" ]
+  )"));
+
+  EXPECT_TRUE(store->CanRequestObjectPermission(kFooOrigin, kFooOrigin));
+  EXPECT_TRUE(store->HasDevicePermission(kFooOrigin, kFooOrigin, *device));
+  EXPECT_FALSE(store->CanRequestObjectPermission(kBarOrigin, kBarOrigin));
+  EXPECT_FALSE(store->HasDevicePermission(kBarOrigin, kBarOrigin, *device));
+
+  std::vector<std::unique_ptr<permissions::ChooserContextBase::Object>>
+      objects = store->GetGrantedObjects(kFooOrigin, kFooOrigin);
+  EXPECT_EQ(1u, objects.size());
+  objects = store->GetGrantedObjects(kBarOrigin, kBarOrigin);
+  EXPECT_EQ(0u, objects.size());
+
+  std::vector<std::unique_ptr<permissions::ChooserContextBase::Object>>
+      all_origin_objects = store->GetAllGrantedObjects();
+  EXPECT_EQ(1u, all_origin_objects.size());
+}
+
+TEST_F(UsbChooserContextTest, PolicyBlockedForUrls) {
+  const auto kFooOrigin = url::Origin::Create(GURL("https://foo.origin"));
+  const auto kBarOrigin = url::Origin::Create(GURL("https://bar.origin"));
+
+  UsbDeviceInfoPtr device =
+      device_manager_.CreateAndAddDevice(0, 0, "", "", "");
+  auto* store = GetChooserContext(profile());
+  store->GrantDevicePermission(kFooOrigin, kFooOrigin, *device);
+  store->GrantDevicePermission(kBarOrigin, kBarOrigin, *device);
+
+  auto* prefs = profile()->GetTestingPrefService();
+  prefs->SetManagedPref(prefs::kManagedWebUsbBlockedForUrls,
+                        base::JSONReader::ReadDeprecated(R"(
+    [ "https://foo.origin" ]
+  )"));
+
+  EXPECT_FALSE(store->CanRequestObjectPermission(kFooOrigin, kFooOrigin));
+  EXPECT_FALSE(store->HasDevicePermission(kFooOrigin, kFooOrigin, *device));
+  EXPECT_TRUE(store->CanRequestObjectPermission(kBarOrigin, kBarOrigin));
+  EXPECT_TRUE(store->HasDevicePermission(kBarOrigin, kBarOrigin, *device));
+
+  std::vector<std::unique_ptr<permissions::ChooserContextBase::Object>>
+      objects = store->GetGrantedObjects(kFooOrigin, kFooOrigin);
+  EXPECT_EQ(0u, objects.size());
+  objects = store->GetGrantedObjects(kBarOrigin, kBarOrigin);
+  EXPECT_EQ(1u, objects.size());
+
+  std::vector<std::unique_ptr<permissions::ChooserContextBase::Object>>
+      all_origin_objects = store->GetAllGrantedObjects();
+  EXPECT_EQ(1u, all_origin_objects.size());
 }
 
 namespace {
@@ -589,10 +677,10 @@ TEST_F(UsbChooserContextTest,
   auto* map = HostContentSettingsMapFactory::GetForProfile(profile());
   map->SetContentSettingDefaultScope(ProductVendorUrl(), ProductVendorUrl(),
                                      ContentSettingsType::USB_GUARD,
-                                     std::string(), CONTENT_SETTING_BLOCK);
+                                     CONTENT_SETTING_BLOCK);
   map->SetContentSettingDefaultScope(GadgetUrl(), CoolUrl(),
                                      ContentSettingsType::USB_GUARD,
-                                     std::string(), CONTENT_SETTING_BLOCK);
+                                     CONTENT_SETTING_BLOCK);
   EXPECT_FALSE(store->HasDevicePermission(
       kProductVendorOrigin, kProductVendorOrigin, *specific_device_info));
   EXPECT_FALSE(store->HasDevicePermission(
@@ -615,12 +703,11 @@ TEST_F(UsbChooserContextTest,
                                          *unrelated_device_info));
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 
 class DeviceLoginScreenWebUsbChooserContextTest : public UsbChooserContextTest {
  public:
-  DeviceLoginScreenWebUsbChooserContextTest()
-      : testing_local_state_(TestingBrowserProcess::GetGlobal()) {
+  DeviceLoginScreenWebUsbChooserContextTest() {
     TestingProfile::Builder builder;
     builder.SetPath(base::FilePath(FILE_PATH_LITERAL(chrome::kInitialProfile)));
     signin_profile_ = builder.Build();
@@ -631,7 +718,6 @@ class DeviceLoginScreenWebUsbChooserContextTest : public UsbChooserContextTest {
   Profile* GetSigninProfile() { return signin_profile_.get(); }
 
  private:
-  ScopedTestingLocalState testing_local_state_;
   std::unique_ptr<Profile> signin_profile_;
 };
 
@@ -680,8 +766,8 @@ TEST_F(DeviceLoginScreenWebUsbChooserContextTest,
   ExpectNoPermissions(user_store, *specific_device_info);
   ExpectNoPermissions(signin_store, *specific_device_info);
 
-  g_browser_process->local_state()->Set(
-      prefs::kDeviceLoginScreenWebUsbAllowDevicesForUrls,
+  signin_profile->GetPrefs()->Set(
+      prefs::kManagedWebUsbAllowDevicesForUrls,
       *base::JSONReader::ReadDeprecated(kPolicySetting));
 
   ExpectNoPermissions(user_store, *specific_device_info);
@@ -689,7 +775,7 @@ TEST_F(DeviceLoginScreenWebUsbChooserContextTest,
                            kInvalidRequestingOrigins, *specific_device_info);
 }
 
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace {
 

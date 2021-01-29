@@ -12,6 +12,7 @@
 #include <memory>
 #include <set>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "base/callback.h"
@@ -24,6 +25,7 @@
 #include "components/viz/common/quads/compositor_frame.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "components/viz/common/surfaces/surface_info.h"
+#include "components/viz/service/surfaces/pending_copy_output_request.h"
 #include "components/viz/service/surfaces/surface_client.h"
 #include "components/viz/service/surfaces/surface_dependency_deadline.h"
 #include "components/viz/service/viz_service_export.h"
@@ -148,7 +150,7 @@ class VIZ_SERVICE_EXPORT Surface final {
   void ActivatePendingFrameForDeadline();
 
   using CopyRequestsMap =
-      std::multimap<RenderPassId, std::unique_ptr<CopyOutputRequest>>;
+      std::multimap<CompositorRenderPassId, std::unique_ptr<CopyOutputRequest>>;
 
   // Adds each CopyOutputRequest in the current frame to copy_requests. The
   // caller takes ownership of them. |copy_requests| is keyed by RenderPass
@@ -244,6 +246,8 @@ class VIZ_SERVICE_EXPORT Surface final {
 
   void ActivateIfDeadlinePassed();
 
+  std::unique_ptr<DelegatedInkMetadata> TakeDelegatedInkMetadata();
+
   base::WeakPtr<Surface> GetWeakPtr() { return weak_factory_.GetWeakPtr(); }
 
  private:
@@ -252,6 +256,12 @@ class VIZ_SERVICE_EXPORT Surface final {
     FrameData(FrameData&& other);
     ~FrameData();
     FrameData& operator=(FrameData&& other);
+
+    // Delegated ink metadata should only be used for a single frame, so it
+    // should be taken from the FrameData to use.
+    std::unique_ptr<DelegatedInkMetadata> TakeDelegatedInkMetadata() {
+      return std::move(frame.metadata.delegated_ink_metadata);
+    }
 
     CompositorFrame frame;
     uint64_t frame_index;
@@ -302,7 +312,15 @@ class VIZ_SERVICE_EXPORT Surface final {
       CompositorFrame* frame,
       std::vector<ui::LatencyInfo>* latency_info);
 
-  void RequestCopyOfOutput(std::unique_ptr<CopyOutputRequest> copy_request);
+  // Places the copy-of-output request on the render pass defined by
+  // |PendingCopyOutputRequest::subtree_capture_id| if such a render pass
+  // exists, otherwise the request will be ignored.
+  void RequestCopyOfOutput(
+      PendingCopyOutputRequest pending_copy_output_request);
+
+  // Always placed the given |copy_request| on the root render pass.
+  void RequestCopyOfOutputOnRootRenderPass(
+      std::unique_ptr<CopyOutputRequest> copy_request);
 
   const SurfaceInfo surface_info_;
   SurfaceId previous_frame_surface_id_;

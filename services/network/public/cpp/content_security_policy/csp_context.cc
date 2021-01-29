@@ -5,8 +5,6 @@
 #include "services/network/public/cpp/content_security_policy/csp_context.h"
 #include "services/network/public/cpp/content_security_policy/content_security_policy.h"
 
-#include "url/origin.h"
-
 namespace network {
 
 namespace {
@@ -39,9 +37,6 @@ bool CSPContext::IsAllowedByCsp(mojom::CSPDirectiveName directive_name,
                                 const mojom::SourceLocationPtr& source_location,
                                 CheckCSPDisposition check_csp_disposition,
                                 bool is_form_submission) {
-  if (SchemeShouldBypassCSP(url.scheme_piece()))
-    return true;
-
   bool allow = true;
   for (const auto& policy : policies_) {
     if (ShouldCheckPolicy(policy, check_csp_disposition)) {
@@ -54,32 +49,6 @@ bool CSPContext::IsAllowedByCsp(mojom::CSPDirectiveName directive_name,
   DCHECK(allow || check_csp_disposition != CSPContext::CHECK_REPORT_ONLY_CSP);
 
   return allow;
-}
-
-void CSPContext::SetSelf(const url::Origin& origin) {
-  self_source_.reset();
-
-  // When the origin is unique, no URL should match with 'self'. That's why
-  // |self_source_| stays undefined here.
-  if (origin.opaque())
-    return;
-
-  if (origin.scheme() == url::kFileScheme) {
-    self_source_ = mojom::CSPSource::New(
-        url::kFileScheme, "", url::PORT_UNSPECIFIED, "", false, false);
-    return;
-  }
-
-  self_source_ = mojom::CSPSource::New(
-      origin.scheme(), origin.host(),
-      origin.port() == 0 ? url::PORT_UNSPECIFIED : origin.port(), "", false,
-      false);
-
-  DCHECK_NE("", self_source_->scheme);
-}
-
-void CSPContext::SetSelf(mojom::CSPSourcePtr self_source) {
-  self_source_ = std::move(self_source);
 }
 
 bool CSPContext::SchemeShouldBypassCSP(const base::StringPiece& scheme) {

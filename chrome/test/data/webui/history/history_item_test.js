@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 import {BrowserService, ensureLazyLoaded} from 'chrome://history/history.js';
+import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {TestBrowserService} from 'chrome://test/history/test_browser_service.js';
 import {createHistoryEntry, createSearchEntry} from 'chrome://test/history/test_util.js';
-import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {flushTasks} from 'chrome://test/test_util.m.js';
 
 const TEST_HISTORY_RESULTS = [
@@ -27,7 +27,7 @@ suite('<history-item> unit test', function() {
   let item;
 
   setup(function() {
-    PolymerTest.clearBody();
+    document.body.innerHTML = '';
     BrowserService.instance_ = new TestBrowserService();
 
     item = document.createElement('history-item');
@@ -70,7 +70,7 @@ suite('<history-item> integration test', function() {
   let element;
 
   setup(function() {
-    PolymerTest.clearBody();
+    document.body.innerHTML = '';
     const testService = new TestBrowserService();
     BrowserService.instance_ = testService;
 

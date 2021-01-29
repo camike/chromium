@@ -14,9 +14,13 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "base/sequenced_task_runner.h"
 #include "chrome/browser/background/background_application_list_model.h"
+#include "chrome/browser/extensions/forced_extensions/force_installed_tracker.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
+#include "chrome/browser/profiles/profile_observer.h"
 #include "chrome/browser/status_icons/status_icon.h"
 #include "chrome/browser/status_icons/status_icon_menu_model.h"
 #include "chrome/browser/ui/browser_list_observer.h"
@@ -31,6 +35,7 @@ class BackgroundModeOptimizer;
 class Browser;
 class PrefRegistrySimple;
 class Profile;
+class ScopedProfileKeepAlive;
 class StatusIcon;
 class StatusTray;
 
@@ -139,6 +144,8 @@ class BackgroundModeManager : public content::NotificationObserver,
                            ProfileAttributesStorageObserver);
   FRIEND_TEST_ALL_PREFIXES(BackgroundModeManagerTest,
                            DeleteBackgroundProfile);
+  FRIEND_TEST_ALL_PREFIXES(BackgroundModeManagerTest,
+                           ForceInstalledExtensionsKeepAlive);
   FRIEND_TEST_ALL_PREFIXES(BackgroundModeManagerWithExtensionsTest,
                            BackgroundMenuGeneration);
   FRIEND_TEST_ALL_PREFIXES(BackgroundModeManagerWithExtensionsTest,
@@ -150,11 +157,19 @@ class BackgroundModeManager : public content::NotificationObserver,
 
   // Manages the background clients and menu items for a single profile. A
   // client is an extension.
-  class BackgroundModeData : public StatusIconMenuModel::Delegate {
+  class BackgroundModeData : public StatusIconMenuModel::Delegate,
+                             public extensions::ForceInstalledTracker::Observer,
+                             public ProfileObserver {
    public:
-    BackgroundModeData(Profile* profile,
+    BackgroundModeData(BackgroundModeManager* manager,
+                       Profile* profile,
                        CommandIdHandlerVector* command_id_handler_vector);
     ~BackgroundModeData() override;
+
+    void SetTracker(extensions::ForceInstalledTracker* tracker);
+
+    // Overrides from extensions::ForceInstalledTracker::Observer.
+    void OnForceInstalledExtensionsReady() override;
 
     // Overrides from StatusIconMenuModel::Delegate implementation.
     void ExecuteCommand(int command_id, int event_flags) override;
@@ -199,7 +214,24 @@ class BackgroundModeManager : public content::NotificationObserver,
     // the last call to GetNewBackgroundApps()).
     std::set<const extensions::Extension*> GetNewBackgroundApps();
 
+    // Acquires or releases a strong ref to the Profile, preventing/allowing it
+    // to be deleted.
+    //
+    // Acquires the ref if background mode is active, and this profile has
+    // persistent background apps. Releases it otherwise.
+    void UpdateProfileKeepAlive();
+
+    // ProfileObserver overrides:
+    void OnProfileWillBeDestroyed(Profile* profile) override;
+
    private:
+    BackgroundModeManager* const manager_;
+
+    ScopedObserver<Profile, ProfileObserver> profile_observer_{this};
+    ScopedObserver<extensions::ForceInstalledTracker,
+                   extensions::ForceInstalledTracker::Observer>
+        force_installed_tracker_observer_{this};
+
     // The cached list of BackgroundApplications.
     std::unique_ptr<BackgroundApplicationListModel> applications_;
 
@@ -207,7 +239,11 @@ class BackgroundModeManager : public content::NotificationObserver,
     base::string16 name_;
 
     // The profile associated with this background app data.
-    Profile* const profile_;
+    Profile* profile_;
+
+    // Prevents |profile_| from being deleted. Created or reset by
+    // UpdateProfileKeepAlive().
+    std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive_;
 
     // Weak ref vector owned by BackgroundModeManager where the indices
     // correspond to Command IDs and values correspond to their handlers.
@@ -230,7 +266,7 @@ class BackgroundModeManager : public content::NotificationObserver,
                const content::NotificationDetails& details) override;
 
   // Called when ExtensionSystem is ready.
-  void OnExtensionsReady(const Profile* profile);
+  void OnExtensionsReady(Profile* profile);
 
   // Called when the kBackgroundModeEnabled preference changes.
   void OnBackgroundModeEnabledPrefChanged();
@@ -295,6 +331,13 @@ class BackgroundModeManager : public content::NotificationObserver,
   // longer need to do this (either because the user has chosen to exit chrome
   // manually, or all apps have been loaded).
   void ReleaseStartupKeepAlive();
+
+  // If --no-startup-window is passed, BackgroundModeManager will manually keep
+  // chrome running while waiting for force-installed extensions to install.
+  // This is called when we no longer need to do this (either because the user
+  // has chosen to exit chrome manually, or all force-installed extensions have
+  // installed/failed installing).
+  void ReleaseForceInstalledExtensionsKeepAlive();
 
   // Create a status tray icon to allow the user to shutdown Chrome when running
   // in background mode. Virtual to enable testing.
@@ -401,8 +444,13 @@ class BackgroundModeManager : public content::NotificationObserver,
 
   // Set when we are keeping chrome running during the startup process - this
   // is required when running with the --no-startup-window flag, as otherwise
-  // chrome would immediately exit due to having no open windows.
+  // chrome would immediately exit due to having no open windows. Resets
+  // after |ExtensionSystem| startup.
   std::unique_ptr<ScopedKeepAlive> keep_alive_for_startup_;
+
+  // Like |keep_alive_for_startup_|, but resets after force-installed
+  // extensions are finished installing.
+  std::unique_ptr<ScopedKeepAlive> keep_alive_for_force_installed_extensions_;
 
   // Reference to the optimizer to use to reduce Chrome's footprint when in
   // background mode. If null, optimizations are disabled.

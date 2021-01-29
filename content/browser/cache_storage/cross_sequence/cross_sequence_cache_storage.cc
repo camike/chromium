@@ -23,11 +23,17 @@ class CrossSequenceCacheStorage::Inner {
                               blink::mojom::CacheStorageError)>;
 
   Inner(const url::Origin& origin,
-        CacheStorageOwner owner,
+        storage::mojom::CacheStorageOwner owner,
         scoped_refptr<CacheStorageContextWithManager> context) {
     scoped_refptr<CacheStorageManager> manager = context->CacheManager();
     if (manager)
       handle_ = manager->OpenCacheStorage(origin, owner);
+  }
+
+  void Init() {
+    if (!handle_.value())
+      return;
+    handle_.value()->Init();
   }
 
   void OpenCache(scoped_refptr<CrossSequenceCacheStorageCache> cache_wrapper,
@@ -152,7 +158,7 @@ class CrossSequenceCacheStorage::Inner {
 
 CrossSequenceCacheStorage::CrossSequenceCacheStorage(
     const url::Origin& origin,
-    CacheStorageOwner owner,
+    storage::mojom::CacheStorageOwner owner,
     scoped_refptr<base::SequencedTaskRunner> target_task_runner,
     scoped_refptr<CacheStorageContextWithManager> context)
     : CacheStorage(origin),
@@ -180,6 +186,11 @@ void CrossSequenceCacheStorage::DropHandleRef() {
   handle_ref_count_ -= 1;
   if (handle_ref_count_ == 0)
     self_ref_.reset();
+}
+
+void CrossSequenceCacheStorage::Init() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  inner_.Post(FROM_HERE, &Inner::Init);
 }
 
 void CrossSequenceCacheStorage::OpenCache(const std::string& cache_name,

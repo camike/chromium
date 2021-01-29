@@ -17,7 +17,6 @@
 namespace net {
 class CertVerifier;
 class CTPolicyEnforcer;
-class CTVerifier;
 class DrainableIOBuffer;
 class GrowableIOBuffer;
 class SSLClientContext;
@@ -64,7 +63,7 @@ class SslHmacChannelAuthenticator : public ChannelAuthenticator {
 
   // ChannelAuthenticator interface.
   void SecureAndAuthenticate(std::unique_ptr<P2PStreamSocket> socket,
-                             const DoneCallback& done_callback) override;
+                             DoneCallback done_callback) override;
 
  private:
   class P2PStreamSocketAdapter;
@@ -84,7 +83,6 @@ class SslHmacChannelAuthenticator : public ChannelAuthenticator {
     // Used in the CLIENT mode only.
     std::unique_ptr<net::TransportSecurityState> transport_security_state;
     std::unique_ptr<net::CertVerifier> cert_verifier;
-    std::unique_ptr<net::CTVerifier> ct_verifier;
     std::unique_ptr<net::CTPolicyEnforcer> ct_policy_enforcer;
     std::unique_ptr<net::SSLClientContext> client_context;
   };

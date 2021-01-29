@@ -20,9 +20,10 @@
 #include "chrome/browser/webauthn/authenticator_reference.h"
 #include "chrome/browser/webauthn/authenticator_transport.h"
 #include "chrome/browser/webauthn/observable_authenticator_list.h"
-#include "device/fido/cable/cable_discovery_data.h"
+#include "device/fido/fido_constants.h"
 #include "device/fido/fido_request_handler_base.h"
 #include "device/fido/fido_transport_protocol.h"
+#include "device/fido/pin.h"
 
 namespace device {
 class AuthenticatorGetAssertionResponse;
@@ -38,8 +39,6 @@ class AuthenticatorGetAssertionResponse;
 class AuthenticatorRequestDialogModel {
  public:
   using RequestCallback = device::FidoRequestHandlerBase::RequestCallback;
-  using BlePairingCallback = device::FidoRequestHandlerBase::BlePairingCallback;
-  using BleDevicePairedCallback = base::RepeatingCallback<void(std::string)>;
   using TransportAvailabilityInfo =
       device::FidoRequestHandlerBase::TransportAvailabilityInfo;
 
@@ -73,13 +72,18 @@ class AuthenticatorRequestDialogModel {
     kBlePowerOnAutomatic,
     kBlePowerOnManual,
 
-    // Touch ID.
-    kTouchIdIncognitoSpeedBump,
+    // Let the user confirm that they want to create a platform credential in an
+    // off-the-record browsing context.
+    kPlatformAuthenticatorOffTheRecordInterstitial,
 
     // Phone as a security key.
     kCableActivate,
+    kAndroidAccessory,
+    kCableV2Activate,
+    kCableV2QRCode,
 
     // Authenticator Client PIN.
+    kClientPinChange,
     kClientPinEntry,
     kClientPinSetup,
     kClientPinTapAgain,
@@ -99,11 +103,9 @@ class AuthenticatorRequestDialogModel {
     // Account selection,
     kSelectAccount,
 
-    // Attestation permission request.
+    // Attestation permission requests.
     kAttestationPermissionRequest,
-
-    // Display QR code for phone pairing.
-    kQRCode,
+    kEnterpriseAttestationPermissionRequest,
   };
 
   // Implemented by the dialog to observe this model and show the UI panels
@@ -219,7 +221,7 @@ class AuthenticatorRequestDialogModel {
   // Valid action when at step: kNotStarted, kTransportSelection, and steps
   // where the other transports menu is shown, namely, kUsbInsertAndActivate,
   // kCableActivate.
-  void EnsureBleAdapterIsPoweredBeforeContinuingWithStep(Step step);
+  void EnsureBleAdapterIsPoweredAndContinueWithCable();
 
   // Continues with the BLE/caBLE flow now that the Bluetooth adapter is
   // powered.
@@ -237,17 +239,24 @@ class AuthenticatorRequestDialogModel {
   // Valid action when at step: kUsbInsert.
   void TryUsbDevice();
 
-  // Tries to use Touch ID -- either because the request requires it or because
-  // the user told us to. May show an error for unrecognized credential, or an
-  // Incognito mode interstitial, or proceed straight to the Touch ID prompt.
+  // Tries to dispatch to the platform authenticator -- either because the
+  // request requires it or because the user told us to. May show an error for
+  // unrecognized credential, or an Incognito mode interstitial, or proceed
+  // straight to the platform authenticator prompt.
   //
   // Valid action when at all steps.
-  void StartTouchIdFlow();
+  void StartPlatformAuthenticatorFlow();
 
-  // Proceeds straight to the Touch ID prompt.
+  // Proceeds straight to the platform authenticator prompt.
   //
   // Valid action when at all steps.
-  void HideDialogAndTryTouchId();
+  void HideDialogAndDispatchToPlatformAuthenticator();
+
+  // Show guidance about caBLE USB fallback.
+  void ShowCableUsbFallback();
+
+  // Show caBLE activation sheet.
+  void ShowCable();
 
   // Cancels the flow as a result of the user clicking `Cancel` on the UI.
   //
@@ -297,12 +306,20 @@ class AuthenticatorRequestDialogModel {
   // user verification capability.
   void OnAuthenticatorMissingUserVerification();
 
+  // To be called when the selected authenticator doesn't have the requested
+  // large blob capability.
+  void OnAuthenticatorMissingLargeBlob();
+
+  // To be called when the selected authenticator doesn't support any of the
+  // COSEAlgorithmIdentifiers requested by the RP.
+  void OnNoCommonAlgorithms();
+
   // To be called when the selected authenticator cannot create a resident
   // credential because of insufficient storage.
   void OnAuthenticatorStorageFull();
 
-  // To be called when the user denies consent, e.g. by clicking "Cancel" on the
-  // system Touch ID prompt.
+  // To be called when the user denies consent, e.g. by canceling out of the
+  // system's platform authenticator prompt.
   void OnUserConsentDenied();
 
   // To be called when the user clicks "Cancel" in the native Windows UI.
@@ -317,10 +334,8 @@ class AuthenticatorRequestDialogModel {
   void SetBluetoothAdapterPowerOnCallback(
       base::RepeatingClosure bluetooth_adapter_power_on_callback);
 
-  void SetPINCallback(base::OnceCallback<void(std::string)> pin_callback);
-
   // OnHavePIN is called when the user enters a PIN in the UI.
-  void OnHavePIN(const std::string& pin);
+  void OnHavePIN(base::string16 pin);
 
   // Called when the user needs to retry user verification with the number of
   // |attempts| remaining.
@@ -354,19 +369,23 @@ class AuthenticatorRequestDialogModel {
     return ephemeral_state_.saved_authenticators_;
   }
 
-  const std::vector<AuthenticatorTransport>& available_transports() {
-    return available_transports_;
+  const base::flat_set<AuthenticatorTransport>& available_transports() {
+    return transport_availability_.available_transports;
   }
 
-  base::span<const uint8_t, 32> qr_generator_key() const {
-    return *qr_generator_key_;
-  }
+  const std::string& cable_qr_string() const { return *cable_qr_string_; }
 
-  void CollectPIN(base::Optional<int> attempts,
-                  base::OnceCallback<void(std::string)> provide_pin_cb);
-  bool has_attempted_pin_entry() const {
-    return ephemeral_state_.has_attempted_pin_entry_;
-  }
+  // cable_is_serverlink returns true if the caBLE "v1" UI was triggered by a
+  // caBLEv2 server-linked request.
+  bool cable_is_serverlink() const;
+
+  void CollectPIN(device::pin::PINEntryReason reason,
+                  device::pin::PINEntryError error,
+                  uint32_t min_pin_length,
+                  int attempts,
+                  base::OnceCallback<void(base::string16)> provide_pin_cb);
+  uint32_t min_pin_length() const { return min_pin_length_; }
+  device::pin::PINEntryError pin_error() const { return pin_error_; }
   base::Optional<int> pin_attempts() const { return pin_attempts_; }
 
   void StartInlineBioEnrollment(base::OnceClosure next_callback);
@@ -375,22 +394,13 @@ class AuthenticatorRequestDialogModel {
   base::Optional<int> max_bio_samples() { return max_bio_samples_; }
   base::Optional<int> bio_samples_remaining() { return bio_samples_remaining_; }
 
-  // Flags the authenticator's internal user verification as locked.
-  void set_internal_uv_locked() { uv_attempts_ = 0; }
   base::Optional<int> uv_attempts() const { return uv_attempts_; }
 
-  void RequestAttestationPermission(base::OnceCallback<void(bool)> callback);
+  void RequestAttestationPermission(bool is_enterprise_attestation,
+                                    base::OnceCallback<void(bool)> callback);
 
   const std::vector<device::AuthenticatorGetAssertionResponse>& responses() {
     return ephemeral_state_.responses_;
-  }
-
-  void set_has_attempted_pin_entry_for_testing() {
-    ephemeral_state_.has_attempted_pin_entry_ = true;
-  }
-
-  void set_incognito_mode(bool incognito_mode) {
-    incognito_mode_ = incognito_mode;
   }
 
   bool might_create_resident_credential() const {
@@ -404,7 +414,7 @@ class AuthenticatorRequestDialogModel {
   void set_cable_transport_info(
       bool cable_extension_provided,
       bool has_paired_phones,
-      base::Optional<device::QRGeneratorKey> qr_generator_key);
+      const base::Optional<std::string>& cable_qr_string);
 
   bool win_native_api_enabled() const {
     return transport_availability_.has_win_native_api_authenticator;
@@ -415,6 +425,8 @@ class AuthenticatorRequestDialogModel {
   const std::string& relying_party_id() const { return relying_party_id_; }
 
   bool offer_try_again_in_ui() const { return offer_try_again_in_ui_; }
+
+  base::WeakPtr<AuthenticatorRequestDialogModel> GetWeakPtr();
 
  private:
   // Contains the state that will be reset when calling StartOver(). StartOver()
@@ -429,12 +441,11 @@ class AuthenticatorRequestDialogModel {
     // to connect to or conduct WebAuthN request to via the WebAuthN UI.
     base::Optional<std::string> selected_authenticator_id_;
 
-    // Transport type and id of Mac TouchId and BLE authenticators are cached so
-    // that the WebAuthN request for the corresponding authenticators can be
-    // dispatched lazily after the user interacts with the UI element.
+    // Stores a list of |AuthenticatorReference| values such that a request can
+    // be dispatched dispatched after some UI interaction. This is useful for
+    // platform authenticators (and Windows) where dispatch to the authenticator
+    // immediately results in modal UI to appear.
     ObservableAuthenticatorList saved_authenticators_;
-
-    bool has_attempted_pin_entry_ = false;
 
     // responses_ contains possible accounts to select between.
     std::vector<device::AuthenticatorGetAssertionResponse> responses_;
@@ -460,7 +471,6 @@ class AuthenticatorRequestDialogModel {
 
   // These fields are only filled out when the UX flow is started.
   TransportAvailabilityInfo transport_availability_;
-  std::vector<AuthenticatorTransport> available_transports_;
   base::Optional<device::FidoTransportProtocol> last_used_transport_;
 
   RequestCallback request_callback_;
@@ -470,7 +480,9 @@ class AuthenticatorRequestDialogModel {
   base::Optional<int> bio_samples_remaining_;
   base::OnceClosure bio_enrollment_callback_;
 
-  base::OnceCallback<void(std::string)> pin_callback_;
+  base::OnceCallback<void(base::string16)> pin_callback_;
+  uint32_t min_pin_length_ = device::kMinPinLength;
+  device::pin::PINEntryError pin_error_ = device::pin::PINEntryError::kNoError;
   base::Optional<int> pin_attempts_;
   base::Optional<int> uv_attempts_;
 
@@ -485,8 +497,6 @@ class AuthenticatorRequestDialogModel {
   base::OnceCallback<void(device::AuthenticatorGetAssertionResponse)>
       selection_callback_;
 
-  bool incognito_mode_ = false;
-
   // offer_try_again_in_ui_ indicates whether a button to retry the request
   // should be included on the dialog sheet shown when encountering certain
   // errors.
@@ -498,7 +508,7 @@ class AuthenticatorRequestDialogModel {
   // have_paired_phones_ indicates whether this profile knows of any paired
   // phones.
   bool have_paired_phones_ = false;
-  base::Optional<device::QRGeneratorKey> qr_generator_key_;
+  base::Optional<std::string> cable_qr_string_;
   // win_native_api_already_tried_ is true if the Windows-native UI has been
   // displayed already and the user cancelled it. In this case, we shouldn't
   // jump straight to showing it again.

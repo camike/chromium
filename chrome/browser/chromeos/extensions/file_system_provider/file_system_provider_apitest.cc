@@ -21,6 +21,7 @@
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/notifications/notification_display_service_tester.h"
+#include "content/public/test/browser_test.h"
 #include "ui/message_center/public/cpp/notification.h"
 #include "ui/message_center/public/cpp/notification_delegate.h"
 
@@ -130,9 +131,9 @@ class FileSystemProviderApiTest : public ExtensionApiTest {
   // Loads a helper testing extension.
   void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
-    const extensions::Extension* extension = LoadExtensionWithFlags(
+    const extensions::Extension* extension = LoadExtension(
         test_data_dir_.AppendASCII("file_system_provider/test_util"),
-        kFlagEnableIncognito);
+        {.allow_in_incognito = true});
     ASSERT_TRUE(extension);
 
     display_service_ = std::make_unique<NotificationDisplayServiceTester>(

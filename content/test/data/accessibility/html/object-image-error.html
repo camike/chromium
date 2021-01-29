@@ -1,9 +1,9 @@
 <!--
 @WAIT-FOR:Fallback
+@NO-LOAD-EXPECTED:broken.jpg
 -->
 <div>
-    <object data="./broken.jpg"
-            onerror="document.getElementById('done').innerText='complete'; ">
+    <object data="./broken.jpg">
         Fallback
     </object>
 </div>

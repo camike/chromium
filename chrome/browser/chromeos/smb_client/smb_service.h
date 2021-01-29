@@ -128,7 +128,7 @@ class SmbService : public KeyedService,
 
   // chromeos::PowerManagerClient::Observer overrides
   void SuspendImminent(power_manager::SuspendImminent::Reason reason) override;
-  void SuspendDone(const base::TimeDelta& sleep_duration) override;
+  void SuspendDone(base::TimeDelta sleep_duration) override;
 
  private:
   friend class SmbServiceTest;
@@ -297,6 +297,10 @@ class SmbService : public KeyedService,
   void OnUpdateSharePathResponse(int32_t mount_id,
                                  StartReadDirIfSuccessfulCallback reply,
                                  smbprovider::ErrorType error);
+
+  // Handles the callback for SmbFsShare::RemoveSavedCredentials().
+  void OnSmbfsRemoveSavedCredentialsDone(const std::string& mount_id,
+                                         bool success);
 
   // Helper function that determines if HostDiscovery can be run again. Returns
   // false if HostDiscovery was recently run.

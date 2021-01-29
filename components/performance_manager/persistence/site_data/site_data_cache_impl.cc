@@ -7,13 +7,13 @@
 #include <set>
 
 #include "base/callback.h"
+#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
 #include "components/performance_manager/persistence/site_data/leveldb_site_data_store.h"
 #include "components/performance_manager/persistence/site_data/site_data_cache_factory.h"
-#include "components/performance_manager/persistence/site_data/site_data_reader.h"
 #include "components/performance_manager/persistence/site_data/site_data_writer.h"
+#include "components/performance_manager/public/persistence/site_data/site_data_reader.h"
 
 namespace performance_manager {
 
@@ -54,18 +54,22 @@ std::unique_ptr<SiteDataReader> SiteDataCacheImpl::GetReaderForOrigin(
 }
 
 std::unique_ptr<SiteDataWriter> SiteDataCacheImpl::GetWriterForOrigin(
-    const url::Origin& origin,
-    performance_manager::TabVisibility tab_visibility) {
+    const url::Origin& origin) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   internal::SiteDataImpl* impl = GetOrCreateFeatureImpl(origin);
   DCHECK(impl);
-  SiteDataWriter* data_writer = new SiteDataWriter(impl, tab_visibility);
+  SiteDataWriter* data_writer = new SiteDataWriter(impl);
   return base::WrapUnique(data_writer);
 }
 
-bool SiteDataCacheImpl::IsRecordingForTesting() {
+bool SiteDataCacheImpl::IsRecording() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return true;
+}
+
+int SiteDataCacheImpl::Size() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return origin_data_map_.size();
 }
 
 const char* SiteDataCacheImpl::GetDataCacheName() {
@@ -164,6 +168,7 @@ void SiteDataCacheImpl::ClearAllSiteData() {
 
 void SiteDataCacheImpl::SetInitializationCallbackForTesting(
     base::OnceClosure callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   data_store_->SetInitializationCallbackForTesting(std::move(callback));
 }
 

@@ -8,6 +8,8 @@
 #include "ash/public/cpp/accessibility_controller_client.h"
 #include "ash/public/cpp/accessibility_controller_enums.h"
 #include "base/macros.h"
+#include "base/optional.h"
+#include "chromeos/audio/chromeos_sounds.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 
 namespace ash {
@@ -27,9 +29,10 @@ class TestAccessibilityControllerClient : public AccessibilityControllerClient {
   void TriggerAccessibilityAlert(AccessibilityAlert alert) override;
   void TriggerAccessibilityAlertWithMessage(
       const std::string& message) override;
-  void PlayEarcon(int32_t sound_key) override;
+  void PlayEarcon(chromeos::Sound sound_key) override;
   base::TimeDelta PlayShutdownSound() override;
-  void HandleAccessibilityGesture(ax::mojom::Gesture gesture) override;
+  void HandleAccessibilityGesture(ax::mojom::Gesture gesture,
+                                  gfx::PointF location) override;
   bool ToggleDictation() override;
   void SilenceSpokenFeedback() override;
   void OnTwoFingerTouchStart() override;
@@ -39,20 +42,34 @@ class TestAccessibilityControllerClient : public AccessibilityControllerClient {
   void RequestSelectToSpeakStateChange() override;
   void RequestAutoclickScrollableBoundsForPoint(
       gfx::Point& point_in_screen) override;
+  void MagnifierBoundsChanged(const gfx::Rect& bounds_in_screen) override;
+  void OnSwitchAccessDisabled() override;
+  void OnSelectToSpeakPanelAction(SelectToSpeakPanelAction action,
+                                  double value) override;
 
-  int32_t GetPlayedEarconAndReset();
+  base::Optional<chromeos::Sound> GetPlayedEarconAndReset();
 
   AccessibilityAlert last_a11y_alert() const { return last_a11y_alert_; }
   ax::mojom::Gesture last_a11y_gesture() const { return last_a11y_gesture_; }
   int select_to_speak_change_change_requests() const {
     return select_to_speak_state_change_requests_;
   }
+  const std::string& last_alert_message() const { return last_alert_message_; }
+  SelectToSpeakPanelAction last_select_to_speak_panel_action() const {
+    return last_select_to_speak_panel_action_;
+  }
+  double last_select_to_speak_panel_action_value() const {
+    return last_select_to_speak_panel_action_value_;
+  }
 
  private:
   AccessibilityAlert last_a11y_alert_ = AccessibilityAlert::NONE;
-
-  int32_t sound_key_ = -1;
+  std::string last_alert_message_;
+  base::Optional<chromeos::Sound> sound_key_;
   bool is_dictation_active_ = false;
+  SelectToSpeakPanelAction last_select_to_speak_panel_action_ =
+      SelectToSpeakPanelAction::kNone;
+  double last_select_to_speak_panel_action_value_ = 0.0;
 
   ax::mojom::Gesture last_a11y_gesture_ = ax::mojom::Gesture::kNone;
 

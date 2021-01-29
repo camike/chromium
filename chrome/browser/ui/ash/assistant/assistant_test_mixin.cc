@@ -4,7 +4,9 @@
 
 #include "chrome/browser/ui/ash/assistant/assistant_test_mixin.h"
 
+#include <algorithm>
 #include <utility>
+#include <vector>
 
 #include "ash/assistant/model/ui/assistant_card_element.h"
 #include "ash/assistant/ui/assistant_ui_constants.h"
@@ -12,7 +14,6 @@
 #include "ash/public/cpp/ash_pref_names.h"
 #include "ash/public/cpp/assistant/assistant_state.h"
 #include "ash/public/cpp/test/assistant_test_api.h"
-#include "ash/public/mojom/assistant_state_controller.mojom-shared.h"
 #include "base/auto_reset.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_run_loop_timeout.h"
@@ -21,7 +22,7 @@
 #include "chrome/browser/chromeos/login/test/fake_gaia_mixin.h"
 #include "chrome/browser/chromeos/login/test/login_manager_mixin.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/ash/assistant/test_support/fake_s3_server.h"
 #include "chrome/test/base/mixin_based_in_process_browser_test.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/login/auth/user_context.h"
@@ -30,6 +31,7 @@
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/dns/mock_host_resolver.h"
 #include "ui/events/test/event_generator.h"
+#include "ui/views/controls/label.h"
 
 namespace chromeos {
 namespace assistant {
@@ -37,24 +39,20 @@ namespace assistant {
 namespace {
 
 constexpr const char kTestUser[] = "test_user@gmail.com";
-constexpr const char kTestUserGaiaId[] = "test_user@gaia.id";
+constexpr const char kTestUserGaiaId[] = "test_user_gaia_id";
 
 LoginManagerMixin::TestUserInfo GetTestUserInfo() {
   return LoginManagerMixin::TestUserInfo(
       AccountId::FromUserEmailGaiaId(kTestUser, kTestUserGaiaId));
 }
 
-bool Equals(const char* left, const char* right) {
-  return strcmp(left, right) == 0;
-}
-
-// Waiter that blocks in the |Wait| method until a given |mojom::AssistantState|
+// Waiter that blocks in the |Wait| method until a given |AssistantStatus|
 // is reached, or until a timeout is hit.
 // On timeout this will abort the test with a useful error message.
 class AssistantStatusWaiter : private ash::AssistantStateObserver {
  public:
   AssistantStatusWaiter(ash::AssistantState* state,
-                        ash::mojom::AssistantState expected_status)
+                        chromeos::assistant::AssistantStatus expected_status)
       : state_(state), expected_status_(expected_status) {
     state_->AddObserver(this);
   }
@@ -62,7 +60,7 @@ class AssistantStatusWaiter : private ash::AssistantStateObserver {
   ~AssistantStatusWaiter() override { state_->RemoveObserver(this); }
 
   void RunUntilExpectedStatus() {
-    if (state_->assistant_state() == expected_status_)
+    if (state_->assistant_status() == expected_status_)
       return;
 
     // Wait until we're ready or we hit the timeout.
@@ -71,18 +69,19 @@ class AssistantStatusWaiter : private ash::AssistantStateObserver {
                                                  run_loop.QuitClosure());
     EXPECT_NO_FATAL_FAILURE(run_loop.Run())
         << "Failed waiting for AssistantStatus |" << expected_status_ << "|. "
-        << "Current status is |" << state_->assistant_state() << "|. "
+        << "Current status is |" << state_->assistant_status() << "|. "
         << "One possible cause is that you're using an expired access token.";
   }
 
  private:
-  void OnAssistantStatusChanged(ash::mojom::AssistantState status) override {
+  void OnAssistantStatusChanged(
+      chromeos::assistant::AssistantStatus status) override {
     if (status == expected_status_ && quit_loop_)
       std::move(quit_loop_).Run();
   }
 
   ash::AssistantState* const state_;
-  ash::mojom::AssistantState const expected_status_;
+  chromeos::assistant::AssistantStatus const expected_status_;
 
   base::OnceClosure quit_loop_;
 };
@@ -223,7 +222,7 @@ class TypedResponseWaiter : public ResponseWaiter {
   // ResponseWaiter overrides:
   base::Optional<std::string> GetResponseTextOfView(
       views::View* view) const override {
-    if (Equals(view->GetClassName(), class_name_.c_str())) {
+    if (view->GetClassName() == class_name_) {
       return static_cast<ash::AssistantUiElementView*>(view)
           ->ToStringForTesting();
     }
@@ -251,7 +250,7 @@ class TypedExpectedResponseWaiter : public ExpectedResponseWaiter {
   // ExpectedResponseWaiter overrides:
   base::Optional<std::string> GetResponseTextOfView(
       views::View* view) const override {
-    if (Equals(view->GetClassName(), class_name_.c_str())) {
+    if (view->GetClassName() == class_name_) {
       return static_cast<ash::AssistantUiElementView*>(view)
           ->ToStringForTesting();
     }
@@ -261,22 +260,43 @@ class TypedExpectedResponseWaiter : public ExpectedResponseWaiter {
   const std::string class_name_;
 };
 
-template <typename T>
-void CheckResult(base::OnceClosure quit,
-                 T expected_value,
-                 base::RepeatingCallback<T()> value_callback) {
-  if (expected_value == value_callback.Run()) {
-    std::move(quit).Run();
-    return;
+// Calls a callback when the view hierarchy changes.
+class CallbackViewHierarchyChangedObserver : views::ViewObserver {
+ public:
+  explicit CallbackViewHierarchyChangedObserver(
+      views::View* parent_view,
+      base::RepeatingCallback<void(const views::ViewHierarchyChangedDetails&)>
+          callback)
+      : callback_(callback), parent_view_(parent_view) {
+    parent_view_->AddObserver(this);
   }
 
-  // Check again in the future
-  base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE,
-      base::BindOnce(CheckResult<T>, std::move(quit), expected_value,
-                     value_callback),
-      base::TimeDelta::FromMilliseconds(10));
-}
+  ~CallbackViewHierarchyChangedObserver() override {
+    if (parent_view_)
+      parent_view_->RemoveObserver(this);
+  }
+
+  // ViewObserver:
+  void OnViewHierarchyChanged(
+      views::View* observed_view,
+      const views::ViewHierarchyChangedDetails& details) override {
+    callback_.Run(details);
+  }
+
+  void OnViewIsDeleting(views::View* view) override {
+    DCHECK_EQ(view, parent_view_);
+
+    if (parent_view_)
+      parent_view_->RemoveObserver(this);
+
+    parent_view_ = nullptr;
+  }
+
+ private:
+  base::RepeatingCallback<void(const views::ViewHierarchyChangedDetails&)>
+      callback_;
+  views::View* parent_view_;
+};
 
 }  // namespace
 
@@ -354,9 +374,10 @@ AssistantTestMixin::AssistantTestMixin(
     InProcessBrowserTestMixinHost* host,
     InProcessBrowserTest* test_base,
     net::EmbeddedTestServer* embedded_test_server,
-    FakeS3Mode mode)
+    FakeS3Mode mode,
+    int test_data_version)
     : InProcessBrowserTestMixin(host),
-      fake_s3_server_(),
+      fake_s3_server_(test_data_version),
       mode_(mode),
       test_api_(ash::AssistantTestApi::Create()),
       user_mixin_(std::make_unique<LoggedInUserMixin>(host,
@@ -380,6 +401,10 @@ void AssistantTestMixin::SetUpOnMainThread() {
 
 void AssistantTestMixin::TearDownOnMainThread() {
   DisableAssistant();
+  DisableFakeS3Server();
+}
+
+void AssistantTestMixin::DisableFakeS3Server() {
   fake_s3_server_.Teardown();
 }
 
@@ -396,15 +421,8 @@ void AssistantTestMixin::StartAssistantAndWaitForReady(
   SetPreferVoice(false);
 
   AssistantStatusWaiter waiter(test_api_->GetAssistantState(),
-                               ash::mojom::AssistantState::NEW_READY);
+                               chromeos::assistant::AssistantStatus::READY);
   waiter.RunUntilExpectedStatus();
-
-  // With the warmer welcome enabled the Assistant service will start an
-  // interaction that will never complete (as our tests finish too soon).
-  // This in turn causes the FakeS3Server to not remember this interaction when
-  // running in |kRecord| mode, which then causes interaction failures in
-  // |kReplay| mode, potentially leading to a deadlock (see b/144872676).
-  DisableWarmerWelcome();
 }
 
 void AssistantTestMixin::SetAssistantEnabled(bool enabled) {
@@ -418,27 +436,6 @@ void AssistantTestMixin::SetPreferVoice(bool prefer_voice) {
 void AssistantTestMixin::SendTextQuery(const std::string& query) {
   test_api_->SendTextQuery(query);
 }
-
-template <typename T>
-void AssistantTestMixin::ExpectResult(
-    T expected_value,
-    base::RepeatingCallback<T()> value_callback) {
-  const base::test::ScopedRunLoopTimeout run_timeout(FROM_HERE,
-                                                     kDefaultWaitTimeout);
-
-  // Wait until we're ready or we hit the timeout.
-  base::RunLoop run_loop;
-  CheckResult(run_loop.QuitClosure(), expected_value, value_callback);
-
-  EXPECT_NO_FATAL_FAILURE(run_loop.Run())
-      << "Failed waiting for expected result.\n"
-      << "Expected \"" << expected_value << "\"\n"
-      << "Got \"" << value_callback.Run() << "\"";
-}
-
-template void AssistantTestMixin::ExpectResult<bool>(
-    bool expected_value,
-    base::RepeatingCallback<bool()> value_callback);
 
 template <typename T>
 T AssistantTestMixin::SyncCall(
@@ -490,6 +487,17 @@ void AssistantTestMixin::ExpectAnyOfTheseTextResponses(
   TypedExpectedResponseWaiter waiter("AssistantTextElementView",
                                      test_api_->ui_element_container(),
                                      expected_responses);
+  waiter.RunUntilResponseReceived();
+}
+
+void AssistantTestMixin::ExpectErrorResponse(
+    const std::string& expected_response,
+    base::TimeDelta wait_timeout) {
+  const base::test::ScopedRunLoopTimeout run_timeout(FROM_HERE, wait_timeout);
+  TypedExpectedResponseWaiter waiter("AssistantErrorElementView",
+                                     test_api_->ui_element_container(),
+                                     {expected_response});
+
   waiter.RunUntilResponseReceived();
 }
 
@@ -545,6 +553,30 @@ bool AssistantTestMixin::IsVisible() {
   return test_api_->IsVisible();
 }
 
+void AssistantTestMixin::ExpectNoChange(base::TimeDelta wait_timeout) {
+  base::test::ScopedDisableRunLoopTimeout disable_timeout;
+
+  base::RunLoop run_loop;
+
+  // Exit the runloop after wait_timeout.
+  base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE,
+      base::BindRepeating(
+          [](base::RepeatingClosure quit) { std::move(quit).Run(); },
+          run_loop.QuitClosure()),
+      wait_timeout);
+
+  // Fail the runloop when the view hierarchy changes.
+  auto callback = base::BindRepeating(
+      [](const views::ViewHierarchyChangedDetails& change) { FAIL(); });
+
+  CallbackViewHierarchyChangedObserver observer(
+      test_api_->ui_element_container(), std::move(callback));
+
+  EXPECT_NO_FATAL_FAILURE(run_loop.Run())
+      << "View hierarchy changed during ExpectNoChange.";
+}
+
 PrefService* AssistantTestMixin::GetUserPreferences() {
   return ProfileManager::GetPrimaryUserProfile()->GetPrefs();
 }
@@ -560,16 +592,8 @@ void AssistantTestMixin::DisableAssistant() {
 
   // Then wait for the Service to shutdown.
   AssistantStatusWaiter waiter(test_api_->GetAssistantState(),
-                               ash::mojom::AssistantState::NOT_READY);
+                               chromeos::assistant::AssistantStatus::NOT_READY);
   waiter.RunUntilExpectedStatus();
-}
-
-void AssistantTestMixin::DisableWarmerWelcome() {
-  // To disable the warmer welcome, we spoof that it has already been
-  // triggered too many times.
-  GetUserPreferences()->SetInteger(
-      ash::prefs::kAssistantNumWarmerWelcomeTriggered,
-      ash::assistant::ui::kWarmerWelcomesMaxTimesTriggered);
 }
 
 }  // namespace assistant

@@ -28,6 +28,7 @@
 #include "components/url_formatter/url_fixer.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 
 using content::BrowserThread;
@@ -102,11 +103,11 @@ std::string FilteringBehaviorReasonToString(
       return "Default";
     case supervised_user_error_page::ASYNC_CHECKER:
       return "AsyncChecker";
-    case supervised_user_error_page::BLACKLIST:
+    case supervised_user_error_page::DENYLIST:
       return "Blacklist";
     case supervised_user_error_page::MANUAL:
       return "Manual";
-    case supervised_user_error_page::WHITELIST:
+    case supervised_user_error_page::ALLOWLIST:
       return "Whitelist";
     case supervised_user_error_page::NOT_SIGNED_IN:
       // Should never happen, only used for requests from WebView
@@ -158,10 +159,10 @@ SupervisedUserInternalsMessageHandler::GetSupervisedUserService() {
 void SupervisedUserInternalsMessageHandler::HandleRegisterForEvents(
     const base::ListValue* args) {
   DCHECK(args->empty());
-  if (scoped_observer_.IsObservingSources())
+  if (scoped_observation_.IsObserving())
     return;
 
-  scoped_observer_.Add(GetSupervisedUserService()->GetURLFilter());
+  scoped_observation_.Observe(GetSupervisedUserService()->GetURLFilter());
 }
 
 void SupervisedUserInternalsMessageHandler::HandleGetBasicInfo(
@@ -181,12 +182,22 @@ void SupervisedUserInternalsMessageHandler::HandleTryURL(
     return;
 
   SupervisedUserURLFilter* filter = GetSupervisedUserService()->GetURLFilter();
-  std::map<std::string, base::string16> whitelists =
-      filter->GetMatchingWhitelistTitles(url);
+  content::WebContents* web_contents =
+      web_ui() ? web_ui()->GetWebContents() : nullptr;
+  bool skip_manual_parent_filter = false;
+  if (web_contents) {
+    skip_manual_parent_filter =
+        filter->ShouldSkipParentManualAllowlistFiltering(
+            web_contents->GetOutermostWebContents());
+  }
+
+  std::map<std::string, base::string16> allowlists =
+      filter->GetMatchingAllowlistTitles(url);
   filter->GetFilteringBehaviorForURLWithAsyncChecks(
       url,
       base::BindOnce(&SupervisedUserInternalsMessageHandler::OnTryURLResult,
-                     weak_factory_.GetWeakPtr(), whitelists));
+                     weak_factory_.GetWeakPtr(), allowlists),
+      skip_manual_parent_filter);
 }
 
 void SupervisedUserInternalsMessageHandler::SendBasicInfo() {
@@ -200,14 +211,12 @@ void SupervisedUserInternalsMessageHandler::SendBasicInfo() {
 
   base::ListValue* section_profile = AddSection(section_list.get(), "Profile");
   AddSectionEntry(section_profile, "Account", profile->GetProfileUserName());
-  AddSectionEntry(section_profile, "Legacy Supervised",
-                  profile->IsLegacySupervised());
   AddSectionEntry(section_profile, "Child", profile->IsChild());
 
   SupervisedUserURLFilter* filter = GetSupervisedUserService()->GetURLFilter();
 
   base::ListValue* section_filter = AddSection(section_list.get(), "Filter");
-  AddSectionEntry(section_filter, "Blacklist active", filter->HasBlacklist());
+  AddSectionEntry(section_filter, "Blacklist active", filter->HasDenylist());
   AddSectionEntry(section_filter, "Online checks active",
                   filter->HasAsyncURLChecker());
   AddSectionEntry(section_filter, "Default behavior",
@@ -244,7 +253,7 @@ void SupervisedUserInternalsMessageHandler::SendBasicInfo() {
   SupervisedUserSettingsService* settings_service =
       SupervisedUserSettingsServiceFactory::GetForKey(profile->GetProfileKey());
   user_settings_subscription_ =
-      settings_service->SubscribeForSettingsChange(base::Bind(
+      settings_service->SubscribeForSettingsChange(base::BindRepeating(
           &SupervisedUserInternalsMessageHandler::SendSupervisedUserSettings,
           weak_factory_.GetWeakPtr()));
 }
@@ -257,23 +266,23 @@ void SupervisedUserInternalsMessageHandler::SendSupervisedUserSettings(
 }
 
 void SupervisedUserInternalsMessageHandler::OnTryURLResult(
-    const std::map<std::string, base::string16>& whitelists,
+    const std::map<std::string, base::string16>& allowlists,
     SupervisedUserURLFilter::FilteringBehavior behavior,
     supervised_user_error_page::FilteringBehaviorReason reason,
     bool uncertain) {
-  std::vector<std::string> whitelists_list;
-  for (const auto& whitelist : whitelists) {
-    whitelists_list.push_back(
-        base::StringPrintf("%s: %s", whitelist.first.c_str(),
-                           base::UTF16ToUTF8(whitelist.second).c_str()));
+  std::vector<std::string> allowlists_list;
+  for (const auto& allowlist : allowlists) {
+    allowlists_list.push_back(
+        base::StringPrintf("%s: %s", allowlist.first.c_str(),
+                           base::UTF16ToUTF8(allowlist.second).c_str()));
   }
-  std::string whitelists_str = base::JoinString(whitelists_list, "; ");
+  std::string allowlists_str = base::JoinString(allowlists_list, "; ");
   base::DictionaryValue result;
   result.SetString("allowResult",
                    FilteringBehaviorToString(behavior, uncertain));
   result.SetBoolean("manual", reason == supervised_user_error_page::MANUAL &&
                                   behavior == SupervisedUserURLFilter::ALLOW);
-  result.SetString("whitelists", whitelists_str);
+  result.SetString("whitelists", allowlists_str);
   web_ui()->CallJavascriptFunctionUnsafe(
       "chrome.supervised_user_internals.receiveTryURLResult", result);
 }

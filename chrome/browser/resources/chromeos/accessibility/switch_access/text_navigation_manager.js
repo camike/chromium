@@ -2,11 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import {ActionManager} from './action_manager.js';
+import {Navigator} from './navigator.js';
+import {SwitchAccess} from './switch_access.js';
+import {SAConstants, SwitchAccessMenuAction} from './switch_access_constants.js';
+
+const AutomationNode = chrome.automation.AutomationNode;
+
 /**
  * Class to handle navigating text. Currently, only
  * navigation and selection in editable text fields is supported.
  */
-class TextNavigationManager {
+export class TextNavigationManager {
   /** @private */
   constructor() {
     /** @private {number} */
@@ -15,17 +22,19 @@ class TextNavigationManager {
     /** @private {number} */
     this.selectionEndIndex_ = TextNavigationManager.NO_SELECT_INDEX;
 
-    /** @private {chrome.automation.AutomationNode} */
+    /** @private {AutomationNode} */
     this.selectionStartObject_;
 
-    /** @private {chrome.automation.AutomationNode} */
+    /** @private {AutomationNode} */
     this.selectionEndObject_;
 
     /** @private {boolean} */
     this.currentlySelecting_ = false;
 
-    /** @private {function(chrome.automation.AutomationEvent): undefined} */
-    this.selectionListener_ = this.onNavChange_.bind(this);
+    /** @private {!EventHandler} */
+    this.selectionListener_ = new EventHandler(
+        [], chrome.automation.EventType.TEXT_SELECTION_CHANGED,
+        this.onNavChange_.bind(this));
 
     /**
      * Keeps track of when there's a selection in the current node.
@@ -45,8 +54,11 @@ class TextNavigationManager {
     }
   }
 
-  static initialize() {
-    TextNavigationManager.instance = new TextNavigationManager();
+  static get instance() {
+    if (!TextNavigationManager.instance_) {
+      TextNavigationManager.instance_ = new TextNavigationManager();
+    }
+    return TextNavigationManager.instance_;
   }
 
   // =============== Static Methods ==============
@@ -72,7 +84,7 @@ class TextNavigationManager {
     if (manager.currentlySelecting_) {
       manager.setupDynamicSelection_(false /* resetCursor */);
     }
-    EventHelper.simulateKeyPress(EventHelper.KeyCode.HOME, {ctrl: true});
+    EventGenerator.sendKeyPress(KeyCode.HOME, {ctrl: true});
   }
 
   /**
@@ -84,7 +96,7 @@ class TextNavigationManager {
     if (manager.currentlySelecting_) {
       manager.setupDynamicSelection_(false /* resetCursor */);
     }
-    EventHelper.simulateKeyPress(EventHelper.KeyCode.END, {ctrl: true});
+    EventGenerator.sendKeyPress(KeyCode.END, {ctrl: true});
   }
 
   /**
@@ -97,7 +109,7 @@ class TextNavigationManager {
     if (manager.currentlySelecting_) {
       manager.setupDynamicSelection_(true /* resetCursor */);
     }
-    EventHelper.simulateKeyPress(EventHelper.KeyCode.LEFT_ARROW);
+    EventGenerator.sendKeyPress(KeyCode.LEFT);
   }
 
   /**
@@ -111,7 +123,7 @@ class TextNavigationManager {
     if (manager.currentlySelecting_) {
       manager.setupDynamicSelection_(false /* resetCursor */);
     }
-    EventHelper.simulateKeyPress(EventHelper.KeyCode.LEFT_ARROW, {ctrl: true});
+    EventGenerator.sendKeyPress(KeyCode.LEFT, {ctrl: true});
   }
 
   /**
@@ -124,7 +136,7 @@ class TextNavigationManager {
     if (manager.currentlySelecting_) {
       manager.setupDynamicSelection_(true /* resetCursor */);
     }
-    EventHelper.simulateKeyPress(EventHelper.KeyCode.DOWN_ARROW);
+    EventGenerator.sendKeyPress(KeyCode.DOWN);
   }
 
   /**
@@ -137,7 +149,7 @@ class TextNavigationManager {
     if (manager.currentlySelecting_) {
       manager.setupDynamicSelection_(true /* resetCursor */);
     }
-    EventHelper.simulateKeyPress(EventHelper.KeyCode.RIGHT_ARROW);
+    EventGenerator.sendKeyPress(KeyCode.RIGHT);
   }
 
   /**
@@ -151,7 +163,7 @@ class TextNavigationManager {
     if (manager.currentlySelecting_) {
       manager.setupDynamicSelection_(false /* resetCursor */);
     }
-    EventHelper.simulateKeyPress(EventHelper.KeyCode.RIGHT_ARROW, {ctrl: true});
+    EventGenerator.sendKeyPress(KeyCode.RIGHT, {ctrl: true});
   }
 
   /**
@@ -164,7 +176,7 @@ class TextNavigationManager {
     if (manager.currentlySelecting_) {
       manager.setupDynamicSelection_(true /* resetCursor */);
     }
-    EventHelper.simulateKeyPress(EventHelper.KeyCode.UP_ARROW);
+    EventGenerator.sendKeyPress(KeyCode.UP);
   }
 
   /**
@@ -180,7 +192,7 @@ class TextNavigationManager {
     if (manager.currentlySelecting_) {
       manager.setupDynamicSelection_(true /* resetCursor */);
     }
-    EventHelper.simulateKeyPress(EventHelper.KeyCode.DOWN_ARROW);
+    EventGenerator.sendKeyPress(KeyCode.DOWN);
   }
 
   /** @return {boolean} */
@@ -224,7 +236,7 @@ class TextNavigationManager {
   /**
    * Sets the selection start index.
    * @param {number} startIndex
-   * @param {!chrome.automation.AutomationNode} textNode
+   * @param {!AutomationNode} textNode
    */
   setSelStartIndexAndNode(startIndex, textNode) {
     this.selectionStartIndex_ = startIndex;
@@ -251,7 +263,7 @@ class TextNavigationManager {
   /**
    * Returns either the selection start index or the selection end index of the
    * node based on the getStart param.
-   * @param {!chrome.automation.AutomationNode} node
+   * @param {!AutomationNode} node
    * @param {boolean} getStart
    * @return {number} selection start if getStart is true otherwise selection
    * end
@@ -276,14 +288,15 @@ class TextNavigationManager {
    * @private
    */
   manageNavigationListener_(addListener) {
+    if (!this.selectionStartObject_) {
+      return;
+    }
+
     if (addListener) {
-      this.selectionStartObject_.addEventListener(
-          chrome.automation.EventType.TEXT_SELECTION_CHANGED,
-          this.selectionListener_, false /** Don't use capture.*/);
+      this.selectionListener_.setNodes(this.selectionStartObject_);
+      this.selectionListener_.start();
     } else {
-      this.selectionStartObject_.removeEventListener(
-          chrome.automation.EventType.TEXT_SELECTION_CHANGED,
-          this.selectionListener_, false /** Don't use capture.*/);
+      this.selectionListener_.stop();
     }
   }
 
@@ -296,42 +309,37 @@ class TextNavigationManager {
   onNavChange_() {
     this.manageNavigationListener_(false);
     if (this.currentlySelecting_) {
-      this.saveSelectEnd();
+      TextNavigationManager.saveSelectEnd();
     }
   }
 
   /**
    * Sets the selectionEnd variable based on the selection of the current node.
    */
-  saveSelectEnd() {
+  static saveSelectEnd() {
+    const manager = TextNavigationManager.instance;
     chrome.automation.getFocus((focusedNode) => {
-      this.selectionEndObject_ = focusedNode;
-      this.selectionEndIndex_ = this.getSelectionIndexFromNode_(
-          this.selectionEndObject_,
+      manager.selectionEndObject_ = focusedNode;
+      manager.selectionEndIndex_ = manager.getSelectionIndexFromNode_(
+          manager.selectionEndObject_,
           false /*We are not getting the start index.*/);
-      this.saveSelection_();
+      manager.saveSelection_();
     });
   }
 
   /**
-   * Sets the selection using the selectionStart and selectionEnd
-   * as the offset input for setDocumentSelection and the parameter
-   * textNode as the object input for setDocumentSelection.
+   * Sets the selection after verifying that the bounds are set.
    * @private
    */
   saveSelection_() {
-    if (this.selectionStartIndex_ == TextNavigationManager.NO_SELECT_INDEX ||
-        this.selectionEndIndex_ == TextNavigationManager.NO_SELECT_INDEX) {
-      console.log(
-          'Selection bounds are not set properly:', this.selectionStartIndex_,
-          this.selectionEndIndex_);
+    if (this.selectionStartIndex_ === TextNavigationManager.NO_SELECT_INDEX ||
+        this.selectionEndIndex_ === TextNavigationManager.NO_SELECT_INDEX) {
+      console.error(SwitchAccess.error(
+          SAConstants.ErrorType.INVALID_SELECTION_BOUNDS,
+          'Selection bounds are not set properly: ' +
+              this.selectionStartIndex_ + ' ' + this.selectionEndIndex_));
     } else {
-      chrome.automation.setDocumentSelection({
-        anchorObject: this.selectionStartObject_,
-        anchorOffset: this.selectionStartIndex_,
-        focusObject: this.selectionEndObject_,
-        focusOffset: this.selectionEndIndex_
-      });
+      this.setSelection_();
     }
   }
 
@@ -350,17 +358,31 @@ class TextNavigationManager {
      */
     if (needToResetCursor) {
       if (TextNavigationManager.currentlySelecting() &&
-          this.selectionEndIndex_ != TextNavigationManager.NO_SELECT_INDEX) {
+          this.selectionEndIndex_ !== TextNavigationManager.NO_SELECT_INDEX) {
         // Move the cursor to the end of the existing selection.
-        chrome.automation.setDocumentSelection({
-          anchorObject: this.selectionEndObject_,
-          anchorOffset: this.selectionEndIndex_,
-          focusObject: this.selectionEndObject_,
-          focusOffset: this.selectionEndIndex_
-        });
+        this.setSelection_();
       }
     }
     this.manageNavigationListener_(true /** Add the listener */);
+  }
+
+  /**
+   * Sets the selection. If start and end object are equal, uses
+   * AutomationNode.setSelection. Otherwise calls
+   * chrome.automation.setDocumentSelection.
+   */
+  setSelection_() {
+    if (this.selectionStartObject_ === this.selectionEndObject_) {
+      this.selectionStartObject_.setSelection(
+          this.selectionStartIndex_, this.selectionEndIndex_);
+    } else {
+      chrome.automation.setDocumentSelection({
+        anchorObject: this.selectionStartObject_,
+        anchorOffset: this.selectionStartIndex_,
+        focusObject: this.selectionEndObject_,
+        focusOffset: this.selectionEndIndex_
+      });
+    }
   }
 
   /*
@@ -371,7 +393,10 @@ class TextNavigationManager {
    */
   updateClipboardHasData_() {
     this.clipboardHasData_ = true;
-    MenuManager.reloadMenuIfNeeded();
+    const node = Navigator.instance.currentNode;
+    if (node.hasAction(SwitchAccessMenuAction.PASTE)) {
+      ActionManager.refreshMenuForNode(node);
+    }
   }
 }
 

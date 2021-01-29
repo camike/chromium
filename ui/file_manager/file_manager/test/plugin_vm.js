@@ -53,13 +53,13 @@ pluginVm.testLabelIconContextMenu = async (done) => {
     });
   }
 
-  // Verify that /PvmDefault has label 'Plugin VM'.
+  // Verify that /PvmDefault has label 'Windows files'.
   await test.setupAndWaitUntilReady([], [], []);
   test.addEntries(
       [test.ENTRIES.pluginVm, test.ENTRIES.photosInPluginVm], [], []);
   test.refreshFileList();
   await test.waitForFiles(test.TestEntryInfo.getExpectedRows(
-      [test.ENTRIES.pluginVm, test.ENTRIES.linuxFiles]));
+      [test.ENTRIES.pluginVm, test.ENTRIES.linuxFiles, test.ENTRIES.trash]));
 
   // Verify folder icon.
   await test.waitForElement(iconFolder);

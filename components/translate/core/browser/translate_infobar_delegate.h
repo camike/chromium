@@ -13,13 +13,13 @@
 #include <vector>
 
 #include "base/feature_list.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/observer_list_types.h"
 #include "build/build_config.h"
 #include "components/infobars/core/infobar_delegate.h"
+#include "components/translate/core/browser/translate_metrics_logger.h"
 #include "components/translate/core/browser/translate_prefs.h"
 #include "components/translate/core/browser/translate_step.h"
 #include "components/translate/core/browser/translate_ui_delegate.h"
@@ -50,6 +50,9 @@ class TranslateInfoBarDelegate : public infobars::InfoBarDelegate {
     // Handles UI changes on the translate step given.
     virtual void OnTranslateStepChanged(translate::TranslateStep step,
                                         TranslateErrors::Type error_type) = 0;
+    // Handles UI changes when the target language is updated.
+    virtual void OnTargetLanguageChanged(
+        const std::string& target_language_code) = 0;
     // Return whether user declined translate service.
     virtual bool IsDeclinedByUser() = 0;
     // Called when the TranslateInfoBarDelegate instance is destroyed.
@@ -111,23 +114,23 @@ class TranslateInfoBarDelegate : public infobars::InfoBarDelegate {
 
   virtual base::string16 original_language_name() const;
 
-  void UpdateOriginalLanguage(const std::string& language_code);
+  virtual void UpdateOriginalLanguage(const std::string& language_code);
 
   std::string target_language_code() const {
     return ui_delegate_.GetTargetLanguageCode();
   }
 
-  base::string16 target_language_name() const {
-    return language_name_at(ui_delegate_.GetTargetLanguageIndex());
-  }
+  virtual base::string16 target_language_name() const;
 
-  void UpdateTargetLanguage(const std::string& language_code);
+  virtual void UpdateTargetLanguage(const std::string& language_code);
 
   // Returns true if the current infobar indicates an error (in which case it
   // should get a yellow background instead of a blue one).
   bool is_error() const {
     return step_ == translate::TRANSLATE_STEP_TRANSLATE_ERROR;
   }
+
+  void OnErrorShown(TranslateErrors::Type error_type);
 
   // Return true if the translation was triggered by a menu entry instead of
   // via an infobar/bubble or preference.
@@ -137,7 +140,7 @@ class TranslateInfoBarDelegate : public infobars::InfoBarDelegate {
 
   virtual void Translate();
   virtual void RevertTranslation();
-  void RevertWithoutClosingInfobar();
+  virtual void RevertWithoutClosingInfobar();
   void ReportLanguageDetectionError();
 
   // Called when the user declines to translate a page, by either closing the
@@ -147,8 +150,8 @@ class TranslateInfoBarDelegate : public infobars::InfoBarDelegate {
   // Methods called by the Options menu delegate.
   virtual bool IsTranslatableLanguageByPrefs() const;
   virtual void ToggleTranslatableLanguageByPrefs();
-  virtual bool IsSiteBlacklisted() const;
-  virtual void ToggleSiteBlacklist();
+  virtual bool IsSiteOnNeverPromptList() const;
+  virtual void ToggleNeverPrompt();
   virtual bool ShouldAlwaysTranslate() const;
   virtual void ToggleAlwaysTranslate();
 
@@ -179,7 +182,6 @@ class TranslateInfoBarDelegate : public infobars::InfoBarDelegate {
 
   // The following methods are called by the infobar that displays the status
   // while translating and also the one displaying the error message.
-  base::string16 GetMessageInfoBarText();
   base::string16 GetMessageInfoBarButtonText();
   void MessageInfoBarButtonPressed();
   bool ShouldShowMessageInfoBarButton();
@@ -221,6 +223,14 @@ class TranslateInfoBarDelegate : public infobars::InfoBarDelegate {
   // Remove an observer.
   virtual void RemoveObserver(Observer* observer);
 
+  // Handles when the user closes the translate infobar. This includes when: the
+  // user presses the 'x' button, the user selects to never translate the site,
+  // and the user selects to never translate the language.
+  void OnInfoBarClosedByUser();
+
+  // Records a high level UI interaction.
+  void ReportUIInteraction(UIInteraction ui_interaction);
+
   // InfoBarDelegate:
   infobars::InfoBarDelegate::InfoBarIdentifier GetIdentifier() const override;
   int GetIconId() const override;
@@ -238,7 +248,7 @@ class TranslateInfoBarDelegate : public infobars::InfoBarDelegate {
       bool triggered_from_menu);
 
  private:
-  friend class TranslationInfoBarTest;
+  friend class TranslateInfoBarDelegateTest;
   typedef std::pair<std::string, base::string16> LanguageNamePair;
 
   bool is_off_the_record_;

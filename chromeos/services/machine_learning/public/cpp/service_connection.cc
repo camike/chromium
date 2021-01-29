@@ -9,6 +9,7 @@
 #include "base/no_destructor.h"
 #include "base/sequence_checker.h"
 #include "chromeos/dbus/machine_learning/machine_learning_client.h"
+#include "chromeos/services/machine_learning/public/mojom/handwriting_recognizer.mojom.h"
 #include "chromeos/services/machine_learning/public/mojom/machine_learning_service.mojom.h"
 #include "chromeos/services/machine_learning/public/mojom/model.mojom.h"
 #include "mojo/public/cpp/bindings/remote.h"
@@ -27,22 +28,18 @@ class ServiceConnectionImpl : public ServiceConnection {
   ServiceConnectionImpl();
   ~ServiceConnectionImpl() override = default;
 
-  void LoadBuiltinModel(mojom::BuiltinModelSpecPtr spec,
-                        mojo::PendingReceiver<mojom::Model> receiver,
-                        mojom::MachineLearningService::LoadBuiltinModelCallback
-                            result_callback) override;
+  mojom::MachineLearningService& GetMachineLearningService() override;
 
-  void LoadFlatBufferModel(
-      mojom::FlatBufferModelSpecPtr spec,
-      mojo::PendingReceiver<mojom::Model> receiver,
-      mojom::MachineLearningService::LoadFlatBufferModelCallback
-          result_callback) override;
+  void BindMachineLearningService(
+      mojo::PendingReceiver<mojom::MachineLearningService> receiver) override;
+
+  void Initialize() override;
 
  private:
-  // Binds the top level interface |machine_learning_service_| to an
+  // Binds the primordial, top-level interface |machine_learning_service_| to an
   // implementation in the ML Service daemon, if it is not already bound. The
   // binding is accomplished via D-Bus bootstrap.
-  void BindMachineLearningServiceIfNeeded();
+  void BindPrimordialMachineLearningServiceIfNeeded();
 
   // Mojo disconnect handler. Resets |machine_learning_service_|, which
   // will be reconnected upon next use.
@@ -52,34 +49,45 @@ class ServiceConnectionImpl : public ServiceConnection {
   void OnBootstrapMojoConnectionResponse(bool success);
 
   mojo::Remote<mojom::MachineLearningService> machine_learning_service_;
+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(ServiceConnectionImpl);
 };
 
-void ServiceConnectionImpl::LoadBuiltinModel(
-    mojom::BuiltinModelSpecPtr spec,
-    mojo::PendingReceiver<mojom::Model> receiver,
-    mojom::MachineLearningService::LoadBuiltinModelCallback result_callback) {
+mojom::MachineLearningService&
+ServiceConnectionImpl::GetMachineLearningService() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  BindMachineLearningServiceIfNeeded();
-  machine_learning_service_->LoadBuiltinModel(
-      std::move(spec), std::move(receiver), std::move(result_callback));
+  DCHECK(task_runner_)
+      << "Call Initialize before first use of ServiceConnection.";
+  BindPrimordialMachineLearningServiceIfNeeded();
+  return *machine_learning_service_.get();
 }
 
-void ServiceConnectionImpl::LoadFlatBufferModel(
-    mojom::FlatBufferModelSpecPtr spec,
-    mojo::PendingReceiver<mojom::Model> receiver,
-    mojom::MachineLearningService::LoadFlatBufferModelCallback
-        result_callback) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  BindMachineLearningServiceIfNeeded();
-  machine_learning_service_->LoadFlatBufferModel(
-      std::move(spec), std::move(receiver), std::move(result_callback));
+void ServiceConnectionImpl::BindMachineLearningService(
+    mojo::PendingReceiver<mojom::MachineLearningService> receiver) {
+  DCHECK(task_runner_)
+      << "Call Initialize before first use of ServiceConnection.";
+  if (!task_runner_->RunsTasksInCurrentSequence()) {
+    task_runner_->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ServiceConnectionImpl::BindMachineLearningService,
+                       base::Unretained(this), std::move(receiver)));
+    return;
+  }
+
+  GetMachineLearningService().Clone(std::move(receiver));
 }
 
-void ServiceConnectionImpl::BindMachineLearningServiceIfNeeded() {
+void ServiceConnectionImpl::Initialize() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(!task_runner_) << "Initialize must be called only once.";
+
+  task_runner_ = base::SequencedTaskRunnerHandle::Get();
+}
+
+void ServiceConnectionImpl::BindPrimordialMachineLearningServiceIfNeeded() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (machine_learning_service_) {
     return;

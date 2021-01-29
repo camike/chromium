@@ -26,7 +26,6 @@ struct CC_EXPORT MainThreadScrollingReason {
 
     // Non-transient scrolling reasons.
     kHasBackgroundAttachmentFixedObjects = 1 << 0,
-    kHasNonLayerViewportConstrainedObjects = 1 << 1,
     kThreadedScrollingDisabled = 1 << 2,
     kScrollbarScrolling = 1 << 3,
     kFrameOverlay = 1 << 4,
@@ -43,10 +42,8 @@ struct CC_EXPORT MainThreadScrollingReason {
     // only be applied by blending glyphs with the background at a specific
     // screen position; transparency and transforms break this.
     kNonCompositedReasonsFirst = 17,
-    kHasTransformAndLCDText = 1 << 17,
-    kBackgroundNotOpaqueInRectAndLCDText = 1 << 18,
-    kHasClipRelatedProperty = 1 << 20,
-    kIsNotStackingContextAndLCDText = 1 << 22,
+    kNotOpaqueForTextAndLCDText = 1 << 18,
+    kCantPaintScrollingBackgroundAndLCDText = 1 << 19,
     kNonCompositedReasonsLast = 22,
 
     // Transient scrolling reasons. These are computed for each scroll begin.
@@ -68,16 +65,15 @@ struct CC_EXPORT MainThreadScrollingReason {
   };
 
   static const uint32_t kNonCompositedReasons =
-      kHasTransformAndLCDText | kBackgroundNotOpaqueInRectAndLCDText |
-      kHasClipRelatedProperty | kIsNotStackingContextAndLCDText;
+      kNotOpaqueForTextAndLCDText | kCantPaintScrollingBackgroundAndLCDText;
 
   // Returns true if the given MainThreadScrollingReason can be set by the main
   // thread.
   static bool MainThreadCanSetScrollReasons(uint32_t reasons) {
     uint32_t reasons_set_by_main_thread =
         kNotScrollingOnMain | kHasBackgroundAttachmentFixedObjects |
-        kHasNonLayerViewportConstrainedObjects | kThreadedScrollingDisabled |
-        kScrollbarScrolling | kFrameOverlay | kHandlingScrollFromMainThread;
+        kThreadedScrollingDisabled | kScrollbarScrolling | kFrameOverlay |
+        kHandlingScrollFromMainThread;
     return (reasons & reasons_set_by_main_thread) == reasons;
   }
 

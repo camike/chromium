@@ -9,7 +9,6 @@
 
 #include "base/gtest_prod_util.h"
 #include "build/build_config.h"
-#include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/browser/ui/startup/startup_tab.h"
@@ -25,7 +24,7 @@ class StartupTabProvider {
   // shown according to onboarding/first run policy.
   virtual StartupTabs GetOnboardingTabs(Profile* profile) const = 0;
 
-  // Gathers URLs from a Master Preferences file indicating first run logic
+  // Gathers URLs from a initial preferences file indicating first run logic
   // specific to this distribution. Transforms any such URLs per policy and
   // returns them. Also clears the value of first_run_urls_ in the provided
   // BrowserCreator.
@@ -78,6 +77,8 @@ class StartupTabProviderImpl : public StartupTabProvider {
   };
 
   StartupTabProviderImpl() = default;
+  StartupTabProviderImpl(const StartupTabProviderImpl&) = delete;
+  StartupTabProviderImpl& operator=(const StartupTabProviderImpl&) = delete;
 
   // The static helper methods below implement the policies relevant to the
   // respective Get*Tabs methods, but do not gather or interact with any
@@ -99,9 +100,9 @@ class StartupTabProviderImpl : public StartupTabProvider {
   static StartupTabs GetStandardOnboardingTabsForState(
       const StandardOnboardingTabsParams& params);
 
-  // Processes first run URLs specified in Master Preferences file, replacing
+  // Processes first run URLs specified in initial preferences file, replacing
   // any "magic word" URL hosts with appropriate URLs.
-  static StartupTabs GetMasterPrefsTabsForState(
+  static StartupTabs GetInitialPrefsTabsForState(
       bool is_first_run,
       const std::vector<GURL>& first_run_tabs);
 
@@ -170,9 +171,6 @@ class StartupTabProviderImpl : public StartupTabProvider {
       bool has_incompatible_applications) const override;
   StartupTabs GetExtensionCheckupTabs(
       bool serve_extensions_page) const override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(StartupTabProviderImpl);
 };
 
 #endif  // CHROME_BROWSER_UI_STARTUP_STARTUP_TAB_PROVIDER_H_

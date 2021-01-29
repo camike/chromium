@@ -10,9 +10,12 @@ import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.preferences.Pref;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.components.navigation_interception.InterceptNavigationDelegate;
+import org.chromium.components.user_prefs.UserPrefs;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.url.GURL;
 
 /**
  * A helper class for using the DOM Distiller.
@@ -68,7 +71,7 @@ public class DomDistillerTabUtils {
      * @param url The original URL.
      * @return the formatted URL of the original page.
      */
-    public static String getFormattedUrlFromOriginalDistillerUrl(String url) {
+    public static String getFormattedUrlFromOriginalDistillerUrl(GURL url) {
         return DomDistillerTabUtilsJni.get().getFormattedUrlFromOriginalDistillerUrl(url);
     }
 
@@ -97,9 +100,12 @@ public class DomDistillerTabUtils {
      * @return True if heuristic is ADABOOST_MODEL, and "Simplified view for accessibility"
      * is disabled.
      */
-    public static boolean shouldExcludeMobileFriendly() {
+    public static boolean shouldExcludeMobileFriendly(Tab tab) {
         if (sExcludeMobileFriendlyForTesting != null) return sExcludeMobileFriendlyForTesting;
-        return !PrefServiceBridge.getInstance().getBoolean(Pref.READER_FOR_ACCESSIBILITY_ENABLED)
+        WebContents webContents = tab.getWebContents();
+        assert webContents != null;
+        return !UserPrefs.get(Profile.fromWebContents(webContents))
+                        .getBoolean(Pref.READER_FOR_ACCESSIBILITY)
                 && getDistillerHeuristics() == DistillerHeuristicsType.ADABOOST_MODEL;
     }
 
@@ -143,7 +149,7 @@ public class DomDistillerTabUtils {
         void distillCurrentPageAndView(WebContents webContents);
         void distillCurrentPage(WebContents webContents);
         void distillAndView(WebContents sourceWebContents, WebContents destinationWebContents);
-        String getFormattedUrlFromOriginalDistillerUrl(String url);
+        String getFormattedUrlFromOriginalDistillerUrl(GURL url);
         int getDistillerHeuristics();
         void setInterceptNavigationDelegate(
                 InterceptNavigationDelegate delegate, WebContents webContents);

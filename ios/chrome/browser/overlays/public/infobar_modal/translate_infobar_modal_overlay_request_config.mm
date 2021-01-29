@@ -34,15 +34,15 @@ TranslateModalRequestConfig::TranslateModalRequestConfig(InfoBarIOS* infobar)
   }
   is_always_translate_enabled_ = delegate->ShouldAlwaysTranslate();
   is_translatable_language_ = delegate->IsTranslatableLanguageByPrefs();
-  is_site_blacklisted_ = delegate->IsSiteBlacklisted();
+  is_site_on_never_prompt_list_ = delegate->IsSiteOnNeverPromptList();
 }
 
 TranslateModalRequestConfig::~TranslateModalRequestConfig() = default;
 
 void TranslateModalRequestConfig::CreateAuxiliaryData(
     base::SupportsUserData* user_data) {
-  InfobarOverlayRequestConfig::CreateForUserData(user_data, infobar_,
-                                                 InfobarOverlayType::kModal);
+  InfobarOverlayRequestConfig::CreateForUserData(
+      user_data, infobar_, InfobarOverlayType::kModal, false);
 }
 
 }  // namespace translate_infobar_overlays

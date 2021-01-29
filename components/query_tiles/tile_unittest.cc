@@ -10,7 +10,7 @@
 #include "components/query_tiles/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace upboarding {
+namespace query_tiles {
 namespace {
 
 TEST(TileTest, CompareOperators) {
@@ -33,6 +33,10 @@ TEST(TileTest, CompareOperators) {
   test::ResetTestEntry(&rhs);
 
   rhs.accessibility_text = "changed";
+  EXPECT_NE(lhs, rhs);
+  test::ResetTestEntry(&rhs);
+
+  rhs.search_params = {"xyz=1"};
   EXPECT_NE(lhs, rhs);
   test::ResetTestEntry(&rhs);
 }
@@ -102,4 +106,4 @@ TEST(TileTest, MoveOperator) {
 
 }  // namespace
 
-}  // namespace upboarding
+}  // namespace query_tiles

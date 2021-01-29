@@ -12,15 +12,9 @@
 using AtkKeyEventStruct = struct _AtkKeyEventStruct;
 #endif
 
-class SkPath;
-
-namespace gfx {
-class Size;
-}
-
 namespace ui {
 
-class COMPONENT_EXPORT(EXTENSIONS) X11ExtensionDelegate {
+class COMPONENT_EXPORT(PLATFORM_WINDOW) X11ExtensionDelegate {
  public:
   // Notifies if the PlatformWindow looses a mouse grab. This can be useful
   // for Wayland or X11. Both of them provide pointer enter and leave
@@ -30,12 +24,13 @@ class COMPONENT_EXPORT(EXTENSIONS) X11ExtensionDelegate {
   // (menu) windows.
   virtual void OnLostMouseGrab() = 0;
 
-  // Returns a mask to be used to clip the window for the given
-  // size. This is used to create the non-rectangular window shape.
-  virtual void GetWindowMask(const gfx::Size& size, SkPath* window_mask) = 0;
-
 #if BUILDFLAG(USE_ATK)
-  virtual bool OnAtkKeyEvent(AtkKeyEventStruct* atk_key_event) = 0;
+  // Notifies an ATK key event to be processed. The transient parameter will be
+  // true if the event target is a transient window (e.g. a modal dialog)
+  // "hanging" from our window. Return true to stop propagation of the original
+  // key event.
+  virtual bool OnAtkKeyEvent(AtkKeyEventStruct* atk_key_event,
+                             bool transient) = 0;
 #endif
 
   // Returns true if this window should be in a forced override-redirect state

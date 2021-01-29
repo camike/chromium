@@ -9,6 +9,7 @@
 #include "base/system/sys_info.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/update_client/update_query_params_delegate.h"
 #include "components/version_info/version_info.h"
 
@@ -25,15 +26,15 @@ const char kUnknown[] = "unknown";
 // The request extra information is the OS and architecture, this helps
 // the server select the right package to be delivered.
 const char kOs[] =
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
     "mac";
 #elif defined(OS_WIN)
     "win";
 #elif defined(OS_ANDROID)
     "android";
-#elif defined(OS_CHROMEOS)
+#elif BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
     "cros";
-#elif defined(OS_LINUX)
+#elif defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
     "linux";
 #elif defined(OS_FUCHSIA)
     "fuchsia";
@@ -62,11 +63,11 @@ const char kArch[] =
 #error "unknown arch"
 #endif
 
-const char kChrome[] = "chrome";
-
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+const char kChrome[] = "chrome";
 const char kCrx[] = "chromecrx";
 #else
+const char kChrome[] = "chromium";
 const char kCrx[] = "chromiumcrx";
 #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 

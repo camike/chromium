@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/sequence_checker.h"
 #include "base/sequenced_task_runner.h"
 #include "chrome/browser/chromeos/policy/value_validation/onc_user_policy_value_validator.h"
 #include "components/ownership/owner_key_util.h"
@@ -40,6 +41,8 @@ DeviceLocalAccountPolicyStore::DeviceLocalAccountPolicyStore(
 DeviceLocalAccountPolicyStore::~DeviceLocalAccountPolicyStore() {}
 
 void DeviceLocalAccountPolicyStore::Load() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   // Cancel all pending requests.
   weak_factory_.InvalidateWeakPtrs();
 
@@ -61,6 +64,8 @@ DeviceLocalAccountPolicyStore::CreateValidator(
 }
 
 void DeviceLocalAccountPolicyStore::LoadImmediately() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   // This blocking D-Bus call is in the startup path and will block the UI
   // thread. This only happens when the Profile is created synchronously, which
   // on Chrome OS happens whenever the browser is restarted into the same
@@ -83,14 +88,16 @@ void DeviceLocalAccountPolicyStore::LoadImmediately() {
 
 void DeviceLocalAccountPolicyStore::Store(
     const em::PolicyFetchResponse& policy) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   // Cancel all pending requests.
   weak_factory_.InvalidateWeakPtrs();
 
   CheckKeyAndValidate(
       true, std::make_unique<em::PolicyFetchResponse>(policy),
       true /*validate_in_background*/,
-      base::Bind(&DeviceLocalAccountPolicyStore::OnPolicyToStoreValidated,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&DeviceLocalAccountPolicyStore::OnPolicyToStoreValidated,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void DeviceLocalAccountPolicyStore::ValidateLoadedPolicyBlob(
@@ -107,8 +114,8 @@ void DeviceLocalAccountPolicyStore::ValidateLoadedPolicyBlob(
     if (policy->ParseFromString(policy_blob)) {
       CheckKeyAndValidate(
           false, std::move(policy), validate_in_background,
-          base::Bind(&DeviceLocalAccountPolicyStore::UpdatePolicy,
-                     weak_factory_.GetWeakPtr()));
+          base::BindOnce(&DeviceLocalAccountPolicyStore::UpdatePolicy,
+                         weak_factory_.GetWeakPtr()));
     } else {
       status_ = CloudPolicyStore::STATUS_PARSE_ERROR;
       NotifyStoreError();
@@ -171,16 +178,16 @@ void DeviceLocalAccountPolicyStore::CheckKeyAndValidate(
     bool valid_timestamp_required,
     std::unique_ptr<em::PolicyFetchResponse> policy,
     bool validate_in_background,
-    const ValidateCompletionCallback& callback) {
+    ValidateCompletionCallback callback) {
   if (validate_in_background) {
-    device_settings_service_->GetOwnershipStatusAsync(
-        base::Bind(&DeviceLocalAccountPolicyStore::Validate,
-                   weak_factory_.GetWeakPtr(), valid_timestamp_required,
-                   base::Passed(&policy), callback, validate_in_background));
+    device_settings_service_->GetOwnershipStatusAsync(base::BindOnce(
+        &DeviceLocalAccountPolicyStore::Validate, weak_factory_.GetWeakPtr(),
+        valid_timestamp_required, base::Passed(&policy), std::move(callback),
+        validate_in_background));
   } else {
     chromeos::DeviceSettingsService::OwnershipStatus ownership_status =
         device_settings_service_->GetOwnershipStatus();
-    Validate(valid_timestamp_required, std::move(policy), callback,
+    Validate(valid_timestamp_required, std::move(policy), std::move(callback),
              validate_in_background, ownership_status);
   }
 }
@@ -188,7 +195,7 @@ void DeviceLocalAccountPolicyStore::CheckKeyAndValidate(
 void DeviceLocalAccountPolicyStore::Validate(
     bool valid_timestamp_required,
     std::unique_ptr<em::PolicyFetchResponse> policy_response,
-    const ValidateCompletionCallback& callback,
+    ValidateCompletionCallback callback,
     bool validate_in_background,
     chromeos::DeviceSettingsService::OwnershipStatus ownership_status) {
   DCHECK_NE(chromeos::DeviceSettingsService::OWNERSHIP_UNKNOWN,
@@ -237,7 +244,8 @@ void DeviceLocalAccountPolicyStore::Validate(
 
   if (validate_in_background) {
     UserCloudPolicyValidator::StartValidation(
-        std::move(validator), base::BindOnce(callback, key->as_string()));
+        std::move(validator),
+        base::BindOnce(std::move(callback), key->as_string()));
   } else {
     validator->RunValidation();
 

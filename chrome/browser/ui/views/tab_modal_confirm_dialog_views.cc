@@ -32,31 +32,27 @@ TabModalConfirmDialogViews::TabModalConfirmDialogViews(
     std::unique_ptr<TabModalConfirmDialogDelegate> delegate,
     content::WebContents* web_contents)
     : delegate_(std::move(delegate)) {
-  DialogDelegate::SetButtons(delegate_->GetDialogButtons());
-  DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_OK,
-                                   delegate_->GetAcceptButtonTitle());
-  DialogDelegate::SetButtonLabel(ui::DIALOG_BUTTON_CANCEL,
-                                   delegate_->GetCancelButtonTitle());
+  SetButtons(delegate_->GetDialogButtons());
+  SetButtonLabel(ui::DIALOG_BUTTON_OK, delegate_->GetAcceptButtonTitle());
+  SetButtonLabel(ui::DIALOG_BUTTON_CANCEL, delegate_->GetCancelButtonTitle());
 
-  DialogDelegate::SetAcceptCallback(
-      base::BindOnce(&TabModalConfirmDialogDelegate::Accept,
-                     base::Unretained(delegate_.get())));
-  DialogDelegate::SetCancelCallback(
-      base::BindOnce(&TabModalConfirmDialogDelegate::Cancel,
-                     base::Unretained(delegate_.get())));
-  DialogDelegate::SetCloseCallback(
-      base::BindOnce(&TabModalConfirmDialogDelegate::Close,
-                     base::Unretained(delegate_.get())));
+  SetAcceptCallback(base::BindOnce(&TabModalConfirmDialogDelegate::Accept,
+                                   base::Unretained(delegate_.get())));
+  SetCancelCallback(base::BindOnce(&TabModalConfirmDialogDelegate::Cancel,
+                                   base::Unretained(delegate_.get())));
+  SetCloseCallback(base::BindOnce(&TabModalConfirmDialogDelegate::Close,
+                                  base::Unretained(delegate_.get())));
+  SetModalType(ui::MODAL_TYPE_CHILD);
+  SetOwnedByWidget(true);
 
   base::Optional<int> default_button = delegate_->GetDefaultDialogButton();
   if (bool(default_button))
-    DialogDelegate::SetDefaultButton(*default_button);
+    SetDefaultButton(*default_button);
 
-  views::MessageBoxView::InitParams init_params(delegate_->GetDialogMessage());
-  init_params.inter_row_vertical_spacing =
+  message_box_view_ = new views::MessageBoxView(delegate_->GetDialogMessage());
+  message_box_view_->SetInterRowVerticalSpacing(
       ChromeLayoutProvider::Get()->GetDistanceMetric(
-          views::DISTANCE_UNRELATED_CONTROL_VERTICAL);
-  message_box_view_ = new views::MessageBoxView(init_params);
+          views::DISTANCE_UNRELATED_CONTROL_VERTICAL));
 
   base::string16 link_text(delegate_->GetLinkText());
   if (!link_text.empty()) {
@@ -85,19 +81,11 @@ views::View* TabModalConfirmDialogViews::GetContentsView() {
 }
 
 views::Widget* TabModalConfirmDialogViews::GetWidget() {
-  return message_box_view_->GetWidget();
+  return message_box_view_ ? message_box_view_->GetWidget() : nullptr;
 }
 
 const views::Widget* TabModalConfirmDialogViews::GetWidget() const {
-  return message_box_view_->GetWidget();
-}
-
-void TabModalConfirmDialogViews::DeleteDelegate() {
-  delete this;
-}
-
-ui::ModalType TabModalConfirmDialogViews::GetModalType() const {
-  return ui::MODAL_TYPE_CHILD;
+  return message_box_view_ ? message_box_view_->GetWidget() : nullptr;
 }
 
 TabModalConfirmDialogViews::~TabModalConfirmDialogViews() = default;
@@ -114,9 +102,8 @@ void TabModalConfirmDialogViews::CloseDialog() {
   GetWidget()->Close();
 }
 
-void TabModalConfirmDialogViews::LinkClicked(views::Link* source,
-                                             int event_flags) {
-  delegate_->LinkClicked(ui::DispositionFromEventFlags(event_flags));
+void TabModalConfirmDialogViews::LinkClicked(const ui::Event& event) {
+  delegate_->LinkClicked(ui::DispositionFromEventFlags(event.flags()));
 }
 
 views::View* TabModalConfirmDialogViews::GetInitiallyFocusedView() {

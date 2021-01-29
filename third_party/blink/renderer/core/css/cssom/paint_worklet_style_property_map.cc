@@ -46,7 +46,7 @@ class PaintWorkletStylePropertyMapIterationSource final
     return true;
   }
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(values_);
     PairIterable<String, CSSStyleValueVector>::IterationSource::Trace(visitor);
   }
@@ -172,13 +172,13 @@ CSSStyleValueVector PaintWorkletStylePropertyMap::getAll(
     const ExecutionContext* execution_context,
     const String& property_name,
     ExceptionState& exception_state) const {
-  CSSPropertyID property_id = cssPropertyID(execution_context, property_name);
+  CSSPropertyID property_id = CssPropertyID(execution_context, property_name);
   if (property_id == CSSPropertyID::kInvalid) {
     exception_state.ThrowTypeError("Invalid propertyName: " + property_name);
     return CSSStyleValueVector();
   }
 
-  DCHECK(isValidCSSPropertyID(property_id));
+  DCHECK(IsValidCSSPropertyID(property_id));
 
   CSSStyleValueVector values;
   auto value = data_.find(property_name);
@@ -209,7 +209,7 @@ PaintWorkletStylePropertyMap::StartIteration(ScriptState* script_state,
       result);
 }
 
-void PaintWorkletStylePropertyMap::Trace(Visitor* visitor) {
+void PaintWorkletStylePropertyMap::Trace(Visitor* visitor) const {
   StylePropertyMapReadOnly::Trace(visitor);
 }
 

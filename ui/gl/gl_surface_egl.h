@@ -9,6 +9,9 @@
 #include <windows.h>
 #endif
 
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -22,7 +25,6 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/vsync_provider.h"
 #include "ui/gl/egl_timestamps.h"
-#include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_export.h"
 #include "ui/gl/gl_surface.h"
 #include "ui/gl/gl_surface_overlay.h"
@@ -70,7 +72,9 @@ enum DisplayType {
   ANGLE_SWIFTSHADER = 14,
   ANGLE_OPENGL_EGL = 15,
   ANGLE_OPENGLES_EGL = 16,
-  DISPLAY_TYPE_MAX = 17,
+  ANGLE_METAL = 17,
+  ANGLE_METAL_NULL = 18,
+  DISPLAY_TYPE_MAX = 19,
 };
 
 GL_EXPORT void GetEGLInitDisplays(bool supports_angle_d3d,
@@ -79,6 +83,7 @@ GL_EXPORT void GetEGLInitDisplays(bool supports_angle_d3d,
                                   bool supports_angle_vulkan,
                                   bool supports_angle_swiftshader,
                                   bool supports_angle_egl,
+                                  bool supports_angle_metal,
                                   const base::CommandLine* command_line,
                                   std::vector<DisplayType>* init_displays);
 
@@ -103,9 +108,12 @@ class GL_EXPORT GLSurfaceEGL : public GLSurface {
   // These aren't particularly tied to surfaces, but since we already
   // have the static InitializeOneOff here, it's easiest to reuse its
   // initialization guards.
+  static const char* GetEGLClientExtensions();
   static const char* GetEGLExtensions();
+  static bool HasEGLClientExtension(const char* name);
   static bool HasEGLExtension(const char* name);
   static bool IsCreateContextRobustnessSupported();
+  static bool IsRobustnessVideoMemoryPurgeSupported();
   static bool IsCreateContextBindGeneratesResourceSupported();
   static bool IsCreateContextWebGLCompatabilitySupported();
   static bool IsEGLSurfacelessContextSupported();
@@ -113,10 +121,13 @@ class GL_EXPORT GLSurfaceEGL : public GLSurface {
   static bool IsEGLFlexibleSurfaceCompatibilitySupported();
   static bool IsRobustResourceInitSupported();
   static bool IsDisplayTextureShareGroupSupported();
+  static bool IsDisplaySemaphoreShareGroupSupported();
   static bool IsCreateContextClientArraysSupported();
   static bool IsAndroidNativeFenceSyncSupported();
   static bool IsPixelFormatFloatSupported();
   static bool IsANGLEFeatureControlSupported();
+  static bool IsANGLEPowerPreferenceSupported();
+  static bool IsANGLEExternalContextAndSurfaceSupported();
 
  protected:
   ~GLSurfaceEGL() override;

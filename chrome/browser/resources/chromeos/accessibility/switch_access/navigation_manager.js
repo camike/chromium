@@ -2,278 +2,243 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/**
- * This class handles navigation amongst the elements onscreen.
- */
-class NavigationManager {
+import {ActionManager} from './action_manager.js';
+import {AutoScanManager} from './auto_scan_manager.js';
+import {FocusRingManager} from './focus_ring_manager.js';
+import {FocusData, FocusHistory} from './history.js';
+import {MenuManager} from './menu_manager.js';
+import {Navigator, NavigatorInterface} from './navigator.js';
+import {BackButtonNode} from './nodes/back_button_node.js';
+import {BasicNode, BasicRootNode} from './nodes/basic_node.js';
+import {DesktopNode} from './nodes/desktop_node.js';
+import {EditableTextNode} from './nodes/editable_text_node.js';
+import {KeyboardRootNode} from './nodes/keyboard_node.js';
+import {ModalDialogRootNode} from './nodes/modal_dialog_node.js';
+import {SliderNode} from './nodes/slider_node.js';
+import {SAChildNode, SARootNode} from './nodes/switch_access_node.js';
+import {TabNode} from './nodes/tab_node.js';
+import {SwitchAccessPredicate} from './switch_access_predicate.js';
 
+const AutomationNode = chrome.automation.AutomationNode;
+
+/** This class handles navigation amongst the elements onscreen. */
+export class NavigationManager extends NavigatorInterface {
   /**
-   * @param {!chrome.automation.AutomationNode} desktop
-   * @private
+   * @param {!AutomationNode} desktop
    */
   constructor(desktop) {
-    /** @private {!chrome.automation.AutomationNode} */
+    super();
+
+    /** @private {!AutomationNode} */
     this.desktop_ = desktop;
 
     /** @private {!SARootNode} */
     this.group_ = DesktopNode.build(this.desktop_);
 
     /** @private {!SAChildNode} */
+    // TODO(crbug.com/1106080): It is possible for the firstChild to be a
+    // window which is occluded, for example if Switch Access is turned on
+    // when the user has several browser windows opened. We should either
+    // dynamically pick this.node_'s initial value based on an occlusion check,
+    // or ensure that we move away from occluded children as quickly as soon
+    // as they are detected using an interval set in DesktopNode.
     this.node_ = this.group_.firstChild;
 
-    /** @private {!Array<!SARootNode>} */
-    this.groupStack_ = [];
-
-    /** @private {!FocusRingManager} */
-    this.focusRingManager_ = new FocusRingManager();
-
-    /**
-     * Callback for testing use only.
-     * @private {?function()}
-     */
-    this.onMoveForwardForTesting_ = null;
+    /** @private {!FocusHistory} */
+    this.history_ = new FocusHistory();
 
     this.init_();
   }
 
-  // =============== Static Methods ==============
+  // =============== NavigatorInterface implementation ==============
 
-  /**
-   * Enters |this.node_|.
-   */
-  static enterGroup() {
-    const navigator = NavigationManager.instance;
-    if (!navigator.node_.isGroup()) {
+  /** @override */
+  currentGroupHasChild(node) {
+    return this.group_.children.includes(node);
+  }
+
+  /** @override */
+  enterGroup() {
+    if (!this.node_.isGroup()) {
       return;
     }
 
-    SwitchAccessMetrics.recordMenuAction('EnterGroup');
-
-    const newGroup = navigator.node_.asRootNode();
+    const newGroup = this.node_.asRootNode();
     if (newGroup) {
-      navigator.groupStack_.push(navigator.group_);
-      navigator.setGroup_(newGroup);
+      this.history_.save(new FocusData(this.group_, this.node_));
+      this.setGroup_(newGroup);
     }
   }
 
-  /**
-   * Puts focus on the virtual keyboard, if the current node is a text input.
-   * TODO(crbug/946190): Handle the case where the user has not enabled the
-   *     onscreen keyboard.
-   */
-  static enterKeyboard() {
-    const navigator = NavigationManager.instance;
+  /** @override */
+  enterKeyboard() {
+    this.node_.automationNode.focus();
     const keyboard = KeyboardRootNode.buildTree();
-    navigator.jumpTo_(keyboard);
-    navigator.node_.automationNode.focus();
+    this.jumpTo_(keyboard);
   }
 
-  /**
-   * Open the Switch Access menu for the currently highlighted node. If there
-   * are not enough actions available to trigger the menu, the current element
-   * is selected.
-   */
-  static enterMenu() {
-    const navigator = NavigationManager.instance;
-    const didEnter = MenuManager.enter(navigator.node_);
+  /** @override */
+  exitGroupUnconditionally() {
+    this.exitGroup_();
+  }
 
-    // If the menu does not or cannot open, select the current node.
-    if (!didEnter) {
-      navigator.selectCurrentNode();
+  /** @override */
+  exitIfInGroup(node) {
+    if (this.group_.isEquivalentTo(node)) {
+      this.exitGroup_();
     }
   }
 
-  static exitKeyboard() {
-    const navigator = NavigationManager.instance;
-    let foundKeyboard = navigator.group_ instanceof KeyboardRootNode;
-    for (const group of navigator.groupStack_) {
-      foundKeyboard |= group instanceof KeyboardRootNode;
-    }
+  /** @override */
+  exitKeyboard() {
+    const isKeyboard = (data) => data.group instanceof KeyboardRootNode;
     // If we are not in the keyboard, do nothing.
-    if (!foundKeyboard) {
+    if (!(this.group_ instanceof KeyboardRootNode) &&
+        !this.history_.containsDataMatchingPredicate(isKeyboard)) {
       return;
     }
 
-    while (navigator.groupStack_.length > 0) {
-      if (navigator.group_ instanceof KeyboardRootNode) {
+    while (this.history_.peek() !== null) {
+      if (this.group_ instanceof KeyboardRootNode) {
+        this.exitGroup_();
         break;
       }
-      navigator.exitGroup_();
+      this.exitGroup_();
     }
-    navigator.exitGroup_();
 
-    NavigationManager.moveToValidNode();
+    this.moveToValidNode();
   }
 
-  /**
-   * Forces the current node to be |node|.
-   * Should only be called by subclasses of SARootNode and
-   *    only when they are focused.
-   * @param {!SAChildNode} node
-   */
-  static forceFocusedNode(node) {
-    const navigator = NavigationManager.instance;
-    navigator.setNode_(node);
+  /** @override */
+  forceFocusedNode(node) {
+    // Check if they are exactly the same instance. Checking contents
+    // equality is not sufficient in case the node has been repopulated
+    // after a refresh.
+    if (this.node_ !== node) {
+      this.setNode_(node);
+    }
   }
 
-  /**
-   * Returns the current Switch Access tree, for debugging purposes.
-   * @param {boolean} wholeTree Whether to print the whole tree, or just the
-   * current focus.
-   * @return {!SARootNode}
-   */
-  static getTreeForDebugging(wholeTree) {
+  /** @override */
+  getTreeForDebugging(wholeTree) {
     if (!wholeTree) {
-      console.log(NavigationManager.instance.group_.debugString(wholeTree));
-      return NavigationManager.instance.group_;
+      console.log(this.group_.debugString(wholeTree));
+      return this.group_;
     }
 
-    const desktopRoot = DesktopNode.build(NavigationManager.instance.desktop_);
-    console.log(desktopRoot.debugString(
-        wholeTree, '', NavigationManager.instance.node_));
+    const desktopRoot = DesktopNode.build(this.desktop_);
+    console.log(desktopRoot.debugString(wholeTree, '', this.node_));
     return desktopRoot;
   }
 
-  /** @param {!chrome.automation.AutomationNode} desktop */
-  static initialize(desktop) {
-    NavigationManager.instance = new NavigationManager(desktop);
+  /** @override */
+  jumpToSwitchAccessMenu() {
+    const menuNode = MenuManager.menuAutomationNode;
+    if (!menuNode) {
+      return;
+    }
+    const menu = BasicRootNode.buildTree(menuNode);
+    this.jumpTo_(menu, false /* shouldExitMenu */);
   }
 
-  /**
-   * Move to the previous interesting node.
-   */
-  static moveBackward() {
-    const navigator = NavigationManager.instance;
+  /** @override */
+  moveBackward() {
+    if (this.node_.isValidAndVisible()) {
+      this.tryMoving(this.node_.previous, (node) => node.previous, this.node_);
+    } else {
+      this.moveToValidNode();
+    }
+  }
 
-    if (MenuManager.moveBackward()) {
-      // The menu navigation is handled separately. If we are in the menu, do
-      // not change the primary focus node.
+  /** @override */
+  moveForward() {
+    if (this.node_.isValidAndVisible()) {
+      this.tryMoving(this.node_.next, (node) => node.next, this.node_);
+    } else {
+      this.moveToValidNode();
+    }
+  }
+
+  /** @override */
+  tryMoving(node, getNext, startingNode) {
+    if (node === startingNode) {
+      // This should only happen if the desktop contains exactly one interesting
+      // child and all other children are windows which are occluded.
+      // Unlikely to happen since we can always access the shelf.
       return;
     }
 
-    navigator.setNode_(navigator.node_.previous);
-  }
-
-  /**
-   * Move to the next interesting node.
-   */
-  static moveForward() {
-    const navigator = NavigationManager.instance;
-
-    if (navigator.onMoveForwardForTesting_) {
-      navigator.onMoveForwardForTesting_();
-    }
-
-    if (MenuManager.moveForward()) {
-      // The menu navigation is handled separately. If we are in the menu, do
-      // not change the primary focus node.
+    if (!(node instanceof BasicNode)) {
+      this.setNode_(node);
       return;
     }
-
-    navigator.setNode_(navigator.node_.next);
+    if (!SwitchAccessPredicate.isWindow(node.automationNode)) {
+      this.setNode_(node);
+      return;
+    }
+    const location = node.location;
+    if (!location) {
+      // Closure compiler doesn't realize we already checked isValidAndVisible
+      // before calling tryMoving, so we need to explicitly check location here
+      // so that RectUtil.center does not cause a closure error.
+      this.moveToValidNode();
+      return;
+    }
+    const center = RectUtil.center(location);
+    // Check if the top center is visible as a proxy for occlusion. It's
+    // possible that other parts of the window are occluded, but in Chrome we
+    // can't drag windows off the top of the screen.
+    this.desktop_.hitTestWithReply(center.x, location.top, (hitNode) => {
+      if (AutomationUtil.isDescendantOf(hitNode, node.automationNode)) {
+        this.setNode_(node);
+      } else if (node.isValidAndVisible()) {
+        this.tryMoving(getNext(node), getNext, startingNode);
+      } else {
+        this.moveToValidNode();
+      }
+    });
   }
 
-  /**
-   * Moves to the Switch Access focus up the group stack closest to the ancestor
-   * that hasn't been invalidated.
-   */
-  static moveToValidNode() {
-    const navigator = NavigationManager.instance;
-
-    const nodeIsValid = navigator.node_.isValidAndVisible();
-    const groupIsValid = navigator.group_.isValidGroup();
+  /** @override */
+  moveToValidNode() {
+    const nodeIsValid = this.node_.isValidAndVisible();
+    const groupIsValid = this.group_.isValidGroup();
 
     if (nodeIsValid && groupIsValid) {
       return;
     }
 
-    if (nodeIsValid) {
-      // Our group has been invalidated. Move to navigator node to repair the
+    if (nodeIsValid && !(this.node_ instanceof BackButtonNode)) {
+      // Our group has been invalidated. Move to this node to repair the
       // group stack.
-      const node = navigator.node_.automationNode;
-      if (node) {
-        navigator.moveTo_(node);
-        return;
-      }
-    }
-
-    if (groupIsValid) {
-      navigator.setNode_(navigator.group_.firstChild);
+      this.moveTo_(this.node_.automationNode);
       return;
     }
 
-    let group = navigator.groupStack_.pop();
-    while (group) {
-      if (group.isValidGroup()) {
-        navigator.setGroup_(group);
-        return;
-      }
-      group = navigator.groupStack_.pop();
+    // Make sure the menu isn't open.
+    ActionManager.exitAllMenus();
+
+    const child = this.group_.firstValidChild();
+    if (groupIsValid && child) {
+      this.setNode_(child);
+      return;
     }
 
-    // If there is no valid node in the group stack, go to the desktop.
-    navigator.setGroup_(DesktopNode.build(navigator.desktop_));
-    navigator.groupStack_ = [];
+    this.restoreFromHistory_();
   }
 
-  /**
-   * Updates the focus ring locations in response to an automation event.
-   */
-  static refreshFocusRings() {
-    const navigator = NavigationManager.instance;
-
-    navigator.focusRingManager_.setFocusNodes(
-        navigator.node_, navigator.group_);
+  /** @override */
+  get currentNode() {
+    this.moveToValidNode();
+    return this.node_;
   }
 
-  // =============== Instance Methods ==============
-
-  /**
-   * Returns the desktop automation node object.
-   * @return {!chrome.automation.AutomationNode}
-   */
+  /** @override */
   get desktopNode() {
     return this.desktop_;
   }
 
-  /**
-   * Selects the current node.
-   */
-  selectCurrentNode() {
-    if (MenuManager.selectCurrentNode()) {
-      // The menu navigation is handled separately. If we are in the menu, do
-      // not change the primary focus node.
-      return;
-    }
-
-    if (this.node_.isGroup()) {
-      NavigationManager.enterGroup();
-      return;
-    }
-
-    if (this.node_.hasAction(SAConstants.MenuAction.OPEN_KEYBOARD)) {
-      SwitchAccessMetrics.recordMenuAction(
-          SAConstants.MenuAction.OPEN_KEYBOARD);
-      this.node_.performAction(SAConstants.MenuAction.OPEN_KEYBOARD);
-      return;
-    }
-
-    if (this.node_.hasAction(SAConstants.MenuAction.SELECT)) {
-      SwitchAccessMetrics.recordMenuAction(SAConstants.MenuAction.SELECT);
-      this.node_.performAction(SAConstants.MenuAction.SELECT);
-    }
-  }
-
   // =============== Event Handlers ==============
-
-  /**
-   * Sets up the connection between the menuPanel and menuManager.
-   * @param {!PanelInterface} menuPanel
-   */
-  connectMenuPanel(menuPanel) {
-    menuPanel.backButtonElement().addEventListener(
-        'click', this.exitGroup_.bind(this));
-  }
 
   /**
    * When focus shifts, move to the element. Find the closest interesting
@@ -282,6 +247,11 @@ class NavigationManager {
    * @private
    */
   onFocusChange_(event) {
+    // Ignore focus changes from our own actions.
+    if (event.eventFrom === 'action') {
+      return;
+    }
+
     if (this.node_.isEquivalentTo(event.target)) {
       return;
     }
@@ -289,112 +259,114 @@ class NavigationManager {
   }
 
   /**
+   * When scroll position changes, ensure that the focus ring is in the
+   * correct place and that the focused node / node group are valid.
+   * @private
+   */
+  onScrollChange_() {
+    if (this.node_.isValidAndVisible()) {
+      // Update focus ring.
+      FocusRingManager.setFocusedNode(this.node_);
+    }
+    this.group_.refresh();
+    ActionManager.refreshMenu();
+  }
+
+  /**
    * When a menu is opened, jump focus to the menu.
    * @param {!chrome.automation.AutomationEvent} event
    * @private
    */
-  onMenuStart_(event) {
-    const menuRoot = SystemMenuRootNode.buildTree(event.target);
-    this.jumpTo_(menuRoot);
+  onModalDialog_(event) {
+    const modalRoot = ModalDialogRootNode.buildTree(event.target);
+    if (modalRoot.isValidGroup()) {
+      this.jumpTo_(modalRoot);
+    }
   }
 
   /**
-   * When the automation tree changes, check if it affects any nodes we are
-   *     currently listening to.
+   * When the automation tree changes, ensure the group and node we are
+   * currently listening to are fresh. This is only called when the tree change
+   * occurred on the node or group which are currently active.
    * @param {!chrome.automation.TreeChange} treeChange
    * @private
    */
   onTreeChange_(treeChange) {
     if (treeChange.type === chrome.automation.TreeChangeType.NODE_REMOVED) {
-      NavigationManager.moveToValidNode();
+      this.group_.refresh();
+      this.moveToValidNode();
+    } else if (
+        treeChange.type ===
+        chrome.automation.TreeChangeType.SUBTREE_UPDATE_END) {
+      this.group_.refresh();
     }
   }
 
   // =============== Private Methods ==============
 
-  /**
-   * Create a stack of the groups the specified node is in, and set
-   *      |this.group_| to the most proximal group.
-   *  @param {!chrome.automation.AutomationNode} node
-   *  @private
-   */
-  buildGroupStack_(node) {
-    // Create a list of ancestors.
-    const ancestorList = [];
-    while (node.parent) {
-      ancestorList.push(node.parent);
-      node = node.parent;
-    }
-
-    this.groupStack_ = [];
-    let group = DesktopNode.build(this.desktop_);
-    while (ancestorList.length > 0) {
-      const ancestor = ancestorList.pop();
-      if (ancestor.role === chrome.automation.RoleType.DESKTOP) {
-        continue;
-      }
-
-      if (SwitchAccessPredicate.isGroup(ancestor, group)) {
-        this.groupStack_.push(group);
-        group = RootNodeWrapper.buildTree(ancestor);
-      }
-    }
-    this.setGroup_(group, false /* shouldSetNode */);
-  }
-
-  /**
-   * Exits the current group.
-   * @private
-   */
+  /** @private */
   exitGroup_() {
-    if (this.groupStack_.length === 0) {
-      return;
-    }
-
     this.group_.onExit();
-
-    let group = this.groupStack_.pop();
-    // Find a group that is still valid.
-    while (!group.isValidGroup() && this.groupStack_.length) {
-      group = this.groupStack_.pop();
-    }
-
-    this.setGroup_(group);
+    this.restoreFromHistory_();
   }
-
 
   /** @private */
   init_() {
     this.group_.onFocus();
     this.node_.onFocus();
 
-    if (window.menuPanel) {
-      this.connectMenuPanel(window.menuPanel);
-    }
+    new RepeatedEventHandler(
+        this.desktop_, chrome.automation.EventType.FOCUS,
+        this.onFocusChange_.bind(this));
 
-    this.desktop_.addEventListener(
-        chrome.automation.EventType.FOCUS, this.onFocusChange_.bind(this),
-        false);
+    // ARC++ fires SCROLL_POSITION_CHANGED.
+    new RepeatedEventHandler(
+        this.desktop_, chrome.automation.EventType.SCROLL_POSITION_CHANGED,
+        this.onScrollChange_.bind(this));
 
-    this.desktop_.addEventListener(
-        chrome.automation.EventType.MENU_START, this.onMenuStart_.bind(this),
-        false);
+    // Web and Views use AXEventGenerator, which fires
+    // separate horizontal and vertical events.
+    new RepeatedEventHandler(
+        this.desktop_,
+        chrome.automation.EventType.SCROLL_HORIZONTAL_POSITION_CHANGED,
+        this.onScrollChange_.bind(this));
+    new RepeatedEventHandler(
+        this.desktop_,
+        chrome.automation.EventType.SCROLL_VERTICAL_POSITION_CHANGED,
+        this.onScrollChange_.bind(this));
 
-    chrome.automation.addTreeChangeObserver(
+    new RepeatedTreeChangeHandler(
         chrome.automation.TreeChangeObserverFilter.ALL_TREE_CHANGES,
-        this.onTreeChange_.bind(this));
+        this.onTreeChange_.bind(this), {
+          predicate: (treeChange) =>
+              this.group_.findChild(treeChange.target) != null ||
+              this.group_.isEquivalentTo(treeChange.target)
+        });
+
+    // The status tray fires a SHOW event when it opens.
+    new EventHandler(
+        this.desktop_,
+        [
+          chrome.automation.EventType.MENU_START,
+          chrome.automation.EventType.SHOW
+        ],
+        this.onModalDialog_.bind(this))
+        .start();
   }
 
   /**
    * Jumps Switch Access focus to a specified node, such as when opening a menu
    * or the keyboard. Does not modify the groups already in the group stack.
    * @param {!SARootNode} group
+   * @param {boolean} shouldExitMenu
    * @private
    */
-  jumpTo_(group) {
-    MenuManager.exit();
+  jumpTo_(group, shouldExitMenu = true) {
+    if (shouldExitMenu) {
+      ActionManager.exitAllMenus();
+    }
 
-    this.groupStack_.push(this.group_);
+    this.history_.save(new FocusData(this.group_, this.node_));
     this.setGroup_(group);
   }
 
@@ -404,39 +376,62 @@ class NavigationManager {
    *
    * This is a "permanent" move, while |jumpTo_| is a "temporary" move.
    *
-   * @param {!chrome.automation.AutomationNode} automationNode
+   * @param {!AutomationNode} automationNode
    * @private
    */
   moveTo_(automationNode) {
-    this.buildGroupStack_(automationNode);
-    let node = this.group_.firstChild;
-    for (const child of this.group_.children) {
-      if (child.isEquivalentTo(automationNode)) {
-        node = child;
-      }
+    ActionManager.exitAllMenus();
+    if (this.history_.buildFromAutomationNode(automationNode)) {
+      this.restoreFromHistory_();
     }
-    if (node.equals(this.node_)) {
-      return;
-    }
-
-    MenuManager.exit();
-    this.setNode_(node);
   }
 
   /**
-   * Set |this.group_| to |group|.
-   * @param {!SARootNode} group
-   * @param {boolean} shouldSetNode
+   * Restores the most proximal state from the history.
    * @private
    */
-  setGroup_(group, shouldSetNode = true) {
+  restoreFromHistory_() {
+    const data = this.history_.retrieve();
+
+    // |data.focus| may not be a child of |data.group| anymore since
+    // |data.group| updates when retrieving the history record. So |data.focus|
+    // should not be used as the preferred focus node.
+    const groupChildren = data.group.children;
+    var focusTarget = null;
+    for (var index = 0; index < groupChildren.length; ++index) {
+      const child = groupChildren[index];
+      if (child.isEquivalentTo(data.focus)) {
+        focusTarget = child;
+        break;
+      }
+    }
+
+    // retrieve() guarantees that the group is valid, but not the focus.
+    if (focusTarget && focusTarget.isValidAndVisible()) {
+      this.setGroup_(data.group, focusTarget);
+    } else {
+      this.setGroup_(data.group);
+    }
+  }
+
+  /**
+   * Set |this.group_| to |group|, and sets |this.node_| to either |opt_focus|
+   * or |group.firstChild|.
+   * @param {!SARootNode} group
+   * @param {SAChildNode=} opt_focus
+   * @private
+   */
+  setGroup_(group, opt_focus) {
     this.group_.onUnfocus();
     this.group_ = group;
     this.group_.onFocus();
 
-    if (shouldSetNode) {
-      this.setNode_(this.group_.firstChild);
+    const node = opt_focus || this.group_.firstValidChild();
+    if (!node) {
+      this.moveToValidNode();
+      return;
     }
+    this.setNode_(node);
   }
 
   /**
@@ -445,10 +440,13 @@ class NavigationManager {
    * @private
    */
   setNode_(node) {
+    if (!node.isValidAndVisible()) {
+      this.moveToValidNode();
+      return;
+    }
     this.node_.onUnfocus();
     this.node_ = node;
     this.node_.onFocus();
-    this.focusRingManager_.setFocusNodes(this.node_, this.group_);
     AutoScanManager.restartIfRunning();
   }
 }

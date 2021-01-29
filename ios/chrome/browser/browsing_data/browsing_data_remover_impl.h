@@ -46,6 +46,7 @@ class BrowsingDataRemoverImpl : public BrowsingDataRemover {
   void Remove(browsing_data::TimePeriod time_period,
               BrowsingDataRemoveMask remove_mask,
               base::OnceClosure callback) override;
+  void RemoveSessionsData(NSArray<NSString*>* session_ids) override;
 
  private:
   // Represents a single removal task. Contains all parameters to execute it.
@@ -127,7 +128,7 @@ class BrowsingDataRemoverImpl : public BrowsingDataRemover {
   // Used if we need to clear history.
   base::CancelableTaskTracker history_task_tracker_;
 
-  std::unique_ptr<TemplateURLService::Subscription> template_url_subscription_;
+  base::CallbackListSubscription template_url_subscription_;
 
   base::WeakPtrFactory<BrowsingDataRemoverImpl> weak_ptr_factory_;
 

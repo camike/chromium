@@ -10,10 +10,12 @@
 #include "base/run_loop.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_launcher.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -32,14 +34,14 @@ class ProfileSigninConfirmationHelperBrowserTest : public InProcessBrowserTest {
 
 // http://crbug.com/321302
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING) && \
-    (defined(OS_MACOSX) || defined(OS_LINUX))
+    (defined(OS_MAC) || defined(OS_LINUX) || defined(OS_CHROMEOS))
 #define MAYBE_HasNotBeenShutdown DISABLED_HasNotBeenShutdown
 #else
 #define MAYBE_HasNotBeenShutdown HasNotBeenShutdown
 #endif
 IN_PROC_BROWSER_TEST_F(ProfileSigninConfirmationHelperBrowserTest,
                        MAYBE_HasNotBeenShutdown) {
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
   EXPECT_TRUE(first_run::auto_import_state() & first_run::AUTO_IMPORT_CALLED);
 #endif
   EXPECT_FALSE(ui::HasBeenShutdown(browser()->profile()));
@@ -47,7 +49,7 @@ IN_PROC_BROWSER_TEST_F(ProfileSigninConfirmationHelperBrowserTest,
 
 // http://crbug.com/321302
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING) && \
-    (defined(OS_MACOSX) || defined(OS_LINUX))
+    (defined(OS_MAC) || defined(OS_LINUX) || defined(OS_CHROMEOS))
 #define MAYBE_HasNoSyncedExtensions DISABLED_HasNoSyncedExtensions
 #else
 #define MAYBE_HasNoSyncedExtensions HasNoSyncedExtensions

@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/html/media/remote_playback_observer.h"
@@ -96,7 +97,9 @@ RemotePlayback::RemotePlayback(HTMLMediaElement& element)
       state_(mojom::blink::PresentationConnectionState::CLOSED),
       availability_(mojom::ScreenAvailability::UNKNOWN),
       media_element_(&element),
-      is_listening_(false) {}
+      is_listening_(false),
+      presentation_connection_receiver_(this, element.GetExecutionContext()),
+      target_presentation_connection_(element.GetExecutionContext()) {}
 
 const AtomicString& RemotePlayback::InterfaceName() const {
   return event_target_names::kRemotePlayback;
@@ -202,7 +205,8 @@ ScriptPromise RemotePlayback::prompt(ScriptState* script_state) {
     return promise;
   }
 
-  if (!LocalFrame::HasTransientUserActivation(media_element_->GetFrame())) {
+  if (!LocalFrame::HasTransientUserActivation(
+          media_element_->DomWindow()->GetFrame())) {
     resolver->Reject(MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kInvalidAccessError,
         "RemotePlayback::prompt() requires user gesture."));
@@ -242,10 +246,6 @@ String RemotePlayback::state() const {
 bool RemotePlayback::HasPendingActivity() const {
   return HasEventListeners() || !availability_callbacks_.IsEmpty() ||
          prompt_promise_resolver_;
-}
-
-void RemotePlayback::ContextDestroyed() {
-  CleanupConnections();
 }
 
 void RemotePlayback::PromptInternal() {
@@ -504,7 +504,12 @@ void RemotePlayback::AvailabilityChanged(
   if (new_availability == old_availability)
     return;
 
-  for (auto& callback : availability_callbacks_.Values())
+  // Copy the callbacks to a temporary vector to prevent iterator invalidations,
+  // in case the JS callbacks invoke watchAvailability().
+  HeapVector<Member<AvailabilityCallbackWrapper>> callbacks;
+  CopyValuesToVector(availability_callbacks_, callbacks);
+
+  for (auto& callback : callbacks)
     callback->Run(this, new_availability);
 }
 
@@ -528,9 +533,12 @@ void RemotePlayback::OnConnectionSuccess(
     return;
 
   // Note: Messages on |connection_receiver| are ignored.
-  target_presentation_connection_.Bind(std::move(result->connection_remote));
+  target_presentation_connection_.Bind(
+      std::move(result->connection_remote),
+      GetExecutionContext()->GetTaskRunner(TaskType::kMediaElementEvent));
   presentation_connection_receiver_.Bind(
-      std::move(result->connection_receiver));
+      std::move(result->connection_receiver),
+      GetExecutionContext()->GetTaskRunner(TaskType::kMediaElementEvent));
 }
 
 void RemotePlayback::OnConnectionError(
@@ -604,10 +612,12 @@ void RemotePlayback::MaybeStartListeningForAvailability() {
   is_listening_ = true;
 }
 
-void RemotePlayback::Trace(Visitor* visitor) {
+void RemotePlayback::Trace(Visitor* visitor) const {
   visitor->Trace(availability_callbacks_);
   visitor->Trace(prompt_promise_resolver_);
   visitor->Trace(media_element_);
+  visitor->Trace(presentation_connection_receiver_);
+  visitor->Trace(target_presentation_connection_);
   visitor->Trace(observers_);
   EventTargetWithInlineData::Trace(visitor);
   ExecutionContextLifecycleObserver::Trace(visitor);

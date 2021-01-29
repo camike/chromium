@@ -13,7 +13,8 @@
 #include "base/macros.h"
 #include "chrome/browser/media/router/providers/cast/cast_app_discovery_service.h"
 #include "chrome/browser/media/router/providers/cast/dual_media_sink_service.h"
-#include "chrome/common/media_router/mojom/media_router.mojom.h"
+#include "components/media_router/common/mojom/logger.mojom.h"
+#include "components/media_router/common/mojom/media_router.mojom.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
@@ -116,6 +117,9 @@ class CastMediaRouteProvider : public mojom::MediaRouteProvider {
   // Mojo remote to the Media Router.
   mojo::Remote<mojom::MediaRouter> media_router_;
 
+  // Mojo remote to the logger owned by the Media Router.
+  mojo::Remote<mojom::Logger> logger_;
+
   // Non-owned pointer to the Cast MediaSinkServiceBase instance.
   MediaSinkServiceBase* const media_sink_service_;
 
@@ -126,8 +130,7 @@ class CastMediaRouteProvider : public mojom::MediaRouteProvider {
   cast_channel::CastMessageHandler* const message_handler_;
 
   // Registered sink queries.
-  base::flat_map<MediaSource::Id, CastAppDiscoveryService::Subscription>
-      sink_queries_;
+  base::flat_map<MediaSource::Id, base::CallbackListSubscription> sink_queries_;
 
   std::unique_ptr<CastActivityManager> activity_manager_;
 

@@ -30,8 +30,11 @@
 #include "extensions/common/draggable_region.h"
 #include "extensions/common/event_filtering_info.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_guid.h"
 #include "extensions/common/extensions_client.h"
 #include "extensions/common/host_id.h"
+#include "extensions/common/message_bundle.h"
+#include "extensions/common/mojom/feature_session_type.mojom.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/socket_permission_data.h"
 #include "extensions/common/permissions/usb_device_permission_data.h"
@@ -58,6 +61,9 @@ IPC_ENUM_TRAITS_MAX_VALUE(extensions::UserScript::InjectionType,
 
 IPC_ENUM_TRAITS_MAX_VALUE(extensions::UserScript::RunLocation,
                           extensions::UserScript::RUN_LOCATION_LAST - 1)
+
+IPC_ENUM_TRAITS_MAX_VALUE(extensions::UserScript::ActionType,
+                          extensions::UserScript::ACTION_TYPE_LAST)
 
 IPC_ENUM_TRAITS_MAX_VALUE(extensions::MessagingEndpoint::Type,
                           extensions::MessagingEndpoint::Type::kLast)
@@ -163,7 +169,7 @@ IPC_STRUCT_BEGIN(ExtensionMsg_ExecuteCode_Params)
   IPC_STRUCT_MEMBER(HostID, host_id)
 
   // Whether the code is JavaScript or CSS.
-  IPC_STRUCT_MEMBER(bool, is_javascript)
+  IPC_STRUCT_MEMBER(extensions::UserScript::ActionType, action_type)
 
   // String of code to execute.
   IPC_STRUCT_MEMBER(std::string, code)
@@ -326,11 +332,6 @@ IPC_STRUCT_END()
 #ifndef INTERNAL_EXTENSIONS_COMMON_EXTENSION_MESSAGES_H_
 #define INTERNAL_EXTENSIONS_COMMON_EXTENSION_MESSAGES_H_
 
-// IPC_MESSAGE macros choke on extra , in the std::map, when expanding. We need
-// to typedef it to avoid that.
-// Substitution map for l10n messages.
-typedef std::map<std::string, std::string> SubstitutionMap;
-
 // Map of extensions IDs to the executing script paths.
 typedef std::map<std::string, std::set<std::string> > ExecutingScriptsMap;
 
@@ -405,6 +406,9 @@ struct ExtensionMsg_Loaded_Params {
 
   // Send creation flags so extension is initialized identically.
   int creation_flags;
+
+  // Reuse the extension guid when creating the extension in the renderer.
+  extensions::ExtensionGuid guid;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ExtensionMsg_Loaded_Params);
@@ -564,30 +568,9 @@ IPC_MESSAGE_ROUTED4(ExtensionMsg_MessageInvoke,
 IPC_MESSAGE_ROUTED1(ExtensionMsg_SetFrameName,
                     std::string /* frame_name */)
 
-// Tell the renderer process the platforms system font.
-IPC_MESSAGE_CONTROL2(ExtensionMsg_SetSystemFont,
-                     std::string /* font_family */,
-                     std::string /* font_size */)
-
-// Marks an extension as 'active' in an extension process. 'Active' extensions
-// have more privileges than other extension content that might end up running
-// in the process (e.g. because of iframes or content scripts).
-IPC_MESSAGE_CONTROL1(ExtensionMsg_ActivateExtension,
-                     std::string /* extension_id */)
-
 // Notifies the renderer that extensions were loaded in the browser.
 IPC_MESSAGE_CONTROL1(ExtensionMsg_Loaded,
                      std::vector<ExtensionMsg_Loaded_Params>)
-
-// Notifies the renderer that an extension was unloaded in the browser.
-IPC_MESSAGE_CONTROL1(ExtensionMsg_Unloaded,
-                     std::string)
-
-// Updates the scripting whitelist for extensions in the render process. This is
-// only used for testing.
-IPC_MESSAGE_CONTROL1(ExtensionMsg_SetScriptingWhitelist,
-                     // extension ids
-                     extensions::ExtensionsClient::ScriptingWhitelist)
 
 // Notification that renderer should run some JavaScript code.
 IPC_MESSAGE_ROUTED1(ExtensionMsg_ExecuteCode,
@@ -617,7 +600,7 @@ IPC_MESSAGE_CONTROL4(ExtensionMsg_UpdateUserScripts,
 IPC_MESSAGE_ROUTED4(ExtensionMsg_ExecuteDeclarativeScript,
                     int /* tab identifier */,
                     extensions::ExtensionId /* extension identifier */,
-                    int /* script identifier */,
+                    std::string /* script identifier */,
                     GURL /* page URL where script should be injected */)
 
 // Tell the render view which browser window it's being attached to.
@@ -713,13 +696,6 @@ IPC_MESSAGE_ROUTED3(ExtensionMsg_DispatchOnDisconnect,
                     extensions::PortId /* port_id */,
                     std::string /* error_message */)
 
-// Informs the renderer what channel (dev, beta, stable, etc) and user session
-// type is running.
-IPC_MESSAGE_CONTROL3(ExtensionMsg_SetSessionInfo,
-                     version_info::Channel /* channel */,
-                     extensions::FeatureSessionType /* session_type */,
-                     bool /* is_lock_screen_context */)
-
 // Notify the renderer that its window has closed.
 IPC_MESSAGE_ROUTED1(ExtensionMsg_AppWindowClosed, bool /* send_onclosed */)
 
@@ -737,10 +713,6 @@ IPC_MESSAGE_CONTROL1(ExtensionMsg_WatchPages,
 // an acknowledgement even if the RenderView has closed or navigated away.
 IPC_MESSAGE_CONTROL1(ExtensionMsg_TransferBlobs,
                      std::vector<std::string> /* blob_uuids */)
-
-// Report the WebView partition ID to the WebView guest renderer process.
-IPC_MESSAGE_CONTROL1(ExtensionMsg_SetWebViewPartitionID,
-                     std::string /* webview_partition_id */)
 
 // Enable or disable spatial navigation.
 IPC_MESSAGE_ROUTED1(ExtensionMsg_SetSpatialNavigationEnabled,
@@ -866,9 +838,10 @@ IPC_MESSAGE_CONTROL2(ExtensionHostMsg_PostMessage,
                      extensions::Message)
 
 // Used to get the extension message bundle.
-IPC_SYNC_MESSAGE_CONTROL1_1(ExtensionHostMsg_GetMessageBundle,
-                            std::string /* extension id */,
-                            SubstitutionMap /* message bundle */)
+IPC_SYNC_MESSAGE_CONTROL1_1(
+    ExtensionHostMsg_GetMessageBundle,
+    std::string /* extension id */,
+    extensions::MessageBundle::SubstitutionMap /* message bundle */)
 
 // Sent from the renderer to the browser to return the script running result.
 IPC_MESSAGE_ROUTED4(
@@ -997,11 +970,6 @@ IPC_MESSAGE_ROUTED3(ExtensionHostMsg_AutomationQuerySelector_Result,
                     ExtensionHostMsg_AutomationQuerySelector_Error /* error */,
                     int /* result_acc_obj_id */)
 
-// Tells the renderer whether or not activity logging is enabled. This is only
-// sent if logging is or was previously enabled; not being enabled is assumed
-// otherwise.
-IPC_MESSAGE_CONTROL1(ExtensionMsg_SetActivityLoggingEnabled, bool /* enabled */)
-
 // Messages related to Extension Service Worker.
 #undef IPC_MESSAGE_START
 #define IPC_MESSAGE_START ExtensionWorkerMsgStart
@@ -1087,6 +1055,12 @@ IPC_MESSAGE_CONTROL5(ExtensionHostMsg_DidStopServiceWorkerContext,
                      GURL /* service_worker_scope */,
                      int64_t /* service_worker_version_id */,
                      int /* worker_thread_id */)
+
+// Optional Ack message sent to the browser to notify that the response to a
+// function has been processed.
+IPC_MESSAGE_CONTROL2(ExtensionHostMsg_WorkerResponseAck,
+                     int /* request_id */,
+                     int64_t /* service_worker_version_id */)
 
 IPC_STRUCT_BEGIN(ExtensionMsg_AccessibilityEventBundleParams)
   // ID of the accessibility tree that this event applies to.

@@ -38,10 +38,13 @@ using MockProcessNodeObserver =
 
 class FrozenFrameAggregatorTest : public GraphTestHarness {
  protected:
+  using Super = GraphTestHarness;
+
   FrozenFrameAggregatorTest() = default;
   ~FrozenFrameAggregatorTest() override = default;
 
   void SetUp() override {
+    Super::SetUp();
     ffa_ = new FrozenFrameAggregator();
     graph()->PassToGraph(base::WrapUnique(ffa_));
     process_node_ = CreateNode<ProcessNodeImpl>();
@@ -66,6 +69,11 @@ class FrozenFrameAggregatorTest : public GraphTestHarness {
   void ExpectProcessData(uint32_t current_frame_count,
                          uint32_t frozen_frame_count) {
     ExpectData(process_node_.get(), current_frame_count, frozen_frame_count);
+  }
+
+  void ExpectNoProcessData() {
+    EXPECT_EQ(nullptr,
+              FrozenFrameAggregator::Data::GetForTesting(process_node_.get()));
   }
 
   void ExpectRunning() {
@@ -94,11 +102,12 @@ TEST_F(FrozenFrameAggregatorTest, ProcessAggregation) {
   MockProcessNodeObserver obs;
   graph()->AddProcessNodeObserver(&obs);
 
-  ExpectProcessData(0, 0);
+  // The data should be created on first aggregation.
+  ExpectNoProcessData();
 
   // Add a main frame.
   auto f0 = CreateFrame(nullptr, 0);
-  ExpectProcessData(0, 0);
+  ExpectNoProcessData();
 
   // Make the frame current.
   f0.get()->SetIsCurrent(true);

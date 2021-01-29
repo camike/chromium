@@ -6,24 +6,25 @@ package org.chromium.chrome.browser.thumbnail.generator;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.support.test.filters.SmallTest;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.util.Pair;
+import androidx.test.filters.SmallTest;
 
+import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.test.util.Batch;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.FlakyTest;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.components.browser_ui.util.ConversionUtils;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 import java.util.ArrayList;
@@ -35,6 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Tests ThumbnailProviderDiskStorage.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
+@Batch(Batch.UNIT_TESTS)
 public class ThumbnailDiskStorageTest {
     private static final String TAG = "ThumbnailDiskTest";
     private static final String CONTENT_ID1 = "contentId1";
@@ -46,7 +48,7 @@ public class ThumbnailDiskStorageTest {
     private static final Bitmap BITMAP2 = BitmapFactory.decodeFile(FILE_PATH2);
     private static final int ICON_WIDTH1 = 50;
     private static final int ICON_WIDTH2 = 70;
-    private static final int TEST_MAX_CACHE_BYTES = 1 * ConversionUtils.BYTES_PER_MEGABYTE;
+    private static final int TEST_MAX_CACHE_BYTES = 50 * ConversionUtils.BYTES_PER_KILOBYTE;
 
     private static final long TIMEOUT_MS = 10000;
     private static final long INTERVAL_MS = 500;
@@ -159,7 +161,6 @@ public class ThumbnailDiskStorageTest {
 
     @Before
     public void setUp() {
-        RecordHistogram.setDisabledForTests(true);
         mTestThumbnailStorageDelegate = new TestThumbnailStorageDelegate();
         mTestThumbnailGenerator = new TestThumbnailGenerator();
         TestThreadUtils.runOnUiThreadBlocking(() -> {
@@ -300,11 +301,8 @@ public class ThumbnailDiskStorageTest {
      * @param expectedBytes the expected number of bytes stored on disk.
      */
     private void assertDiskSizeBytes(long expectedBytes) {
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return expectedBytes == mTestThumbnailDiskStorage.mSizeBytes;
-            }
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            Criteria.checkThat(mTestThumbnailDiskStorage.mSizeBytes, Matchers.is(expectedBytes));
         }, TIMEOUT_MS, INTERVAL_MS);
     }
 
@@ -315,21 +313,14 @@ public class ThumbnailDiskStorageTest {
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> { mTestThumbnailDiskStorage.retrieveThumbnail(request); });
 
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return mTestThumbnailStorageDelegate.retrievedCount.get() == 1;
-            }
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            Criteria.checkThat(mTestThumbnailStorageDelegate.retrievedCount.get(), Matchers.is(1));
         }, TIMEOUT_MS, INTERVAL_MS);
     }
 
     private void assertInitialized() {
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return mTestThumbnailDiskStorage.initialized.get();
-            }
-        }, TIMEOUT_MS, INTERVAL_MS);
+        CriteriaHelper.pollInstrumentationThread(
+                () -> mTestThumbnailDiskStorage.initialized.get(), TIMEOUT_MS, INTERVAL_MS);
     }
 
     /**
@@ -341,11 +332,9 @@ public class ThumbnailDiskStorageTest {
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> { mTestThumbnailDiskStorage.removeFromDisk(contentId); });
 
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return mTestThumbnailDiskStorage.removeCount.get() == expectedRemoveCount;
-            }
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            Criteria.checkThat(
+                    mTestThumbnailDiskStorage.removeCount.get(), Matchers.is(expectedRemoveCount));
         }, TIMEOUT_MS, INTERVAL_MS);
     }
 

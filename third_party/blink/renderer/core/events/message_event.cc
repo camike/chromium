@@ -58,7 +58,7 @@ size_t MessageEvent::SizeOfExternalMemoryInBytes() {
       size_t result = 0;
       for (auto const& array_buffer :
            data_as_serialized_script_value_->ArrayBuffers()) {
-        result += array_buffer->ByteLengthAsSizeT();
+        result += array_buffer->ByteLength();
       }
 
       return result;
@@ -68,7 +68,7 @@ size_t MessageEvent::SizeOfExternalMemoryInBytes() {
     case kDataTypeBlob:
       return static_cast<size_t>(data_as_blob_->size());
     case kDataTypeArrayBuffer:
-      return data_as_array_buffer_->ByteLengthAsSizeT();
+      return data_as_array_buffer_->ByteLength();
   }
 }
 
@@ -161,8 +161,7 @@ MessageEvent::MessageEvent(scoped_refptr<SerializedScriptValue> data,
                            EventTarget* source,
                            Vector<MessagePortChannel> channels,
                            UserActivation* user_activation,
-                           bool transfer_user_activation,
-                           bool allow_autoplay)
+                           bool delegate_payment_request)
     : Event(event_type_names::kMessage, Bubbles::kNo, Cancelable::kNo),
       data_type_(kDataTypeSerializedScriptValue),
       data_as_serialized_script_value_(
@@ -172,8 +171,7 @@ MessageEvent::MessageEvent(scoped_refptr<SerializedScriptValue> data,
       source_(source),
       channels_(std::move(channels)),
       user_activation_(user_activation),
-      transfer_user_activation_(transfer_user_activation),
-      allow_autoplay_(allow_autoplay) {
+      delegate_payment_request_(delegate_payment_request) {
   DCHECK(IsValidSource(source_.Get()));
   RegisterAmountOfExternallyAllocatedMemory();
 }
@@ -262,8 +260,7 @@ void MessageEvent::initMessageEvent(const AtomicString& type,
                                     EventTarget* source,
                                     MessagePortArray* ports,
                                     UserActivation* user_activation,
-                                    bool transfer_user_activation,
-                                    bool allow_autoplay) {
+                                    bool delegate_payment_request) {
   if (IsBeingDispatched())
     return;
 
@@ -279,8 +276,7 @@ void MessageEvent::initMessageEvent(const AtomicString& type,
   ports_ = ports;
   is_ports_dirty_ = true;
   user_activation_ = user_activation;
-  transfer_user_activation_ = transfer_user_activation;
-  allow_autoplay_ = allow_autoplay;
+  delegate_payment_request_ = delegate_payment_request;
   RegisterAmountOfExternallyAllocatedMemory();
 }
 
@@ -390,7 +386,7 @@ void MessageEvent::EntangleMessagePorts(ExecutionContext* context) {
   is_ports_dirty_ = true;
 }
 
-void MessageEvent::Trace(Visitor* visitor) {
+void MessageEvent::Trace(Visitor* visitor) const {
   visitor->Trace(data_as_v8_value_);
   visitor->Trace(data_as_serialized_script_value_);
   visitor->Trace(data_as_blob_);

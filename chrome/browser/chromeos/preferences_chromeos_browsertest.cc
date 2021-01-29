@@ -24,6 +24,7 @@
 #include "components/feedback/tracing_manager.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/user_manager.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ime/chromeos/fake_ime_keyboard.h"
@@ -61,13 +62,16 @@ class PreferencesTest : public LoginManagerTest {
     prefs->SetBoolean(ash::prefs::kNaturalScroll, variant);
     prefs->SetBoolean(prefs::kTapToClickEnabled, variant);
     prefs->SetBoolean(prefs::kPrimaryMouseButtonRight, !variant);
+    prefs->SetBoolean(prefs::kPrimaryPointingStickButtonRight, !variant);
     prefs->SetBoolean(prefs::kMouseAcceleration, variant);
     prefs->SetBoolean(prefs::kMouseScrollAcceleration, variant);
+    prefs->SetBoolean(prefs::kPointingStickAcceleration, variant);
     prefs->SetBoolean(prefs::kTouchpadAcceleration, variant);
     prefs->SetBoolean(prefs::kTouchpadScrollAcceleration, variant);
     prefs->SetBoolean(prefs::kEnableTouchpadThreeFingerClick, !variant);
     prefs->SetInteger(prefs::kMouseSensitivity, !variant);
     prefs->SetInteger(prefs::kMouseScrollSensitivity, variant ? 1 : 4);
+    prefs->SetInteger(prefs::kPointingStickSensitivity, !variant);
     prefs->SetInteger(prefs::kTouchpadSensitivity, variant);
     prefs->SetInteger(prefs::kTouchpadScrollSensitivity, variant ? 1 : 4);
     prefs->SetBoolean(ash::prefs::kXkbAutoRepeatEnabled, variant);
@@ -84,6 +88,9 @@ class PreferencesTest : public LoginManagerTest {
     EXPECT_EQ(prefs->GetBoolean(prefs::kPrimaryMouseButtonRight),
               input_settings_->current_mouse_settings()
                   .GetPrimaryButtonRight());
+    EXPECT_EQ(prefs->GetBoolean(prefs::kPrimaryPointingStickButtonRight),
+              input_settings_->current_pointing_stick_settings()
+                  .GetPrimaryButtonRight());
     EXPECT_EQ(prefs->GetBoolean(ash::prefs::kMouseReverseScroll),
               input_settings_->current_mouse_settings().GetReverseScroll());
     EXPECT_EQ(prefs->GetBoolean(prefs::kMouseAcceleration),
@@ -91,6 +98,9 @@ class PreferencesTest : public LoginManagerTest {
     EXPECT_EQ(
         prefs->GetBoolean(prefs::kMouseScrollAcceleration),
         input_settings_->current_mouse_settings().GetScrollAcceleration());
+    EXPECT_EQ(
+        prefs->GetBoolean(prefs::kPointingStickAcceleration),
+        input_settings_->current_pointing_stick_settings().GetAcceleration());
     EXPECT_EQ(prefs->GetBoolean(prefs::kTouchpadAcceleration),
               input_settings_->current_touchpad_settings().GetAcceleration());
     EXPECT_EQ(
@@ -103,6 +113,9 @@ class PreferencesTest : public LoginManagerTest {
               input_settings_->current_mouse_settings().GetSensitivity());
     EXPECT_EQ(prefs->GetInteger(prefs::kMouseScrollSensitivity),
               input_settings_->current_mouse_settings().GetScrollSensitivity());
+    EXPECT_EQ(
+        prefs->GetInteger(prefs::kPointingStickSensitivity),
+        input_settings_->current_pointing_stick_settings().GetSensitivity());
     EXPECT_EQ(prefs->GetInteger(prefs::kTouchpadSensitivity),
               input_settings_->current_touchpad_settings().GetSensitivity());
     EXPECT_EQ(
@@ -128,6 +141,9 @@ class PreferencesTest : public LoginManagerTest {
               prefs->GetBoolean(prefs::kTapToClickEnabled));
     EXPECT_EQ(local_state->GetBoolean(prefs::kOwnerPrimaryMouseButtonRight),
               prefs->GetBoolean(prefs::kPrimaryMouseButtonRight));
+    EXPECT_EQ(
+        local_state->GetBoolean(prefs::kOwnerPrimaryPointingStickButtonRight),
+        prefs->GetBoolean(prefs::kPrimaryPointingStickButtonRight));
   }
 
   LoginManagerMixin login_mixin_{&mixin_host_};
@@ -172,28 +188,28 @@ IN_PROC_BROWSER_TEST_F(PreferencesTest, MultiProfiles) {
 
   // Check that changing prefs of the active user doesn't affect prefs of the
   // inactive user.
-  std::unique_ptr<base::DictionaryValue> prefs_backup =
+  base::Value prefs_backup =
       prefs1->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS);
   SetPrefs(prefs2, false);
   CheckSettingsCorrespondToPrefs(prefs2);
-  EXPECT_TRUE(prefs_backup->Equals(
-      prefs1->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS).get()));
+  EXPECT_EQ(prefs_backup,
+            prefs1->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS));
   SetPrefs(prefs2, true);
   CheckSettingsCorrespondToPrefs(prefs2);
-  EXPECT_TRUE(prefs_backup->Equals(
-      prefs1->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS).get()));
+  EXPECT_EQ(prefs_backup,
+            prefs1->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS));
 
   // Check that changing prefs of the inactive user doesn't affect prefs of the
   // active user.
   prefs_backup = prefs2->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS);
   SetPrefs(prefs1, true);
   CheckSettingsCorrespondToPrefs(prefs2);
-  EXPECT_TRUE(prefs_backup->Equals(
-      prefs2->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS).get()));
+  EXPECT_EQ(prefs_backup,
+            prefs2->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS));
   SetPrefs(prefs1, false);
   CheckSettingsCorrespondToPrefs(prefs2);
-  EXPECT_TRUE(prefs_backup->Equals(
-      prefs2->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS).get()));
+  EXPECT_EQ(prefs_backup,
+            prefs2->GetPreferenceValues(PrefService::INCLUDE_DEFAULTS));
 
   // Check that changing non-owner prefs doesn't change corresponding local
   // state prefs and vice versa.

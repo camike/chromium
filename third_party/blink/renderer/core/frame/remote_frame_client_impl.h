@@ -8,10 +8,6 @@
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/frame/remote_frame_client.h"
 
-namespace cc {
-class PaintCanvas;
-}
-
 namespace blink {
 class WebRemoteFrameImpl;
 
@@ -19,21 +15,16 @@ class RemoteFrameClientImpl final : public RemoteFrameClient {
  public:
   explicit RemoteFrameClientImpl(WebRemoteFrameImpl*);
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   // FrameClient overrides:
   bool InShadowTree() const override;
   void Detached(FrameDetachType) override;
-  Frame* Opener() const override;
-  void SetOpener(Frame*) override;
-  Frame* Parent() const override;
-  Frame* Top() const override;
-  Frame* NextSibling() const override;
-  Frame* FirstChild() const override;
   base::UnguessableToken GetDevToolsFrameToken() const override;
 
   // RemoteFrameClient overrides:
   void Navigate(const ResourceRequest&,
+                blink::WebLocalFrame* initiator_frame,
                 bool should_replace_current_entry,
                 bool is_opener_navigation,
                 bool prevent_sandboxed_download,
@@ -41,16 +32,14 @@ class RemoteFrameClientImpl final : public RemoteFrameClient {
                 mojo::PendingRemote<mojom::blink::BlobURLToken>,
                 const base::Optional<WebImpression>& impression) override;
   unsigned BackForwardLength() override;
-  void ForwardPostMessage(MessageEvent*,
-                          scoped_refptr<const SecurityOrigin> target,
-                          base::Optional<base::UnguessableToken> cluster_id,
-                          LocalFrame* source) const override;
-  void FrameRectsChanged(const IntRect& local_frame_rect,
-                         const IntRect& screen_space_rect) override;
-  void UpdateRemoteViewportIntersection(
-      const ViewportIntersectionState& intersection_state) override;
-  void AdvanceFocus(mojom::blink::FocusType, LocalFrame*) override;
-  uint32_t Print(const IntRect&, cc::PaintCanvas*) const override;
+  void WillSynchronizeVisualProperties(
+      bool synchronized_props_changed,
+      bool capture_sequence_number_changed,
+      const gfx::Size& compositor_viewport_size) override;
+  const viz::LocalSurfaceId& GetLocalSurfaceId() const override;
+  bool RemoteProcessGone() const override;
+  AssociatedInterfaceProvider* GetRemoteAssociatedInterfaces() override;
+  viz::FrameSinkId GetFrameSinkId() override;
 
   WebRemoteFrameImpl* GetWebFrame() const { return web_frame_; }
 

@@ -5,8 +5,10 @@
 // <include src="utils.js">
 // <include src="setting_zippy.js">
 // <include src="voice_match_entry.js">
+// <include src="browser_proxy.js">
 // <include src="assistant_get_more.js">
 // <include src="assistant_loading.js">
+// <include src="assistant_related_info.js">
 // <include src="assistant_third_party.js">
 // <include src="assistant_value_prop.js">
 // <include src="assistant_voice_match.js">
@@ -17,10 +19,35 @@
  *
  */
 
-Polymer({
-  is: 'assistant-optin-flow',
+'use strict';
 
-  behaviors: [OobeI18nBehavior, OobeDialogHostBehavior],
+(function() {
+
+/**
+ * UI mode for the dialog.
+ * @enum {string}
+ */
+const UIState = {
+  LOADING: 'loading',
+  VALUE_PROP: 'value-prop',
+  RELATED_INFO: 'related-info',
+  THIRD_PARTY: 'third-party',
+  VOICE_MATCH: 'voice-match',
+  GET_MORE: 'get-more',
+};
+
+Polymer({
+  is: 'assistant-optin-flow-element',
+
+  behaviors: [OobeI18nBehavior, OobeDialogHostBehavior, MultiStepBehavior],
+
+  /** @private {?assistant.BrowserProxy} */
+  browserProxy_: null,
+
+  /** @override */
+  created() {
+    this.browserProxy_ = assistant.BrowserProxyImpl.getInstance();
+  },
 
   /**
    * Indicates the type of the opt-in flow.
@@ -34,14 +61,32 @@ Polymer({
     SPEAKER_ID_RETRAIN: 2,
   },
 
+  defaultUIStep() {
+    return UIState.LOADING;
+  },
+
+  UI_STEPS: UIState,
+
   /**
    * Signal from host to show the screen.
    * @param {?string} type The type of the flow.
    * @param {?string} captionBarHeight The height of the caption bar.
    */
-  onShow(type, captionBarHeight) {
+  onShow(type, captionBarHeight, oobeDialogHeight, oobeDialogWidth) {
     captionBarHeight = captionBarHeight ? captionBarHeight + 'px' : '0px';
     this.style.setProperty('--caption-bar-height', captionBarHeight);
+
+    if (oobeDialogHeight && oobeDialogWidth) {
+      document.documentElement.style.setProperty(
+          '--oobe-oobe-dialog-height-base', oobeDialogHeight + 'px');
+      document.documentElement.style.setProperty(
+          '--oobe-oobe-dialog-width-base', oobeDialogWidth + 'px');
+      if (parseInt(oobeDialogWidth) > parseInt(oobeDialogHeight)) {
+        document.documentElement.setAttribute('orientation', 'horizontal');
+      } else {
+        document.documentElement.setAttribute('orientation', 'vertical');
+      }
+    }
 
     type = type ? type : this.FlowType.CONSENT_FLOW.toString();
     var flowType = Number(type);
@@ -61,20 +106,19 @@ Polymer({
     this.boundOnScreenLoadingError = this.onScreenLoadingError.bind(this);
     this.boundOnScreenLoaded = this.onScreenLoaded.bind(this);
 
-    this.$['loading'].onBeforeShow();
-    this.$['loading'].addEventListener('reload', this.onReload.bind(this));
+    this.$.loading.onBeforeShow();
+    this.$.loading.addEventListener('reload', this.onReload.bind(this));
 
     switch (this.flowType) {
       case this.FlowType.SPEAKER_ID_ENROLLMENT:
       case this.FlowType.SPEAKER_ID_RETRAIN:
-        this.$['value-prop'].hidden = true;
-        this.$['voice-match'].isFirstScreen = true;
-        this.showScreen(this.$['voice-match']);
+        this.$.voiceMatch.isFirstScreen = true;
+        this.showStep(UIState.VOICE_MATCH);
         break;
       default:
-        this.showScreen(this.$['value-prop']);
+        this.showStep(UIState.VALUE_PROP);
     }
-    chrome.send('login.AssistantOptInFlowScreen.initialized', [this.flowType]);
+    this.browserProxy_.initialized([this.flowType]);
   },
 
   /**
@@ -84,10 +128,13 @@ Polymer({
   reloadContent(data) {
     this.voiceMatchEnforcedOff = data['voiceMatchEnforcedOff'];
     this.voiceMatchDisabled = loadTimeData.getBoolean('voiceMatchDisabled');
+    this.betterAssistantEnabled =
+        loadTimeData.getBoolean('betterAssistantEnabled');
     data['flowType'] = this.flowType;
-    this.$['value-prop'].reloadContent(data);
-    this.$['third-party'].reloadContent(data);
-    this.$['get-more'].reloadContent(data);
+    this.$.valueProp.reloadContent(data);
+    this.$.relatedInfo.reloadContent(data);
+    this.$.thirdParty.reloadContent(data);
+    this.$.getMore.reloadContent(data);
   },
 
   /**
@@ -98,13 +145,13 @@ Polymer({
   addSettingZippy(type, data) {
     switch (type) {
       case 'settings':
-        this.$['value-prop'].addSettingZippy(data);
+        this.$.valueProp.addSettingZippy(data);
         break;
       case 'disclosure':
-        this.$['third-party'].addSettingZippy(data);
+        this.$.thirdParty.addSettingZippy(data);
         break;
       case 'get-more':
-        this.$['get-more'].addSettingZippy(data);
+        this.$.getMore.addSettingZippy(data);
         break;
       default:
         console.error('Undefined zippy data type: ' + type);
@@ -115,31 +162,43 @@ Polymer({
    * Show the next screen in the flow.
    */
   showNextScreen() {
-    switch (this.currentScreen) {
-      case this.$['value-prop']:
-        this.showScreen(this.$['third-party']);
+    switch (this.currentStep) {
+      case UIState.VALUE_PROP:
+        if (this.betterAssistantEnabled) {
+          this.showStep(UIState.RELATED_INFO);
+        } else {
+          this.showStep(UIState.THIRD_PARTY);
+        }
         break;
-      case this.$['third-party']:
+      case UIState.RELATED_INFO:
         if (this.voiceMatchEnforcedOff || this.voiceMatchDisabled) {
-          this.showScreen(this.$['get-more']);
+          this.browserProxy_.flowFinished();
         } else {
-          this.showScreen(this.$['voice-match']);
+          this.showStep(UIState.VOICE_MATCH);
         }
         break;
-      case this.$['voice-match']:
+      case UIState.THIRD_PARTY:
+        if (this.voiceMatchEnforcedOff || this.voiceMatchDisabled) {
+          this.showStep(UIState.GET_MORE);
+        } else {
+          this.showStep(UIState.VOICE_MATCH);
+        }
+        break;
+      case UIState.VOICE_MATCH:
         if (this.flowType == this.FlowType.SPEAKER_ID_ENROLLMENT ||
-            this.flowType == this.FlowType.SPEAKER_ID_RETRAIN) {
-          chrome.send('login.AssistantOptInFlowScreen.flowFinished');
+            this.flowType == this.FlowType.SPEAKER_ID_RETRAIN ||
+            this.betterAssistantEnabled) {
+          this.browserProxy_.flowFinished();
         } else {
-          this.showScreen(this.$['get-more']);
+          this.showStep(UIState.GET_MORE);
         }
         break;
-      case this.$['get-more']:
-        this.showScreen(this.$['ready']);
+      case UIState.GET_MORE:
+        this.browserProxy_.flowFinished();
         break;
       default:
         console.error('Undefined');
-        chrome.send('dialogClose');
+        this.browserProxy_.dialogClose();
     }
   },
 
@@ -148,18 +207,18 @@ Polymer({
    * @param {string} state the voice match state.
    */
   onVoiceMatchUpdate(state) {
-    if (!this.currentScreen == this.$['voice-match']) {
+    if (this.currentStep !== UIState.VOICE_MATCH) {
       return;
     }
     switch (state) {
       case 'listen':
-        this.$['voice-match'].listenForHotword();
+        this.$.voiceMatch.listenForHotword();
         break;
       case 'process':
-        this.$['voice-match'].processingHotword();
+        this.$.voiceMatch.processingHotword();
         break;
       case 'done':
-        this.$['voice-match'].voiceMatchDone();
+        this.$.voiceMatch.voiceMatchDone();
         break;
       case 'failure':
         this.onScreenLoadingError();
@@ -170,65 +229,62 @@ Polymer({
   },
 
   /**
-   * Show the given screen.
+   * Show the given step.
    *
-   * @param {Element} screen The screen to be shown.
+   * @param {UIState} step The step to be shown.
    */
-  showScreen(screen) {
-    if (this.currentScreen == screen) {
+  showStep(step) {
+    if (this.currentStep == step) {
       return;
     }
-
-    this.$['loading'].hidden = true;
-    screen.hidden = false;
-    screen.addEventListener('loading', this.boundShowLoadingScreen);
-    screen.addEventListener('error', this.boundOnScreenLoadingError);
-    screen.addEventListener('loaded', this.boundOnScreenLoaded);
-    if (this.currentScreen) {
-      this.currentScreen.hidden = true;
-      this.currentScreen.removeEventListener(
-          'loading', this.boundShowLoadingScreen);
-      this.currentScreen.removeEventListener(
-          'error', this.boundOnScreenLoadingError);
-      this.currentScreen.removeEventListener(
-          'loaded', this.boundOnScreenLoaded);
+    if (this.currentStep) {
+      this.applyToStepElements((screen) => {
+        screen.removeEventListener('loading', this.boundShowLoadingScreen);
+        screen.removeEventListener('error', this.boundOnScreenLoadingError);
+        screen.removeEventListener('loaded', this.boundOnScreenLoaded);
+      });
     }
-    this.currentScreen = screen;
-    this.currentScreen.onBeforeShow();
-    this.currentScreen.onShow();
+    this.setUIStep(step);
+    this.currentStep = step;
+    this.applyToStepElements((screen) => {
+      screen.addEventListener('loading', this.boundShowLoadingScreen);
+      screen.addEventListener('error', this.boundOnScreenLoadingError);
+      screen.addEventListener('loaded', this.boundOnScreenLoaded);
+      screen.onShow();
+    });
   },
 
   /**
    * Show the loading screen.
    */
   showLoadingScreen() {
-    this.$['loading'].hidden = false;
-    this.currentScreen.hidden = true;
-    this.$['loading'].onShow();
+    this.setUIStep(UIState.LOADING);
+    this.$.loading.onShow();
   },
 
   /**
    * Called when the screen failed to load.
    */
   onScreenLoadingError() {
-    this.$['loading'].hidden = false;
-    this.currentScreen.hidden = true;
-    this.$['loading'].onErrorOccurred();
+    this.setUIStep(UIState.LOADING);
+    this.$.loading.onErrorOccurred();
   },
 
   /**
    * Called when all the content of current screen has been loaded.
    */
   onScreenLoaded() {
-    this.currentScreen.hidden = false;
-    this.$['loading'].hidden = true;
-    this.$['loading'].onPageLoaded();
+    this.setUIStep(this.currentStep);
+    this.$.loading.onPageLoaded();
   },
 
   /**
    * Called when user request the screen to be reloaded.
    */
   onReload() {
-    this.currentScreen.reloadPage();
+    this.applyToStepElements((screen) => {
+      screen.reloadPage();
+    }, this.currentStep);
   },
 });
+})();

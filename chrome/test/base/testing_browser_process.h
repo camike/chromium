@@ -15,11 +15,12 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
+#include "chrome/test/base/testing_browser_process_platform_part.h"
 #include "extensions/buildflags/buildflags.h"
 #include "media/media_buildflags.h"
 #include "printing/buildflags/buildflags.h"
@@ -71,6 +72,9 @@ class TestingBrowserProcess : public BrowserProcess {
   // Convenience method to get g_browser_process as a TestingBrowserProcess*.
   static TestingBrowserProcess* GetGlobal();
 
+  TestingBrowserProcess(const TestingBrowserProcess&) = delete;
+  TestingBrowserProcess& operator=(const TestingBrowserProcess&) = delete;
+
   // BrowserProcess overrides:
   void EndSession() override;
   void FlushLocalStateAndReply(base::OnceClosure reply) override;
@@ -91,22 +95,24 @@ class TestingBrowserProcess : public BrowserProcess {
   IconManager* icon_manager() override;
   GpuModeManager* gpu_mode_manager() override;
   BackgroundModeManager* background_mode_manager() override;
+#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
   void set_background_mode_manager_for_test(
       std::unique_ptr<BackgroundModeManager> manager) override;
+#endif
   StatusTray* status_tray() override;
   safe_browsing::SafeBrowsingService* safe_browsing_service() override;
-  safe_browsing::ClientSideDetectionService* safe_browsing_detection_service()
-      override;
   subresource_filter::RulesetService* subresource_filter_ruleset_service()
       override;
-  optimization_guide::OptimizationGuideService* optimization_guide_service()
-      override;
+  federated_learning::FlocSortingLshClustersService*
+  floc_sorting_lsh_clusters_service() override;
   BrowserProcessPlatformPart* platform_part() override;
 
   extensions::EventRouterForwarder* extension_event_router_forwarder() override;
   NotificationUIManager* notification_ui_manager() override;
   NotificationPlatformBridge* notification_platform_bridge() override;
+#if !defined(OS_ANDROID)
   IntranetRedirectDetector* intranet_redirect_detector() override;
+#endif
   void CreateDevToolsProtocolHandler() override;
   void CreateDevToolsAutoOpener() override;
   bool IsShuttingDown() override;
@@ -120,22 +126,22 @@ class TestingBrowserProcess : public BrowserProcess {
   DownloadRequestLimiter* download_request_limiter() override;
   StartupData* startup_data() override;
 
-#if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit once build flag switch of lacros-chrome is
+// complete.
+#if defined(OS_WIN) || defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
   void StartAutoupdateTimer() override {}
 #endif
 
   component_updater::ComponentUpdateService* component_updater() override;
-#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
-  component_updater::SupervisedUserWhitelistInstaller*
-  supervised_user_whitelist_installer() override;
-#endif
   MediaFileSystemRegistry* media_file_system_registry() override;
 
   WebRtcLogUploader* webrtc_log_uploader() override;
 
   network_time::NetworkTimeTracker* network_time_tracker() override;
 
+#if !defined(OS_ANDROID)
   gcm::GCMDriver* gcm_driver() override;
+#endif
   resource_coordinator::TabManager* GetTabManager() override;
   resource_coordinator::ResourceCoordinatorParts* resource_coordinator_parts()
       override;
@@ -148,9 +154,9 @@ class TestingBrowserProcess : public BrowserProcess {
   void SetSafeBrowsingService(safe_browsing::SafeBrowsingService* sb_service);
   void SetRulesetService(
       std::unique_ptr<subresource_filter::RulesetService> ruleset_service);
-  void SetOptimizationGuideService(
-      std::unique_ptr<optimization_guide::OptimizationGuideService>
-          optimization_guide_service);
+  void SetFlocSortingLshClustersService(
+      std::unique_ptr<federated_learning::FlocSortingLshClustersService>
+          service);
   void SetSharedURLLoaderFactory(
       scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory);
   void SetNotificationUIManager(
@@ -162,6 +168,7 @@ class TestingBrowserProcess : public BrowserProcess {
   void SetRapporServiceImpl(rappor::RapporServiceImpl* rappor_service);
   void SetShuttingDown(bool is_shutting_down);
   void ShutdownBrowserPolicyConnector();
+  TestingBrowserProcessPlatformPart* GetTestPlatformPart();
 
  private:
   // See CreateInstance() and DestoryInstance() above.
@@ -199,8 +206,8 @@ class TestingBrowserProcess : public BrowserProcess {
   scoped_refptr<safe_browsing::SafeBrowsingService> sb_service_;
   std::unique_ptr<subresource_filter::RulesetService>
       subresource_filter_ruleset_service_;
-  std::unique_ptr<optimization_guide::OptimizationGuideService>
-      optimization_guide_service_;
+  std::unique_ptr<federated_learning::FlocSortingLshClustersService>
+      floc_sorting_lsh_clusters_service_;
 
   std::unique_ptr<network_time::NetworkTimeTracker> network_time_tracker_;
 
@@ -209,7 +216,7 @@ class TestingBrowserProcess : public BrowserProcess {
   scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory_;
   rappor::RapporServiceImpl* rappor_service_ = nullptr;
 
-  std::unique_ptr<BrowserProcessPlatformPart> platform_part_;
+  std::unique_ptr<TestingBrowserProcessPlatformPart> platform_part_;
   std::unique_ptr<network::TestNetworkConnectionTracker>
       test_network_connection_tracker_;
 
@@ -226,8 +233,6 @@ class TestingBrowserProcess : public BrowserProcess {
 #if !defined(OS_ANDROID)
   BuildState build_state_;
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(TestingBrowserProcess);
 };
 
 // RAII (resource acquisition is initialization) for TestingBrowserProcess.
@@ -247,10 +252,11 @@ class TestingBrowserProcess : public BrowserProcess {
 class TestingBrowserProcessInitializer {
  public:
   TestingBrowserProcessInitializer();
+  TestingBrowserProcessInitializer(const TestingBrowserProcessInitializer&) =
+      delete;
+  TestingBrowserProcessInitializer& operator=(
+      const TestingBrowserProcessInitializer&) = delete;
   ~TestingBrowserProcessInitializer();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestingBrowserProcessInitializer);
 };
 
 #endif  // CHROME_TEST_BASE_TESTING_BROWSER_PROCESS_H_

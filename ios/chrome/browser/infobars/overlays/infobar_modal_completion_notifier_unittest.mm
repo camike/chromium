@@ -9,7 +9,7 @@
 #import "ios/chrome/browser/overlays/public/common/infobars/infobar_overlay_request_config.h"
 #include "ios/chrome/browser/overlays/public/overlay_request_queue.h"
 #include "ios/chrome/browser/overlays/test/fake_overlay_request_cancel_handler.h"
-#import "ios/web/public/test/fakes/test_web_state.h"
+#import "ios/web/public/test/fakes/fake_web_state.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/platform_test.h"
 
@@ -45,7 +45,7 @@ class InfobarModalCompletionNotifierTest : public PlatformTest {
   }
 
  protected:
-  web::TestWebState web_state_;
+  web::FakeWebState web_state_;
   FakeInfobarIOS infobar_;
   InfobarModalCompletionNotifier notifier_;
   MockInfobarModalCompletionNotifierObserver observer_;
@@ -60,7 +60,7 @@ TEST_F(InfobarModalCompletionNotifierTest, ModalCompletion) {
   // Add a detail sheet request for |infobar_|.
   std::unique_ptr<OverlayRequest> detail_sheet_request =
       OverlayRequest::CreateWithConfig<InfobarOverlayRequestConfig>(
-          &infobar_, InfobarOverlayType::kDetailSheet);
+          &infobar_, InfobarOverlayType::kDetailSheet, false);
   std::unique_ptr<FakeOverlayRequestCancelHandler>
       passed_detail_sheet_cancel_handler =
           std::make_unique<FakeOverlayRequestCancelHandler>(
@@ -72,7 +72,7 @@ TEST_F(InfobarModalCompletionNotifierTest, ModalCompletion) {
   // Add a modal request for |infobar_|.
   std::unique_ptr<OverlayRequest> modal_request =
       OverlayRequest::CreateWithConfig<InfobarOverlayRequestConfig>(
-          &infobar_, InfobarOverlayType::kModal);
+          &infobar_, InfobarOverlayType::kModal, false);
   std::unique_ptr<FakeOverlayRequestCancelHandler> passed_modal_cancel_handler =
       std::make_unique<FakeOverlayRequestCancelHandler>(modal_request.get(),
                                                         queue());

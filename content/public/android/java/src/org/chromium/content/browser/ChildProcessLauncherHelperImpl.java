@@ -21,23 +21,25 @@ import org.chromium.base.ChildBindingState;
 import org.chromium.base.CollectionUtil;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.CpuFeatures;
+import org.chromium.base.JavaExceptionReporter;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.library_loader.LibraryLoader;
-import org.chromium.base.library_loader.Linker;
+import org.chromium.base.library_loader.LibraryLoader.MultiProcessMediator;
 import org.chromium.base.process_launcher.ChildConnectionAllocator;
 import org.chromium.base.process_launcher.ChildProcessConnection;
 import org.chromium.base.process_launcher.ChildProcessConstants;
 import org.chromium.base.process_launcher.ChildProcessLauncher;
 import org.chromium.base.process_launcher.FileDescriptorInfo;
-import org.chromium.content.app.ChromiumLinkerParams;
+import org.chromium.base.task.PostTask;
 import org.chromium.content.app.SandboxedProcessService;
 import org.chromium.content.common.ContentSwitchUtils;
 import org.chromium.content_public.browser.ChildProcessImportance;
 import org.chromium.content_public.browser.ContentFeatureList;
+import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.content_public.common.ContentSwitches;
 
 import java.io.IOException;
@@ -70,8 +72,8 @@ public final class ChildProcessLauncherHelperImpl {
     // To be conservative, only delay removing binding in the initial second of the process.
     private static final int TIMEOUT_FOR_DELAY_BINDING_REMOVE_MS = 1000;
 
-    // Flag to check features after native is initialized.
-    private static boolean sCheckedFeatures;
+    // Flag to check if ServiceGroupImportance should be enabled after native is initialized.
+    private static boolean sCheckedServiceGroupImportance;
 
     // A warmed-up connection to a sandboxed service.
     private static SpareChildConnection sSpareSandboxedConnection;
@@ -114,6 +116,9 @@ public final class ChildProcessLauncherHelperImpl {
     // Whether the process can use warmed up connection.
     private final boolean mCanUseWarmUpConnection;
 
+    // Tracks reporting exception from child process to avoid reporting it more than once.
+    private boolean mReportedException;
+
     private final ChildProcessLauncher.Delegate mLauncherDelegate =
             new ChildProcessLauncher.Delegate() {
                 @Override
@@ -140,10 +145,8 @@ public final class ChildProcessLauncherHelperImpl {
                             ContentChildProcessConstants.EXTRA_CPU_COUNT, CpuFeatures.getCount());
                     connectionBundle.putLong(
                             ContentChildProcessConstants.EXTRA_CPU_FEATURES, CpuFeatures.getMask());
-                    if (LibraryLoader.getInstance().useChromiumLinker()) {
-                        connectionBundle.putBundle(Linker.EXTRA_LINKER_SHARED_RELROS,
-                                Linker.getInstance().getSharedRelros());
-                    }
+                    LibraryLoader.getInstance().getMediator().putSharedRelrosToBundle(
+                            connectionBundle);
                 }
 
                 @Override
@@ -262,10 +265,10 @@ public final class ChildProcessLauncherHelperImpl {
                 commandLine, filesToBeMapped, sandboxed, canUseWarmUpConnection, binderCallback);
         helper.start();
 
-        if (!sCheckedFeatures) {
-            sCheckedFeatures = true;
+        if (sandboxed && !sCheckedServiceGroupImportance) {
+            sCheckedServiceGroupImportance = true;
             if (sSandboxedChildConnectionRanking != null
-                    && ContentFeatureList.isEnabled(ContentFeatureList.SERVICE_GROUP_IMPORTANCE)) {
+                    && ChildProcessLauncherHelperImplJni.get().serviceGroupImportanceEnabled()) {
                 sSandboxedChildConnectionRanking.enableServiceGroupImportance();
             }
         }
@@ -312,11 +315,14 @@ public final class ChildProcessLauncherHelperImpl {
             public void run() {
                 ChildConnectionAllocator allocator =
                         getConnectionAllocator(context, true /* sandboxed */);
+                boolean bindWaiveCpu = ContentFeatureList.isEnabled(
+                        ContentFeatureList.BINDING_MANAGEMENT_WAIVE_CPU);
                 if (ChildProcessConnection.supportVariableConnections()) {
-                    sBindingManager = new BindingManager(context, sSandboxedChildConnectionRanking);
+                    sBindingManager = new BindingManager(
+                            context, sSandboxedChildConnectionRanking, bindWaiveCpu);
                 } else {
                     sBindingManager = new BindingManager(context, allocator.getNumberOfServices(),
-                            sSandboxedChildConnectionRanking);
+                            sSandboxedChildConnectionRanking, bindWaiveCpu);
                 }
             }
         });
@@ -503,11 +509,17 @@ public final class ChildProcessLauncherHelperImpl {
         // is not thread safe, so this is the best we can do.
         int reverseRank = getReverseRankWhenConnectionLost();
         int bindingCounts[] = connection.remainingBindingStateCountsCurrentOrWhenDied();
+        String exceptionString = connection.getExceptionDuringInit();
+        if (exceptionString != null && !mReportedException) {
+            mReportedException = true;
+            PostTask.postTask(UiThreadTaskTraits.BEST_EFFORT,
+                    () -> JavaExceptionReporter.reportStackTrace(exceptionString));
+        }
         ChildProcessLauncherHelperImplJni.get().setTerminationInfo(terminationInfoPtr,
                 connection.bindingStateCurrentOrWhenDied(), connection.isKilledByUs(),
-                connection.hasCleanExit(), bindingCounts[ChildBindingState.STRONG],
-                bindingCounts[ChildBindingState.MODERATE], bindingCounts[ChildBindingState.WAIVED],
-                reverseRank);
+                connection.hasCleanExit(), exceptionString != null,
+                bindingCounts[ChildBindingState.STRONG], bindingCounts[ChildBindingState.MODERATE],
+                bindingCounts[ChildBindingState.WAIVED], reverseRank);
         LauncherThread.post(() -> mLauncher.stop());
     }
 
@@ -556,7 +568,7 @@ public final class ChildProcessLauncherHelperImpl {
                     // Nothing to add.
                     break;
                 case ChildProcessImportance.MODERATE:
-                    connection.addModerateBinding();
+                    connection.addModerateBinding(false);
                     break;
                 case ChildProcessImportance.IMPORTANT:
                     connection.addStrongBinding();
@@ -581,7 +593,7 @@ public final class ChildProcessLauncherHelperImpl {
                         // Nothing to remove.
                         break;
                     case ChildProcessImportance.MODERATE:
-                        connection.removeModerateBinding();
+                        connection.removeModerateBinding(false);
                         break;
                     case ChildProcessImportance.IMPORTANT:
                         connection.removeStrongBinding();
@@ -626,38 +638,13 @@ public final class ChildProcessLauncherHelperImpl {
         }
     }
 
-    private static boolean sLinkerInitialized;
-    private static long sLinkerLoadAddress;
-    private static void initLinker() {
-        assert LauncherThread.runningOnLauncherThread();
-        if (sLinkerInitialized) return;
-        if (LibraryLoader.getInstance().useChromiumLinker()) {
-            sLinkerLoadAddress = Linker.getInstance().getBaseLoadAddress();
-            if (sLinkerLoadAddress == 0) {
-                Log.i(TAG, "Shared RELRO support disabled!");
-            }
-        }
-        sLinkerInitialized = true;
-    }
-
-    private static ChromiumLinkerParams getLinkerParamsForNewConnection() {
-        assert LauncherThread.runningOnLauncherThread();
-
-        initLinker();
-        assert sLinkerInitialized;
-        if (sLinkerLoadAddress == 0) return null;
-
-        // Always wait for the shared RELROs in service processes.
-        final boolean waitForSharedRelros = true;
-        return new ChromiumLinkerParams(sLinkerLoadAddress, waitForSharedRelros);
-    }
-
     private static Bundle populateServiceBundle(Bundle bundle) {
         ChildProcessCreationParamsImpl.addIntentExtras(bundle);
         bundle.putBoolean(ChildProcessConstants.EXTRA_BIND_TO_CALLER,
                 ChildProcessCreationParamsImpl.getBindToCallerCheck());
-        ChromiumLinkerParams linkerParams = getLinkerParamsForNewConnection();
-        if (linkerParams != null) linkerParams.populateBundle(bundle);
+        MultiProcessMediator m = LibraryLoader.getInstance().getMediator();
+        m.ensureInitializedInMainProcess();
+        m.putLoadAddressToBundle(bundle);
         return bundle;
     }
 
@@ -686,7 +673,7 @@ public final class ChildProcessLauncherHelperImpl {
                 pids.add(entry.getKey());
             });
 
-            responseHandler.post(() -> callback.onResult(map));
+            responseHandler.post(callback.bind(map));
         });
     }
 
@@ -752,7 +739,9 @@ public final class ChildProcessLauncherHelperImpl {
         void onChildProcessStarted(long nativeChildProcessLauncherHelper, int pid);
 
         void setTerminationInfo(long termiantionInfoPtr, @ChildBindingState int bindingState,
-                boolean killedByUs, boolean cleanExit, int remainingStrong, int remainingModerate,
-                int remainingWaived, int reverseRank);
+                boolean killedByUs, boolean cleanExit, boolean exceptionDuringInit,
+                int remainingStrong, int remainingModerate, int remainingWaived, int reverseRank);
+
+        boolean serviceGroupImportanceEnabled();
     }
 }

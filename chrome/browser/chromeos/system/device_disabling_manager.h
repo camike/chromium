@@ -51,7 +51,7 @@ namespace system {
 //   regular login screen flows from a known-good point.
 class DeviceDisablingManager {
  public:
-  using DeviceDisabledCheckCallback = base::Callback<void(bool)>;
+  using DeviceDisabledCheckCallback = base::OnceCallback<void(bool)>;
 
   class Observer {
    public:
@@ -106,7 +106,7 @@ class DeviceDisablingManager {
   // Performs a check whether the device is disabled during OOBE. |callback|
   // will be invoked with the result of the check.
   void CheckWhetherDeviceDisabledDuringOOBE(
-      const DeviceDisabledCheckCallback& callback);
+      DeviceDisabledCheckCallback callback);
 
   // Returns true if trusted cros settings say the device is disabled and the
   // device disabled setting should be honored.
@@ -130,10 +130,8 @@ class DeviceDisablingManager {
 
   base::ObserverList<Observer>::Unchecked observers_;
 
-  std::unique_ptr<CrosSettings::ObserverSubscription>
-      device_disabled_subscription_;
-  std::unique_ptr<CrosSettings::ObserverSubscription>
-      disabled_message_subscription_;
+  base::CallbackListSubscription device_disabled_subscription_;
+  base::CallbackListSubscription disabled_message_subscription_;
 
   // Indicates whether the device was disabled when the cros settings were last
   // read.

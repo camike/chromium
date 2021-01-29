@@ -14,16 +14,16 @@
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "chrome/browser/ui/ash/test_ime_controller.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ime/chromeos/fake_input_method_delegate.h"
+#include "ui/base/ime/chromeos/ime_bridge.h"
 #include "ui/base/ime/chromeos/input_method_descriptor.h"
 #include "ui/base/ime/chromeos/input_method_util.h"
 #include "ui/base/ime/chromeos/mock_ime_candidate_window_handler.h"
 #include "ui/base/ime/chromeos/mock_input_method_manager.h"
-#include "ui/base/ime/ime_bridge.h"
 
 using chromeos::input_method::FakeInputMethodDelegate;
 using chromeos::input_method::InputMethodDescriptor;
@@ -47,12 +47,12 @@ class TestInputMethodManager : public MockInputMethodManager {
    public:
     TestState() {
       // Set up two input methods.
-      std::vector<std::string> layouts({"us"});
+      std::string layout("us");
       std::vector<std::string> languages({"en-US"});
-      InputMethodDescriptor ime1("id1", "name1", "indicator1", layouts,
+      InputMethodDescriptor ime1("id1", "name1", "indicator1", layout,
                                  languages, true /* is_login_keyboard */,
                                  GURL(), GURL());
-      InputMethodDescriptor ime2("id2", "name2", "indicator2", layouts,
+      InputMethodDescriptor ime2("id2", "name2", "indicator2", layout,
                                  languages, false /* is_login_keyboard */,
                                  GURL(), GURL());
       current_ime_id_ = ime1.id();
@@ -152,7 +152,7 @@ class ImeControllerClientTest : public testing::Test {
  public:
   ImeControllerClientTest() {
     input_method_manager_.delegate_.set_get_localized_string_callback(
-        base::Bind(&GetLocalizedString));
+        base::BindRepeating(&GetLocalizedString));
   }
   ~ImeControllerClientTest() override = default;
 

@@ -4,7 +4,9 @@
 
 #include "third_party/blink/renderer/modules/webgpu/dawn_object.h"
 
+#include "gpu/command_buffer/client/webgpu_interface.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_device.h"
+#include "third_party/blink/renderer/platform/bindings/microtask.h"
 
 namespace blink {
 
@@ -17,10 +19,6 @@ DawnObjectBase::GetDawnControlClient() const {
   return dawn_control_client_;
 }
 
-bool DawnObjectBase::IsDawnControlClientDestroyed() const {
-  return dawn_control_client_->IsDestroyed();
-}
-
 gpu::webgpu::WebGPUInterface* DawnObjectBase::GetInterface() const {
   return dawn_control_client_->GetInterface();
 }
@@ -29,12 +27,66 @@ const DawnProcTable& DawnObjectBase::GetProcs() const {
   return dawn_control_client_->GetProcs();
 }
 
+DawnDeviceClientSerializerHolder::DawnDeviceClientSerializerHolder(
+    scoped_refptr<DawnControlClientHolder> dawn_control_client,
+    uint64_t device_client_id)
+    : dawn_control_client_(std::move(dawn_control_client)),
+      device_client_id_(device_client_id) {}
+
+DawnDeviceClientSerializerHolder::~DawnDeviceClientSerializerHolder() {
+  dawn_control_client_->GetInterface()->RemoveDevice(device_client_id_);
+}
+
+const scoped_refptr<DawnControlClientHolder>&
+DeviceTreeObject::GetDawnControlClient() const {
+  return device_client_serializer_holder_->dawn_control_client_;
+}
+
+gpu::webgpu::WebGPUInterface* DeviceTreeObject::GetInterface() const {
+  return GetDawnControlClient()->GetInterface();
+}
+const DawnProcTable& DeviceTreeObject::GetProcs() const {
+  return GetDawnControlClient()->GetProcs();
+}
+
+uint64_t DeviceTreeObject::GetDeviceClientID() const {
+  return device_client_serializer_holder_->device_client_id_;
+}
+
+void DeviceTreeObject::EnsureFlush() {
+  bool needs_flush = false;
+  GetInterface()->EnsureAwaitingFlush(
+      device_client_serializer_holder_->device_client_id_, &needs_flush);
+  if (!needs_flush) {
+    // We've already enqueued a task to flush, or the command buffer
+    // is empty. Do nothing.
+    return;
+  }
+  Microtask::EnqueueMicrotask(WTF::Bind(
+      [](scoped_refptr<DawnDeviceClientSerializerHolder> holder) {
+        holder->dawn_control_client_->GetInterface()->FlushAwaitingCommands(
+            holder->device_client_id_);
+      },
+      device_client_serializer_holder_));
+}
+
+// Flush commands up until now on this object's parent device immediately.
+void DeviceTreeObject::FlushNow() {
+  GetInterface()->FlushCommands(
+      device_client_serializer_holder_->device_client_id_);
+}
+
 DawnObjectImpl::DawnObjectImpl(GPUDevice* device)
-    : DawnObjectBase(device->GetDawnControlClient()), device_(device) {}
+    : DeviceTreeObject(device->GetDeviceClientSerializerHolder()),
+      device_(device) {}
 
 DawnObjectImpl::~DawnObjectImpl() = default;
 
-void DawnObjectImpl::Trace(Visitor* visitor) {
+WGPUDevice DawnObjectImpl::GetDeviceHandle() {
+  return device_->GetHandle();
+}
+
+void DawnObjectImpl::Trace(Visitor* visitor) const {
   visitor->Trace(device_);
   ScriptWrappable::Trace(visitor);
 }

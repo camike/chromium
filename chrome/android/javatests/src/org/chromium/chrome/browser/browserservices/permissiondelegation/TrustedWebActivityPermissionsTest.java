@@ -8,9 +8,12 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import static org.chromium.base.test.util.Batch.PER_CLASS;
+
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.MediumTest;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.MediumTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Before;
@@ -19,9 +22,11 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.library_loader.LibraryLoader;
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisableIf;
 import org.chromium.chrome.browser.ChromeApplication;
-import org.chromium.chrome.browser.background_sync.BackgroundSyncPwaDetector;
+import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.customtabs.CustomTabActivityTestRule;
 import org.chromium.chrome.browser.customtabs.CustomTabsTestUtils;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
@@ -32,6 +37,7 @@ import org.chromium.components.embedder_support.util.Origin;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.net.test.ServerCertificate;
+import org.chromium.ui.test.util.UiDisableIf;
 
 import java.util.concurrent.TimeoutException;
 
@@ -41,6 +47,9 @@ import java.util.concurrent.TimeoutException;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+// See: https://crbug.com/1120707
+@DisableIf.Device(type = {UiDisableIf.TABLET})
+@Batch(PER_CLASS)
 public class TrustedWebActivityPermissionsTest {
     @Rule
     public CustomTabActivityTestRule mCustomTabActivityTestRule = new CustomTabActivityTestRule();
@@ -57,6 +66,7 @@ public class TrustedWebActivityPermissionsTest {
 
     @Before
     public void setUp() throws TimeoutException {
+        mCustomTabActivityTestRule.setFinishActivity(true);
         // Native needs to be initialized to start the test server.
         LibraryLoader.getInstance().ensureInitialized();
 
@@ -117,10 +127,10 @@ public class TrustedWebActivityPermissionsTest {
     public void detectTwa() {
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> mPermissionManager.updatePermission(mOrigin, mPackage, NOTIFICATIONS, true));
-        assertTrue(BackgroundSyncPwaDetector.isTwaInstalled(mOrigin.toString()));
+        assertTrue(ShortcutHelper.doesOriginContainAnyInstalledTwa(mOrigin.toString()));
 
         TestThreadUtils.runOnUiThreadBlocking(() -> { mPermissionManager.unregister(mOrigin); });
-        assertFalse(BackgroundSyncPwaDetector.isTwaInstalled(mOrigin.toString()));
+        assertFalse(ShortcutHelper.doesOriginContainAnyInstalledTwa(mOrigin.toString()));
     }
 
     @Test

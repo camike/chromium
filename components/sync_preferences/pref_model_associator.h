@@ -148,7 +148,7 @@ class PrefModelAssociator : public syncer::SyncableService {
                                            const base::Value& to_value);
 
   // Extract preference value from sync specifics.
-  static base::Value* ReadPreferenceSpecifics(
+  static base::Optional<base::Value> ReadPreferenceSpecifics(
       const sync_pb::PreferenceSpecifics& specifics);
 
   void NotifySyncedPrefObservers(const std::string& path, bool from_sync) const;
@@ -168,6 +168,10 @@ class PrefModelAssociator : public syncer::SyncableService {
   // matches the type of any persisted value. On mismatch, the persisted value
   // gets removed.
   void EnforceRegisteredTypeInStore(const std::string& pref_name);
+
+  // Notifies the synced pref observers that the pref for the given |path| is
+  // synced.
+  void NotifyStartedSyncing(const std::string& path) const;
 
   // Do we have an active association between the preferences and sync models?
   // Set when start syncing, reset in StopSyncing. While this is not set, we

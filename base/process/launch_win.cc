@@ -15,7 +15,7 @@
 #include <limits>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/debug/activity_tracker.h"
 #include "base/debug/stack_trace.h"
 #include "base/logging.h"
@@ -25,7 +25,9 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/system/sys_info.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "base/threading/scoped_thread_priority.h"
+#include "base/trace_event/base_tracing.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/scoped_process_information.h"
 #include "base/win/startup_information.h"
@@ -39,6 +41,8 @@ bool GetAppOutputInternal(CommandLine::StringPieceType cl,
                           bool include_stderr,
                           std::string* output,
                           int* exit_code) {
+  TRACE_EVENT0("base", "GetAppOutput");
+
   HANDLE out_read = nullptr;
   HANDLE out_write = nullptr;
 
@@ -92,7 +96,8 @@ bool GetAppOutputInternal(CommandLine::StringPieceType cl,
   win::ScopedProcessInformation proc_info(temp_process_info);
   debug::GlobalActivityTracker* tracker = debug::GlobalActivityTracker::Get();
   if (tracker)
-    tracker->RecordProcessLaunch(proc_info.process_id(), cl.as_string());
+    tracker->RecordProcessLaunch(proc_info.process_id(),
+                                 CommandLine::StringType(cl));
 
   // Close our writing end of pipe now. Otherwise later read would not be able
   // to detect end of child's output.
@@ -112,7 +117,13 @@ bool GetAppOutputInternal(CommandLine::StringPieceType cl,
   }
 
   // Let's wait for the process to finish.
-  WaitForSingleObject(proc_info.process_handle(), INFINITE);
+  {
+    // It is okay to allow this process to wait on the launched process as a
+    // process launched with GetAppOutput*() shouldn't wait back on the process
+    // that launched it.
+    internal::GetAppOutputScopedAllowBaseSyncPrimitives allow_wait;
+    WaitForSingleObject(proc_info.process_handle(), INFINITE);
+  }
 
   TerminationStatus status =
       GetTerminationStatus(proc_info.process_handle(), exit_code);

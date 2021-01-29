@@ -84,11 +84,6 @@ class ProfileHelper
   // Returns true if the signin profile has been initialized.
   static bool IsSigninProfileInitialized();
 
-  // Returns true if the signin profile has force-installed extensions set by
-  // policy. This DCHECKs that the profile is created, its PrefService is
-  // initialized and the associated pref exists.
-  static bool SigninProfileHasLoginScreenExtensions();
-
   // Returns the path used for the lock screen apps profile - profile used
   // for launching platform apps that can display windows on top of the lock
   // screen.
@@ -101,6 +96,15 @@ class ProfileHelper
   // for launching platform apps that can display a window on top of the lock
   // screen.
   static bool IsLockScreenAppProfile(const Profile* profile);
+
+  // Returns the path that corresponds to the lockscreen profile.
+  static base::FilePath GetLockScreenProfileDir();
+
+  // Returns lockscreen profile.
+  static Profile* GetLockScreenIncognitoProfile();
+
+  // Returns true if |profile| is the lockscreen profile.
+  static bool IsLockScreenProfile(const Profile* profile);
 
   // Returns true when |profile| corresponds to owner's profile.
   static bool IsOwnerProfile(const Profile* profile);
@@ -129,7 +133,7 @@ class ProfileHelper
 
   // Clears site data (cookies, history, etc) for signin profile.
   // Callback can be empty. Not thread-safe.
-  virtual void ClearSigninProfile(const base::Closure& on_clear_callback) = 0;
+  virtual void ClearSigninProfile(base::OnceClosure on_clear_callback) = 0;
 
   // Returns profile of the user associated with |account_id| if it is created
   // and fully initialized. Otherwise, returns NULL.
@@ -203,5 +207,9 @@ class ProfileHelper
 };
 
 }  // namespace chromeos
+
+// TODO(https://crbug.com/1164001): remove after //chrome/browser/chromeos
+// source migration is finished.
+using chromeos::ProfileHelper;
 
 #endif  // CHROME_BROWSER_CHROMEOS_PROFILES_PROFILE_HELPER_H_

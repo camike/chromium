@@ -8,6 +8,7 @@
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/test/launcher/test_launcher.h"
+#include "build/build_config.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/content_test_suite_base.h"
 #include "content/public/test/network_service_test_helper.h"
@@ -16,6 +17,10 @@
 #include "headless/lib/headless_content_main_delegate.h"
 #include "headless/lib/utility/headless_content_utility_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if defined(OS_WIN)
+#include "base/win/win_util.h"
+#endif  // defined(OS_WIN)
 
 namespace headless {
 namespace {
@@ -41,10 +46,8 @@ class HeadlessTestLauncherDelegate : public content::TestLauncherDelegate {
   // content::TestLauncherDelegate implementation:
   int RunTestSuite(int argc, char** argv) override {
     base::TestSuite test_suite(argc, argv);
-    // Browser tests are expected not to tear-down various globals and may
-    // complete with the thread priority being above NORMAL.
+    // Browser tests are expected not to tear-down various globals.
     test_suite.DisableCheckForLeakedGlobals();
-    test_suite.DisableCheckForThreadPriorityAtTestEnd();
     return test_suite.Run();
   }
 
@@ -67,10 +70,15 @@ class HeadlessTestLauncherDelegate : public content::TestLauncherDelegate {
 
 int main(int argc, char** argv) {
   base::CommandLine::Init(argc, argv);
-  size_t parallel_jobs = base::NumParallelJobs();
-  if (parallel_jobs > 1U) {
-    parallel_jobs /= 2U;
-  }
+  size_t parallel_jobs = base::NumParallelJobs(/*cores_per_job=*/2);
+  if (parallel_jobs == 0U)
+    return 1;
+
+#if defined(OS_WIN)
+  // Load and pin user32.dll to avoid having to load it once tests start while
+  // on the main thread loop where blocking calls are disallowed.
+  base::win::PinUser32();
+#endif  // OS_WIN
 
   // Setup a working test environment for the network service in case it's used.
   // Only create this object in the utility process, so that its members don't

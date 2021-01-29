@@ -39,13 +39,13 @@ class SuggestionListViewBinder {
         if (SuggestionListProperties.VISIBLE.equals(propertyKey)) {
             boolean visible = model.get(SuggestionListProperties.VISIBLE);
             // Actual View showing the dropdown.
-            View dropdownView = view.dropdown.getView();
+            View dropdownView = view.dropdown.getViewGroup();
             if (visible) {
                 view.container.setVisibility(View.VISIBLE);
                 if (dropdownView.getParent() == null) view.container.addView(dropdownView);
                 view.dropdown.show();
             } else {
-                dropdownView.setVisibility(View.GONE);
+                view.dropdown.hide();
                 UiUtils.removeViewFromParent(dropdownView);
                 view.container.setVisibility(View.INVISIBLE);
             }

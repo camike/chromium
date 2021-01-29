@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// #import 'chrome://resources/cr_elements/cr_action_menu/cr_action_menu.m.js';
+
 /**
  * @const {string} breadCrumbTemplate
  */
@@ -102,6 +104,23 @@ const breadCrumbTemplate = `
       width: 36px;
     }
 
+    button.dropdown-item {
+      position: relative;
+    }
+
+    :host-context(:root.pointer-active) button.dropdown-item:active {
+      background-color: rgba(0, 0, 0, 4%);
+    }
+
+    :host-context(:root:not(.pointer-active)) button.dropdown-item > paper-ripple {
+      display: none;
+    }
+
+    button.dropdown-item > paper-ripple {
+      --paper-ripple-opacity: 8%;
+      color: black;
+    }
+
     button:not([disabled]):not(:active):hover {
       background-color: rgba(0, 0, 0, 4%);
     }
@@ -130,8 +149,8 @@ const breadCrumbTemplate = `
       display: block;
       font-family: 'Roboto';
       font-size: 13px;
-      min-width: 14em;  /* menu width */
-      max-width: 14em;
+      min-width: 192px;  /* menu width */
+      max-width: min(288px, 40vw);
       padding: 0 16px;
       text-align: start;
     }
@@ -157,13 +176,13 @@ const breadCrumbTemplate = `
   <button id='third'></button>
   <span caret hidden></span>
   <button id='fourth'></button>
-  <cr-action-menu id='elider-menu'></cr-menu-item>
+  <cr-action-menu id='elider-menu'></cr-action-menu>
 `;
 
 /**
  * Class BreadCrumb.
  */
-class BreadCrumb extends HTMLElement {
+/* #export */ class BreadCrumb extends HTMLElement {
   constructor() {
     /**
      * Create element content.
@@ -250,7 +269,7 @@ class BreadCrumb extends HTMLElement {
       }
 
       buttons[i].removeAttribute('has-tooltip');
-      buttons[i].textContent = text;
+      buttons[i].textContent = window.unescape(text);
       buttons[i].hidden = !text;
       buttons[i].disabled = false;
       !!text && enabled.push(i);
@@ -292,7 +311,8 @@ class BreadCrumb extends HTMLElement {
 
     let elidedParts = '';
     for (let i = 1; i < parts.length - 2; ++i) {
-      elidedParts += `<button class='dropdown-item'>${parts[i]}</button>`;
+      elidedParts += `<button class='dropdown-item'>${
+          window.unescape(parts[i])}<paper-ripple></paper-ripple></button>`;
     }
 
     const menu = this.shadowRoot.querySelector('cr-action-menu');
@@ -431,16 +451,17 @@ class BreadCrumb extends HTMLElement {
     }
 
     // Show drop-down below the elider button.
-    const menu = this.shadowRoot.querySelector('cr-action-menu');
-    const top = elider.offsetTop + elider.offsetHeight + 4;
-    !window.UNIT_TEST && menu.showAt(elider, {top: top});
+    const menu = /** @type {!CrActionMenuElement} */ (
+        this.shadowRoot.querySelector('cr-action-menu'));
+    const top = elider.offsetTop + elider.offsetHeight + 8;
+    menu.showAt(elider, {top: top});
 
     // Style drop-down and horizontal position.
-    const dialog = !window.UNIT_TEST ? menu.getDialog() : {style: {}};
+    const dialog = menu.getDialog();
     dialog.style['left'] = position + 'px';
     dialog.style['right'] = position + 'px';
     dialog.style['overflow'] = 'hidden auto';
-    dialog.style['max-height'] = '40vh';
+    dialog.style['max-height'] = '272px';
 
     // Update global <html> and |this| element state.
     document.documentElement.classList.add('breadcrumb-elider-expanded');
@@ -465,7 +486,7 @@ class BreadCrumb extends HTMLElement {
 
     // Close the drop-down <dialog> if needed.
     const menu = this.shadowRoot.querySelector('cr-action-menu');
-    if (!window.UNIT_TEST && menu.getDialog().hasAttribute('open')) {
+    if (menu.getDialog().hasAttribute('open')) {
       menu.close();
     }
   }

@@ -12,9 +12,37 @@ const char kOnFileAttachedPref[] = "enterprise_connectors.on_file_attached";
 
 const char kOnFileDownloadedPref[] = "enterprise_connectors.on_file_downloaded";
 
-void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
+const char kOnBulkDataEntryPref[] = "enterprise_connectors.on_bulk_data_entry";
+
+const char kOnSecurityEventPref[] = "enterprise_connectors.on_security_event";
+
+const char kOnFileAttachedScopePref[] =
+    "enterprise_connectors.scope.on_file_attached";
+const char kOnFileDownloadedScopePref[] =
+    "enterprise_connectors.scope.on_file_downloaded";
+const char kOnBulkDataEntryScopePref[] =
+    "enterprise_connectors.scope.on_bulk_data_entry";
+const char kOnSecurityEventScopePref[] =
+    "enterprise_connectors.scope.on_security_event";
+
+const char kFileSystemBoxAccessTokenPref[] =
+    "enterprise_connectors.file_system.box.access_token";
+
+const char kFileSystemBoxRefreshTokenPref[] =
+    "enterprise_connectors.file_system.box.refresh_token";
+
+void RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterListPref(kOnFileAttachedPref);
   registry->RegisterListPref(kOnFileDownloadedPref);
+  registry->RegisterListPref(kOnBulkDataEntryPref);
+  registry->RegisterListPref(kOnSecurityEventPref);
+  registry->RegisterIntegerPref(kOnFileAttachedScopePref, 0);
+  registry->RegisterIntegerPref(kOnFileDownloadedScopePref, 0);
+  registry->RegisterIntegerPref(kOnBulkDataEntryScopePref, 0);
+  registry->RegisterIntegerPref(kOnSecurityEventScopePref, 0);
+  registry->RegisterStringPref(kFileSystemBoxAccessTokenPref, std::string());
+  registry->RegisterStringPref(kFileSystemBoxRefreshTokenPref, std::string());
+  // TODO(1157641) store folder_id in profile pref to handle indexing latency.
 }
 
 }  // namespace enterprise_connectors

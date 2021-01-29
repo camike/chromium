@@ -13,8 +13,8 @@
 #include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
-#include "chrome/browser/chromeos/accessibility/magnification_manager.h"
+#include "chrome/browser/ash/accessibility/accessibility_manager.h"
+#include "chrome/browser/ash/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/power/ml/adaptive_screen_brightness_ukm_logger.h"
 #include "chrome/browser/chromeos/power/ml/adaptive_screen_brightness_ukm_logger_impl.h"
 #include "chrome/browser/chromeos/power/ml/recent_events_counter.h"
@@ -42,12 +42,10 @@ namespace ml {
 
 namespace {
 // Count number of key, mouse and touch events in the past hour.
-constexpr base::TimeDelta kUserInputEventsDuration =
-    base::TimeDelta::FromMinutes(60);
+constexpr auto kUserInputEventsDuration = base::TimeDelta::FromHours(1);
 
 // Granularity of input events is per minute.
-constexpr int kNumUserInputEventsBuckets =
-    kUserInputEventsDuration / base::TimeDelta::FromMinutes(1);
+constexpr int kNumUserInputEventsBuckets = kUserInputEventsDuration.InMinutes();
 
 // Returns the focused visible browser unless no visible browser is focused,
 // then returns the topmost visible browser.
@@ -208,7 +206,7 @@ void AdaptiveScreenBrightnessManager::OnUserActivity(
     key_counter_->Log(time_since_boot);
   } else if (event->IsTouchEvent()) {
     if (event->AsTouchEvent()->pointer_details().pointer_type ==
-        ui::EventPointerType::POINTER_TYPE_PEN) {
+        ui::EventPointerType::kPen) {
       stylus_counter_->Log(time_since_boot);
     } else {
       touch_counter_->Log(time_since_boot);
@@ -273,13 +271,13 @@ void AdaptiveScreenBrightnessManager::PowerChanged(
 
 void AdaptiveScreenBrightnessManager::LidEventReceived(
     const chromeos::PowerManagerClient::LidState state,
-    const base::TimeTicks& /* timestamp */) {
+    base::TimeTicks /* timestamp */) {
   lid_state_ = state;
 }
 
 void AdaptiveScreenBrightnessManager::TabletModeEventReceived(
     const chromeos::PowerManagerClient::TabletMode mode,
-    const base::TimeTicks& /* timestamp */) {
+    base::TimeTicks /* timestamp */) {
   tablet_mode_ = mode;
 }
 

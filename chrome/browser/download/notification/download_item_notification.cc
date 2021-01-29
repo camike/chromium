@@ -23,7 +23,7 @@
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/notification/download_notification_manager.h"
-#include "chrome/browser/enterprise/connectors/connectors_manager.h"
+#include "chrome/browser/enterprise/connectors/connectors_service.h"
 #include "chrome/browser/notifications/notification_display_service.h"
 #include "chrome/browser/notifications/notification_display_service_factory.h"
 #include "chrome/browser/notifications/notification_handler.h"
@@ -475,7 +475,8 @@ void DownloadItemNotification::UpdateNotificationData(bool display,
     switch (item_->GetState()) {
       case download::DownloadItem::IN_PROGRESS: {
         int percent_complete = item_->PercentComplete();
-        if (percent_complete >= 0) {
+        // Show "running" progress when percent is unknown or during cloud scan.
+        if (percent_complete >= 0 && !IsScanning()) {
           notification_->set_progress(percent_complete);
         } else {
           // Negative progress value shows an indeterminate progress bar.
@@ -720,6 +721,11 @@ base::string16 DownloadItemNotification::GetTitle() const {
 
   base::string16 file_name =
       item_->GetFileNameToReportUser().LossyDisplayName();
+  if (IsScanning()) {
+    return l10n_util::GetStringFUTF16(IDS_DOWNLOAD_STATUS_SCAN_TITLE,
+                                      file_name);
+  }
+
   switch (item_->GetState()) {
     case download::DownloadItem::IN_PROGRESS:
       if (!item_->IsPaused()) {
@@ -848,6 +854,14 @@ base::string16 DownloadItemNotification::GetWarningStatusString() const {
       return l10n_util::GetStringFUTF16(IDS_PROMPT_DOWNLOAD_CHANGES_SETTINGS,
                                         elided_filename);
     }
+    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_TOO_LARGE: {
+      return l10n_util::GetStringFUTF16(IDS_PROMPT_DOWNLOAD_BLOCKED_TOO_LARGE,
+                                        elided_filename);
+    }
+    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_PASSWORD_PROTECTED: {
+      return l10n_util::GetStringFUTF16(
+          IDS_PROMPT_DOWNLOAD_BLOCKED_PASSWORD_PROTECTED, elided_filename);
+    }
     case download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_WARNING: {
       return l10n_util::GetStringFUTF16(
           IDS_PROMPT_DOWNLOAD_SENSITIVE_CONTENT_WARNING, elided_filename);
@@ -860,13 +874,11 @@ base::string16 DownloadItemNotification::GetWarningStatusString() const {
     case download::DOWNLOAD_DANGER_TYPE_PROMPT_FOR_SCANNING:
     case download::DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_SAFE:
     case download::DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_OPENED_DANGEROUS:
-    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_TOO_LARGE:
-    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_PASSWORD_PROTECTED:
     case download::DOWNLOAD_DANGER_TYPE_ASYNC_SCANNING:
     case download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS:
     case download::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT:
     case download::DOWNLOAD_DANGER_TYPE_USER_VALIDATED:
-    case download::DOWNLOAD_DANGER_TYPE_WHITELISTED_BY_POLICY:
+    case download::DOWNLOAD_DANGER_TYPE_ALLOWLISTED_BY_POLICY:
     case download::DOWNLOAD_DANGER_TYPE_MAX: {
       break;
     }
@@ -880,15 +892,14 @@ base::string16 DownloadItemNotification::GetInProgressSubStatusString() const {
   if (item_->IsPaused())
     return l10n_util::GetStringUTF16(IDS_DOWNLOAD_PROGRESS_PAUSED);
 
-  // "Being scanned"
+  // "In progress" (scanning)
   if (IsScanning())
-    return l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_SCANNED);
+    return l10n_util::GetStringUTF16(IDS_DOWNLOAD_STATUS_IN_PROGRESS_SHORT);
 
   base::TimeDelta time_remaining;
   // time_remaining is only known if the download isn't paused.
   bool time_remaining_known = (!item_->IsPaused() &&
                                item_->TimeRemaining(&time_remaining));
-
 
   // A download scheduled to be opened when complete.
   if (item_->GetOpenWhenComplete()) {
@@ -922,9 +933,6 @@ base::string16 DownloadItemNotification::GetSubStatusString() const {
     return GetWarningStatusString();
 
   if (item_->GetDangerType() ==
-      download::DownloadDangerType::DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_SAFE) {
-    return l10n_util::GetStringUTF16(IDS_PROMPT_DOWNLOAD_DEEP_SCANNED_SAFE);
-  } else if (item_->GetDangerType() ==
              download::DownloadDangerType::
                  DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_OPENED_DANGEROUS) {
     return l10n_util::GetStringUTF16(
@@ -978,6 +986,10 @@ base::string16 DownloadItemNotification::GetStatusString() const {
   if (item_->IsDangerous() || item_->IsMixedContent())
     return base::string16();
 
+  if (IsScanning()) {
+    return l10n_util::GetStringUTF16(IDS_PROMPT_DEEP_SCANNING_DOWNLOAD_SHORT);
+  }
+
   // The hostname. (E.g.:"example.com" or "127.0.0.1")
   base::string16 host_name = url_formatter::FormatUrlForSecurityDisplay(
       item_->GetURL(), url_formatter::SchemeDisplay::OMIT_HTTP_AND_HTTPS);
@@ -1024,9 +1036,12 @@ bool DownloadItemNotification::IsScanning() const {
 }
 
 bool DownloadItemNotification::AllowedToOpenWhileScanning() const {
-  return !enterprise_connectors::ConnectorsManager::GetInstance()
-              ->DelayUntilVerdict(
-                  enterprise_connectors::AnalysisConnector::FILE_DOWNLOADED);
+  auto* service =
+      enterprise_connectors::ConnectorsServiceFactory::GetForBrowserContext(
+          profile());
+  return !service ||
+         !service->DelayUntilVerdict(
+             enterprise_connectors::AnalysisConnector::FILE_DOWNLOADED);
 }
 
 Browser* DownloadItemNotification::GetBrowser() const {

@@ -5,9 +5,12 @@
 #include "chrome/browser/profiles/profiles_state.h"
 
 #include "base/check.h"
+#include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
 #include "chrome/browser/profiles/profile.h"
@@ -15,8 +18,10 @@
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
+#include "chrome/browser/ui/profile_picker.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/browsing_data/content/browsing_data_helper.h"
@@ -31,13 +36,17 @@
 #include "chrome/browser/ui/browser.h"
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chromeos/login/login_state/login_state.h"
 #else
 #include <algorithm>
 #include "chrome/browser/profiles/gaia_info_update_service.h"
 #include "chrome/browser/profiles/gaia_info_update_service_factory.h"
 #include "components/signin/public/base/signin_pref_names.h"
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "chromeos/lacros/lacros_chrome_service_impl.h"
 #endif
 
 namespace profiles {
@@ -60,6 +69,7 @@ void RegisterPrefs(PrefRegistrySimple* registry) {
   // Preferences about global profile information.
   registry->RegisterStringPref(prefs::kProfileLastUsed, std::string());
   registry->RegisterIntegerPref(prefs::kProfilesNumCreated, 1);
+  registry->RegisterIntegerPref(prefs::kGuestProfilesNumCreated, 1);
   registry->RegisterListPref(prefs::kProfilesLastActive);
   registry->RegisterListPref(prefs::kProfilesDeleted);
 
@@ -68,6 +78,12 @@ void RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kBrowserGuestModeEnforced, false);
   registry->RegisterBooleanPref(prefs::kBrowserAddPersonEnabled, true);
   registry->RegisterBooleanPref(prefs::kForceBrowserSignin, false);
+  registry->RegisterBooleanPref(prefs::kBrowserShowProfilePickerOnStartup,
+                                true);
+  registry->RegisterIntegerPref(
+      prefs::kBrowserProfilePickerAvailabilityOnStartup,
+      static_cast<int>(ProfilePicker::AvailabilityOnStartup::kEnabled));
+  registry->RegisterBooleanPref(prefs::kBrowserProfilePickerShown, false);
 }
 
 void SetLastUsedProfile(const std::string& profile_dir) {
@@ -120,12 +136,8 @@ base::string16 GetAvatarNameForProfile(const base::FilePath& profile_path) {
   return email.empty() ? profile_name_to_display : email;
 }
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 base::string16 GetProfileSwitcherTextForItem(const AvatarMenu::Item& item) {
-  if (item.legacy_supervised) {
-    return l10n_util::GetStringFUTF16(
-        IDS_LEGACY_SUPERVISED_USER_NEW_AVATAR_LABEL, item.name);
-  }
   if (item.child_account)
     return l10n_util::GetStringFUTF16(IDS_CHILD_AVATAR_LABEL, item.name);
   return item.name;
@@ -153,11 +165,34 @@ void UpdateProfileName(Profile* profile,
                           base::UTF16ToUTF8(new_profile_name));
 }
 
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 bool IsRegularOrGuestSession(Browser* browser) {
   Profile* profile = browser->profile();
-  return profile->IsRegularProfile() || profile->IsGuestSession();
+  return profile->IsRegularProfile() || profile->IsGuestSession() ||
+         profile->IsEphemeralGuestProfile();
+}
+
+bool IsGuestModeRequested(const base::CommandLine& command_line,
+                          PrefService* local_state,
+                          bool show_warning) {
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_WIN) || \
+    defined(OS_MAC)
+  DCHECK(local_state);
+
+  // Check if guest mode enforcement commandline switch or policy are provided.
+  if (command_line.HasSwitch(switches::kGuest) ||
+      local_state->GetBoolean(prefs::kBrowserGuestModeEnforced)) {
+    // Check if guest mode is allowed by policy.
+    if (local_state->GetBoolean(prefs::kBrowserGuestModeEnabled))
+      return true;
+    if (show_warning) {
+      LOG(WARNING) << "Guest mode disabled by policy, launching a normal "
+                   << "browser session.";
+    }
+  }
+#endif
+  return false;
 }
 
 bool IsProfileLocked(const base::FilePath& profile_path) {
@@ -170,15 +205,7 @@ bool IsProfileLocked(const base::FilePath& profile_path) {
   return entry->IsSigninRequired();
 }
 
-#if !defined(OS_CHROMEOS)
-void UpdateIsProfileLockEnabledIfNeeded(Profile* profile) {
-  if (!profile->GetPrefs()->GetString(prefs::kGoogleServicesHostedDomain).
-      empty())
-    return;
-
-  UpdateGaiaProfileInfoIfNeeded(profile);
-}
-
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 void UpdateGaiaProfileInfoIfNeeded(Profile* profile) {
   DCHECK(profile);
 
@@ -211,7 +238,7 @@ bool SetActiveProfileToGuestIfLocked() {
 
   return true;
 }
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 void RemoveBrowsingDataForProfile(const base::FilePath& profile_path) {
   // The BrowsingDataRemover relies on many objects that aren't created in unit
@@ -227,12 +254,12 @@ void RemoveBrowsingDataForProfile(const base::FilePath& profile_path) {
 
   // For guest profiles the browsing data is in the OTR profile.
   if (profile->IsGuestSession())
-    profile = profile->GetOffTheRecordProfile();
+    profile = profile->GetPrimaryOTRProfile();
 
   profile->Wipe();
 }
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 bool AreAllNonChildNonSupervisedProfilesLocked() {
   bool at_least_one_regular_profile_present = false;
 
@@ -243,8 +270,8 @@ bool AreAllNonChildNonSupervisedProfilesLocked() {
     if (entry->IsOmitted())
       continue;
 
-    // Only consider non-child and non-supervised profiles.
-    if (!entry->IsChild() && !entry->IsLegacySupervised()) {
+    // Only consider non-child profiles.
+    if (!entry->IsChild()) {
       at_least_one_regular_profile_present = true;
 
       if (!entry->IsSigninRequired())
@@ -256,22 +283,53 @@ bool AreAllNonChildNonSupervisedProfilesLocked() {
 #endif
 
 bool IsPublicSession() {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (chromeos::LoginState::IsInitialized()) {
     return chromeos::LoginState::Get()->IsPublicSessionUser();
   }
+#elif BUILDFLAG(IS_CHROMEOS_LACROS)
+  DCHECK(chromeos::LacrosChromeServiceImpl::Get());
+  return chromeos::LacrosChromeServiceImpl::Get()
+             ->init_params()
+             ->session_type == crosapi::mojom::SessionType::kPublicSession;
 #endif
   return false;
 }
 
 bool ArePublicSessionRestrictionsEnabled() {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (chromeos::LoginState::IsInitialized()) {
     return chromeos::LoginState::Get()->ArePublicSessionRestrictionsEnabled();
   }
 #endif
   return false;
 }
+
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
+base::string16 GetDefaultNameForNewEnterpriseProfile(
+    const std::string& hosted_domain) {
+  if (AccountInfo::IsManaged(hosted_domain))
+    return base::UTF8ToUTF16(hosted_domain);
+  return l10n_util::GetStringUTF16(
+      IDS_SIGNIN_DICE_WEB_INTERCEPT_ENTERPRISE_PROFILE_NAME);
+}
+
+base::string16 GetDefaultNameForNewSignedInProfile(
+    const AccountInfo& account_info) {
+  DCHECK(account_info.IsValid());
+  if (!account_info.IsManaged())
+    return base::UTF8ToUTF16(account_info.given_name);
+  return GetDefaultNameForNewEnterpriseProfile(account_info.hosted_domain);
+}
+
+base::string16 GetDefaultNameForNewSignedInProfileWithIncompleteInfo(
+    const CoreAccountInfo& account_info) {
+  // As a fallback, use the email of the user as the profile name when extended
+  // account info is not available.
+  return base::UTF8ToUTF16(account_info.email);
+}
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
+
 #endif  // !defined(OS_ANDROID)
 
 }  // namespace profiles

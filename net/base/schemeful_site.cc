@@ -1,0 +1,193 @@
+// Copyright 2020 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#include "net/base/schemeful_site.h"
+
+#include "base/check.h"
+#include "base/debug/crash_logging.h"
+#include "base/debug/dump_without_crashing.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "net/base/url_util.h"
+#include "url/gurl.h"
+#include "url/url_canon.h"
+#include "url/url_constants.h"
+
+namespace net {
+
+// Return a tuple containing:
+// * a new origin using the registerable domain of `origin` if possible and
+//   a port of 0; otherwise, the passed-in origin.
+// * a bool indicating whether `origin` had a non-null registerable domain.
+//   (False if `origin` was opaque.)
+//
+// Follows steps specified in
+// https://html.spec.whatwg.org/multipage/origin.html#obtain-a-site
+SchemefulSite::ObtainASiteResult SchemefulSite::ObtainASite(
+    const url::Origin& origin) {
+  // 1. If origin is an opaque origin, then return origin.
+  if (origin.opaque())
+    return {origin, false /* used_registerable_domain */};
+
+  std::string registerable_domain;
+
+  // Non-normative step.
+  // We only lookup the registerable domain for schemes with network hosts, this
+  // is non-normative. Other schemes for non-opaque origins do not
+  // meaningfully have a registerable domain for their host, so they are
+  // skipped.
+  if (IsStandardSchemeWithNetworkHost(origin.scheme())) {
+    registerable_domain = GetDomainAndRegistry(
+        origin, net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
+
+    // Create a crash dump if the registerable domain is not safe.
+    // TODO(https://crbug.com/1157010): Remove once we have enough information
+    // to verify whether or not this is what's causing issue 1157010.
+    url::CanonHostInfo host_info;
+    if (!registerable_domain.empty() &&
+        registerable_domain !=
+            CanonicalizeHost(registerable_domain, &host_info)) {
+      static base::debug::CrashKeyString* crash_key_string =
+          base::debug::AllocateCrashKeyString(
+              "schemeful_site_bad_origin", base::debug::CrashKeySize::Size256);
+      url::debug::ScopedOriginCrashKey crash_key(crash_key_string, &origin);
+      base::debug::DumpWithoutCrashing();
+    }
+  }
+
+  // If origin's host's registrable domain is null, then return (origin's
+  // scheme, origin's host).
+  //
+  // `GetDomainAndRegistry()` returns an empty string for IP literals and
+  // effective TLDs.
+  //
+  // Note that `registerable_domain` could still end up empty, since the
+  // `origin` might have a scheme that permits empty hostnames, such as "file".
+  bool used_registerable_domain = !registerable_domain.empty();
+  if (!used_registerable_domain)
+    registerable_domain = origin.host();
+
+  int port = url::DefaultPortForScheme(origin.scheme().c_str(),
+                                       origin.scheme().length());
+
+  // Provide a default port of 0 for non-standard schemes.
+  if (port == url::PORT_UNSPECIFIED)
+    port = 0;
+
+  return {url::Origin::CreateFromNormalizedTuple(origin.scheme(),
+                                                 registerable_domain, port),
+          used_registerable_domain};
+}
+
+SchemefulSite::SchemefulSite(ObtainASiteResult result)
+    : site_as_origin_(std::move(result.origin)) {}
+
+SchemefulSite::SchemefulSite(const url::Origin& origin)
+    : SchemefulSite(ObtainASite(origin)) {}
+
+SchemefulSite::SchemefulSite(const GURL& url)
+    : SchemefulSite(url::Origin::Create(url)) {}
+
+SchemefulSite::SchemefulSite(const SchemefulSite& other) = default;
+SchemefulSite::SchemefulSite(SchemefulSite&& other) = default;
+
+SchemefulSite& SchemefulSite::operator=(const SchemefulSite& other) = default;
+SchemefulSite& SchemefulSite::operator=(SchemefulSite&& other) = default;
+
+// static
+bool SchemefulSite::FromWire(const url::Origin& site_as_origin,
+                             SchemefulSite* out) {
+  // The origin passed into this constructor may not match the
+  // `site_as_origin_` used as the internal representation of the schemeful
+  // site. However, a valid SchemefulSite's internal origin should result in a
+  // match if used to construct another SchemefulSite. Thus, if there is a
+  // mismatch here, we must indicate a failure.
+  SchemefulSite candidate(site_as_origin);
+  if (candidate.site_as_origin_ != site_as_origin) {
+    // TODO(crbug.com/1157010): Remove crash keys after deserialization failures
+    // are diagnosed.
+    static base::debug::CrashKeyString* schemeful_site_origin_from_wire =
+        base::debug::AllocateCrashKeyString("schemeful_site_origin_from_wire",
+                                            base::debug::CrashKeySize::Size256);
+    url::debug::ScopedOriginCrashKey origin_from_wire_crash_key(
+        schemeful_site_origin_from_wire, &site_as_origin);
+
+    static base::debug::CrashKeyString* schemeful_site_candidate_origin =
+        base::debug::AllocateCrashKeyString("schemeful_site_candidate_origin",
+                                            base::debug::CrashKeySize::Size256);
+    url::debug::ScopedOriginCrashKey candidate_origin_crash_key(
+        schemeful_site_candidate_origin, &candidate.site_as_origin_);
+
+    base::debug::DumpWithoutCrashing();
+    return false;
+  }
+
+  *out = std::move(candidate);
+  return true;
+}
+
+base::Optional<SchemefulSite> SchemefulSite::CreateIfHasRegisterableDomain(
+    const url::Origin& origin) {
+  ObtainASiteResult result = ObtainASite(origin);
+  if (!result.used_registerable_domain)
+    return base::nullopt;
+  return SchemefulSite(std::move(result));
+}
+
+void SchemefulSite::ConvertWebSocketToHttp() {
+  if (site_as_origin_.scheme() == url::kWsScheme ||
+      site_as_origin_.scheme() == url::kWssScheme) {
+    site_as_origin_ = url::Origin::Create(
+        ChangeWebSocketSchemeToHttpScheme(site_as_origin_.GetURL()));
+  }
+}
+
+// static
+SchemefulSite SchemefulSite::Deserialize(const std::string& value) {
+  return SchemefulSite(GURL(value));
+}
+
+std::string SchemefulSite::Serialize() const {
+  return site_as_origin_.Serialize();
+}
+
+std::string SchemefulSite::GetDebugString() const {
+  return site_as_origin_.GetDebugString();
+}
+
+const url::Origin& SchemefulSite::GetInternalOriginForTesting() const {
+  return site_as_origin_;
+}
+
+bool SchemefulSite::operator==(const SchemefulSite& other) const {
+  return site_as_origin_ == other.site_as_origin_;
+}
+
+bool SchemefulSite::operator!=(const SchemefulSite& other) const {
+  return !(*this == other);
+}
+
+// Allows SchemefulSite to be used as a key in STL containers (for example, a
+// std::set or std::map).
+bool SchemefulSite::operator<(const SchemefulSite& other) const {
+  return site_as_origin_ < other.site_as_origin_;
+}
+
+// static
+base::Optional<SchemefulSite> SchemefulSite::DeserializeWithNonce(
+    const std::string& value) {
+  base::Optional<url::Origin> result = url::Origin::Deserialize(value);
+  if (!result)
+    return base::nullopt;
+  return SchemefulSite(result.value());
+}
+
+base::Optional<std::string> SchemefulSite::SerializeWithNonce() {
+  return site_as_origin_.SerializeWithNonceAndInitIfNeeded();
+}
+
+bool SchemefulSite::SchemelesslyEqual(const SchemefulSite& other) const {
+  return site_as_origin_.host() == other.site_as_origin_.host();
+}
+
+}  // namespace net

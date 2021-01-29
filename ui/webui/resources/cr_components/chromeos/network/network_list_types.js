@@ -8,12 +8,21 @@
  * NetworkListItem.
  */
 
-const NetworkList = {};
+/* #export */ const NetworkList = {};
+
+/** @enum {number} */
+NetworkList.CustomItemType = {
+  OOBE: 1,
+  ESIM_PENDING_PROFILE: 2,
+  ESIM_INSTALLING_PROFILE: 3,
+};
 
 /**
  * Custom data for implementation specific network list items.
  * @typedef {{
+ *   customItemType: NetworkList.CustomItemType,
  *   customItemName: string,
+ *   customItemSubtitle: string,
  *   polymerIcon: (string|undefined),
  *   customData: (!Object|undefined),
  *   showBeforeNetworksList: boolean,

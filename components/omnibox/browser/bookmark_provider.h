@@ -10,7 +10,6 @@
 #include <string>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
 
@@ -32,6 +31,9 @@ struct TitledUrlMatch;
 class BookmarkProvider : public AutocompleteProvider {
  public:
   explicit BookmarkProvider(AutocompleteProviderClient* client);
+
+  BookmarkProvider(const BookmarkProvider&) = delete;
+  BookmarkProvider& operator=(const BookmarkProvider&) = delete;
 
   // When |minimal_changes| is true short circuit any additional searching and
   // leave the previous matches for this provider unchanged, otherwise perform
@@ -57,10 +59,12 @@ class BookmarkProvider : public AutocompleteProvider {
   int CalculateBookmarkMatchRelevance(
       const bookmarks::TitledUrlMatch& match) const;
 
+  // Removes any URL matches for query parameter keys (if the matching word
+  // starts immediately after a '?' or '&').
+  void RemoveQueryParamKeyMatches(bookmarks::TitledUrlMatch& match);
+
   AutocompleteProviderClient* client_;
   bookmarks::BookmarkModel* bookmark_model_;
-
-  DISALLOW_COPY_AND_ASSIGN(BookmarkProvider);
 };
 
 #endif  // COMPONENTS_OMNIBOX_BROWSER_BOOKMARK_PROVIDER_H_

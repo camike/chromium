@@ -60,19 +60,21 @@ public class ContentCaptureConsumerImpl extends ContentCaptureConsumer {
     }
 
     @Override
-    public void onContentCaptured(FrameSession parentFrame, ContentCaptureData contentCaptureData) {
+    public void onContentCaptured(
+            FrameSession parentFrame, ContentCaptureFrame contentCaptureFrame) {
         if (mPlatformSession == null) {
             mPlatformSession = PlatformSession.fromView(mView);
             if (mPlatformSession == null) return;
         }
-        new ContentCapturedTask(parentFrame, contentCaptureData, mPlatformSession)
+        new ContentCapturedTask(parentFrame, contentCaptureFrame, mPlatformSession)
                 .executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
 
     @Override
-    public void onContentUpdated(FrameSession parentFrame, ContentCaptureData contentCaptureData) {
+    public void onContentUpdated(
+            FrameSession parentFrame, ContentCaptureFrame contentCaptureFrame) {
         if (mPlatformSession == null) return;
-        new ContentUpdateTask(parentFrame, contentCaptureData, mPlatformSession)
+        new ContentUpdateTask(parentFrame, contentCaptureFrame, mPlatformSession)
                 .executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
 
@@ -88,5 +90,15 @@ public class ContentCaptureConsumerImpl extends ContentCaptureConsumer {
         if (frame.isEmpty() || mPlatformSession == null) return;
         new ContentRemovedTask(frame, removedIds, mPlatformSession)
                 .executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
+    }
+
+    @Override
+    protected boolean shouldCapture(String[] urls) {
+        // No need to check if the experiment is disabled, because it was done when the navigation
+        // committed, refer to ContentCaptureReceiverManager::ReadyToCommitNavigation().
+        if (!ContentCaptureFeatures.shouldTriggerContentCaptureForExperiment()) return true;
+        ContentCaptureController controller = ContentCaptureController.getInstance();
+        if (controller == null) return false;
+        return controller.shouldCapture(urls);
     }
 }

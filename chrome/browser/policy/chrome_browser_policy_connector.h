@@ -13,6 +13,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 
 class PrefService;
@@ -20,7 +21,7 @@ class PrefService;
 namespace policy {
 class ConfigurationPolicyProvider;
 
-#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+#if !defined(OS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
 class ChromeBrowserCloudManagementController;
 class MachineLevelUserCloudPolicyManager;
 #endif
@@ -55,7 +56,7 @@ class ChromeBrowserPolicyConnector : public BrowserPolicyConnector {
 
   ConfigurationPolicyProvider* GetPlatformProvider();
 
-#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+#if !defined(OS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
   ChromeBrowserCloudManagementController*
   chrome_browser_cloud_management_controller() {
     return chrome_browser_cloud_management_controller_.get();
@@ -66,8 +67,15 @@ class ChromeBrowserPolicyConnector : public BrowserPolicyConnector {
   }
 #endif
 
- protected:
   // BrowserPolicyConnector:
+  // Command line switch only supports Dev and Canary channel, trunk and browser
+  // tests on Win, Mac, Linux and Android.
+  bool IsCommandLineSwitchSupported() const override;
+
+  static void EnableCommandLineSupportForTesting();
+
+ protected:
+  // BrowserPolicyConnectorBase::
   std::vector<std::unique_ptr<policy::ConfigurationPolicyProvider>>
   CreatePolicyProviders() override;
 
@@ -77,13 +85,15 @@ class ChromeBrowserPolicyConnector : public BrowserPolicyConnector {
   // Owned by base class.
   ConfigurationPolicyProvider* platform_provider_ = nullptr;
 
-#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+#if !defined(OS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
   std::unique_ptr<ChromeBrowserCloudManagementController>
       chrome_browser_cloud_management_controller_;
   // Owned by base class.
   MachineLevelUserCloudPolicyManager* machine_level_user_cloud_policy_manager_ =
       nullptr;
 #endif
+
+  ConfigurationPolicyProvider* command_line_provider_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserPolicyConnector);
 };

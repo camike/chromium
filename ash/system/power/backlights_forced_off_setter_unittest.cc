@@ -8,13 +8,13 @@
 #include <utility>
 #include <vector>
 
+#include "ash/public/cpp/screen_backlight_observer.h"
 #include "ash/shell.h"
 #include "ash/system/power/scoped_backlights_forced_off.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/touch/ash_touch_transform_controller.h"
 #include "ash/touch/touch_devices_controller.h"
 #include "base/macros.h"
-#include "base/scoped_observer.h"
 #include "chromeos/dbus/power/fake_power_manager_client.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/manager/test/touch_transform_controller_test_api.h"
@@ -28,12 +28,11 @@ namespace ash {
 
 namespace {
 
-class TestObserver : public BacklightsForcedOffSetter::Observer {
+class TestObserver : public ScreenBacklightObserver {
  public:
   explicit TestObserver(BacklightsForcedOffSetter* backlights_forced_off_setter)
-      : backlights_forced_off_setter_(backlights_forced_off_setter),
-        scoped_observer_(this) {
-    scoped_observer_.Add(backlights_forced_off_setter);
+      : backlights_forced_off_setter_(backlights_forced_off_setter) {
+    scoped_observation_.Observe(backlights_forced_off_setter);
   }
 
   ~TestObserver() override = default;
@@ -44,7 +43,7 @@ class TestObserver : public BacklightsForcedOffSetter::Observer {
 
   void ClearForcedOffStates() { forced_off_states_.clear(); }
 
-  // BacklightsForcedOffSetter::Observer:
+  // ScreenBacklightObserver:
   void OnBacklightsForcedOffChanged(bool backlights_forced_off) override {
     ASSERT_EQ(backlights_forced_off,
               backlights_forced_off_setter_->backlights_forced_off());
@@ -56,8 +55,8 @@ class TestObserver : public BacklightsForcedOffSetter::Observer {
 
   std::vector<bool> forced_off_states_;
 
-  ScopedObserver<BacklightsForcedOffSetter, BacklightsForcedOffSetter::Observer>
-      scoped_observer_;
+  base::ScopedObservation<BacklightsForcedOffSetter, ScreenBacklightObserver>
+      scoped_observation_{this};
 
   DISALLOW_COPY_AND_ASSIGN(TestObserver);
 };
@@ -72,6 +71,8 @@ class BacklightsForcedOffSetterTest : public AshTestBase {
   void SetUp() override {
     AshTestBase::SetUp();
 
+    screen_backlight_resetter_ =
+        std::make_unique<ash::ScreenBacklight::ScopedResetterForTest>();
     backlights_forced_off_setter_ =
         std::make_unique<BacklightsForcedOffSetter>();
     backlights_forced_off_observer_ =
@@ -81,6 +82,7 @@ class BacklightsForcedOffSetterTest : public AshTestBase {
   void TearDown() override {
     backlights_forced_off_observer_.reset();
     backlights_forced_off_setter_.reset();
+    screen_backlight_resetter_.reset();
     AshTestBase::TearDown();
   }
 
@@ -90,6 +92,8 @@ class BacklightsForcedOffSetterTest : public AshTestBase {
   }
 
  protected:
+  std::unique_ptr<ash::ScreenBacklight::ScopedResetterForTest>
+      screen_backlight_resetter_;
   std::unique_ptr<BacklightsForcedOffSetter> backlights_forced_off_setter_;
   std::unique_ptr<TestObserver> backlights_forced_off_observer_;
 

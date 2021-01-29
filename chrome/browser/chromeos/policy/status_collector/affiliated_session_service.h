@@ -49,8 +49,6 @@ class AffiliatedSessionService : public session_manager::SessionManagerObserver,
   AffiliatedSessionService& operator=(const AffiliatedSessionService&) = delete;
   ~AffiliatedSessionService() override;
 
-  static AffiliatedSessionService* Get();
-
   void AddObserver(Observer* observer);
 
   void RemoveObserver(Observer* observer);
@@ -63,7 +61,7 @@ class AffiliatedSessionService : public session_manager::SessionManagerObserver,
   void OnProfileWillBeDestroyed(Profile* profile) override;
 
   // chromeos::PowerManagerClient::Observer
-  void SuspendDone(const base::TimeDelta& sleep_duration) override;
+  void SuspendDone(base::TimeDelta sleep_duration) override;
 
  private:
   bool is_session_locked_;
@@ -78,6 +76,9 @@ class AffiliatedSessionService : public session_manager::SessionManagerObserver,
   ScopedObserver<session_manager::SessionManager,
                  session_manager::SessionManagerObserver>
       session_manager_observer_{this};
+  ScopedObserver<chromeos::PowerManagerClient,
+                 chromeos::PowerManagerClient::Observer>
+      power_manager_observer_{this};
 };
 
 }  // namespace policy

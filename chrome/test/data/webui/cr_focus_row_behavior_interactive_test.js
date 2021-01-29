@@ -5,6 +5,8 @@
 // Polymer BrowserTest fixture.
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_interactive_ui_test.js']);
 
+GEN('#include "content/public/test/browser_test.h"');
+
 /**
  * Test fixture for FocusRowBehavior.
  * @constructor
@@ -13,14 +15,14 @@ GEN_INCLUDE(['//chrome/test/data/webui/polymer_interactive_ui_test.js']);
 function CrFocusRowBehaviorTest() {}
 
 CrFocusRowBehaviorTest.prototype = {
-  __proto__: PolymerInteractiveUITest.prototype,
+  __proto__: Polymer2DeprecatedInteractiveUITest.prototype,
 
   /** @override */
   browsePreload: 'chrome://resources/html/cr/ui/focus_row_behavior.html',
 
   /** @override */
   extraLibraries: [
-    ...PolymerTest.prototype.extraLibraries,
+    ...Polymer2DeprecatedTest.prototype.extraLibraries,
     '//ui/webui/resources/js/util.js',
     'cr_focus_row_behavior_test.js',
     'test_util.js',

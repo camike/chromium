@@ -26,6 +26,7 @@
 #include "chrome/test/base/android/android_browser_test.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -44,8 +45,7 @@ class ProfileDeleteMediaBrowserTest : public AndroidBrowserTest {
     base::ScopedAllowBlockingForTesting allow_blocking;
     EXPECT_TRUE(base::CreateDirectory(media_cache_path));
     std::string data = "foo";
-    base::WriteFile(media_cache_path.AppendASCII("foo"), data.c_str(),
-                    data.size());
+    base::WriteFile(media_cache_path.AppendASCII("foo"), data);
 
     AndroidBrowserTest::SetUp();
   }
@@ -95,7 +95,7 @@ class FileDestructionWatcher {
     // destroyed between the existence check and when we start watching, if the
     // order were reversed.
     EXPECT_TRUE(watcher_->Watch(
-        watched_file_path_, false /* recursive */,
+        watched_file_path_, base::FilePathWatcher::Type::kNonRecursive,
         base::BindRepeating(&FileDestructionWatcher::OnPathChanged,
                             base::Unretained(this))));
     CheckIfPathExists();

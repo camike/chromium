@@ -59,8 +59,7 @@ void URLFetcherImpl::SetReferrer(const std::string& referrer) {
   core_->SetReferrer(referrer);
 }
 
-void URLFetcherImpl::SetReferrerPolicy(
-    URLRequest::ReferrerPolicy referrer_policy) {
+void URLFetcherImpl::SetReferrerPolicy(ReferrerPolicy referrer_policy) {
   core_->SetReferrerPolicy(referrer_policy);
 }
 
@@ -76,13 +75,13 @@ int URLFetcherImpl::GetLoadFlags() const {
   return core_->GetLoadFlags();
 }
 
-void URLFetcherImpl::SetExtraRequestHeaders(
-    const std::string& extra_request_headers) {
-  core_->SetExtraRequestHeaders(extra_request_headers);
+void URLFetcherImpl::ClearExtraRequestHeaders() {
+  core_->ClearExtraRequestHeaders();
 }
 
-void URLFetcherImpl::AddExtraRequestHeader(const std::string& header_line) {
-  core_->AddExtraRequestHeader(header_line);
+void URLFetcherImpl::AddExtraRequestHeader(const std::string& name,
+                                           const std::string& value) {
+  core_->AddExtraRequestHeader(name, value);
 }
 
 void URLFetcherImpl::SetRequestContext(
@@ -178,8 +177,8 @@ const GURL& URLFetcherImpl::GetURL() const {
   return core_->GetURL();
 }
 
-const URLRequestStatus& URLFetcherImpl::GetStatus() const {
-  return core_->GetStatus();
+Error URLFetcherImpl::GetError() const {
+  return core_->GetError();
 }
 
 int URLFetcherImpl::GetResponseCode() const {

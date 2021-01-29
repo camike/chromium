@@ -32,8 +32,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_EXCEPTION_STATE_H_
 
 #include "base/macros.h"
+#include "base/notreached.h"
 #include "third_party/blink/renderer/platform/bindings/exception_code.h"
-#include "third_party/blink/renderer/platform/bindings/scoped_persistent.h"
+#include "third_party/blink/renderer/platform/bindings/trace_wrapper_v8_reference.h"
 #include "third_party/blink/renderer/platform/bindings/v8_throw_exception.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -59,6 +60,9 @@ class PLATFORM_EXPORT ExceptionState {
     kIndexedGetterContext,
     kIndexedSetterContext,
     kIndexedDeletionContext,
+    kNamedGetterContext,
+    kNamedSetterContext,
+    kNamedDeletionContext,
     kUnknownContext,  // FIXME: Remove this once we've flipped over to the new
                       // API.
   };
@@ -94,6 +98,9 @@ class PLATFORM_EXPORT ExceptionState {
       case kIndexedGetterContext:
       case kIndexedSetterContext:
       case kIndexedDeletionContext:
+      case kNamedGetterContext:
+      case kNamedSetterContext:
+      case kNamedDeletionContext:
         break;
       default:
         NOTREACHED();
@@ -183,7 +190,7 @@ class PLATFORM_EXPORT ExceptionState {
   const char* interface_name_;
   // The exception is empty when it was thrown through
   // DummyExceptionStateForTesting.
-  ScopedPersistent<v8::Value> exception_;
+  TraceWrapperV8Reference<v8::Value> exception_;
   v8::Isolate* isolate_;
 
   DISALLOW_COPY_AND_ASSIGN(ExceptionState);

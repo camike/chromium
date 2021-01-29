@@ -5,18 +5,21 @@
 #include "chrome/browser/signin/signin_ui_util.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
+#include "base/notreached.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/supports_user_data.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
@@ -28,6 +31,7 @@
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
+#include "components/signin/public/base/signin_metrics.h"
 #include "components/signin/public/base/signin_pref_names.h"
 #include "components/signin/public/identity_manager/account_info.h"
 #include "components/signin/public/identity_manager/accounts_in_cookie_jar_info.h"
@@ -38,7 +42,7 @@
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/text_elider.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #endif
 
@@ -136,6 +140,26 @@ void CreateDiceTurnSyncOnHelper(
 }
 #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 
+std::string GetReauthAccessPointHistogramSuffix(
+    signin_metrics::ReauthAccessPoint access_point) {
+  switch (access_point) {
+    case signin_metrics::ReauthAccessPoint::kUnknown:
+      NOTREACHED();
+      return std::string();
+    case signin_metrics::ReauthAccessPoint::kAutofillDropdown:
+      return "ToFillPassword";
+    case signin_metrics::ReauthAccessPoint::kPasswordSaveBubble:
+      return "ToSaveOrUpdatePassword";
+    case signin_metrics::ReauthAccessPoint::kPasswordSettings:
+      return "ToManageInSettings";
+    case signin_metrics::ReauthAccessPoint::kGeneratePasswordDropdown:
+    case signin_metrics::ReauthAccessPoint::kGeneratePasswordContextMenu:
+      return "ToGeneratePassword";
+    case signin_metrics::ReauthAccessPoint::kPasswordMoveBubble:
+      return "ToMovePassword";
+  }
+}
+
 }  // namespace
 
 namespace signin_ui_util {
@@ -146,14 +170,14 @@ base::string16 GetAuthenticatedUsername(Profile* profile) {
   auto* identity_manager = IdentityManagerFactory::GetForProfile(profile);
   if (identity_manager->HasPrimaryAccount()) {
     user_display_name = identity_manager->GetPrimaryAccountInfo().email;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     // See https://crbug.com/994798 for details.
     user_manager::User* user =
         chromeos::ProfileHelper::Get()->GetUserByProfile(profile);
     // |user| may be null in tests.
     if (user)
       user_display_name = user->GetDisplayEmail();
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
   }
 
   return base::UTF8ToUTF16(user_display_name);
@@ -176,10 +200,18 @@ void ShowSigninErrorLearnMorePage(Profile* profile) {
   Navigate(&params);
 }
 
-void EnableSyncFromPromo(Browser* browser,
-                         const AccountInfo& account,
-                         signin_metrics::AccessPoint access_point,
-                         bool is_default_promo_account) {
+void EnableSyncFromSingleAccountPromo(
+    Browser* browser,
+    const AccountInfo& account,
+    signin_metrics::AccessPoint access_point) {
+  EnableSyncFromMultiAccountPromo(browser, account, access_point,
+                                  /*is_default_promo_account=*/true);
+}
+
+void EnableSyncFromMultiAccountPromo(Browser* browser,
+                                     const AccountInfo& account,
+                                     signin_metrics::AccessPoint access_point,
+                                     bool is_default_promo_account) {
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
   internal::EnableSyncFromPromo(browser, account, access_point,
                                 is_default_promo_account,
@@ -216,7 +248,8 @@ void EnableSyncFromPromo(
   }
 
   if (account.IsEmpty()) {
-    chrome::ShowBrowserSignin(browser, access_point);
+    chrome::ShowBrowserSignin(browser, access_point,
+                              signin::ConsentLevel::kSync);
     return;
   }
 
@@ -415,6 +448,36 @@ void RecordProfileMenuClick(Profile* profile) {
   } else if (profile->IsIncognitoProfile()) {
     base::RecordAction(
         base::UserMetricsAction("ProfileMenu_ActionableItemClicked_Incognito"));
+  }
+}
+
+void RecordTransactionalReauthResult(
+    signin_metrics::ReauthAccessPoint access_point,
+    signin::ReauthResult result) {
+  const char kHistogramName[] = "Signin.TransactionalReauthResult";
+  base::UmaHistogramEnumeration(kHistogramName, result);
+
+  std::string access_point_suffix =
+      GetReauthAccessPointHistogramSuffix(access_point);
+  if (!access_point_suffix.empty()) {
+    std::string suffixed_histogram_name =
+        base::StrCat({kHistogramName, ".", access_point_suffix});
+    base::UmaHistogramEnumeration(suffixed_histogram_name, result);
+  }
+}
+
+void RecordTransactionalReauthUserAction(
+    signin_metrics::ReauthAccessPoint access_point,
+    SigninReauthViewController::UserAction user_action) {
+  const char kHistogramName[] = "Signin.TransactionalReauthUserAction";
+  base::UmaHistogramEnumeration(kHistogramName, user_action);
+
+  std::string access_point_suffix =
+      GetReauthAccessPointHistogramSuffix(access_point);
+  if (!access_point_suffix.empty()) {
+    std::string suffixed_histogram_name =
+        base::StrCat({kHistogramName, ".", access_point_suffix});
+    base::UmaHistogramEnumeration(suffixed_histogram_name, user_action);
   }
 }
 

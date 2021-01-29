@@ -4,7 +4,7 @@
 
 #include "content/public/browser/media_session.h"
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/optional.h"
 #include "base/run_loop.h"
@@ -12,11 +12,13 @@
 #include "base/synchronization/lock.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
-#include "content/browser/frame_host/render_frame_host_impl.h"
+#include "build/chromeos_buildflags.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/content_features.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -246,7 +248,15 @@ IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTestWithoutInternalMediaSession,
   EXPECT_TRUE(IsPlaying(shell(), "long-video"));
 }
 
-IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest, SimplePlayPause) {
+// Flaky on Linux and Android and Mac. http://crbug.com/1157239,
+// http://crbug.com/1157319
+#if defined(OS_LINUX) || defined(OS_ANDROID) || defined(OS_MAC) || \
+    defined(OS_CHROMEOS)
+#define MAYBE_SimplePlayPause DISABLED_SimplePlayPause
+#else
+#define MAYBE_SimplePlayPause SimplePlayPause
+#endif
+IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest, MAYBE_SimplePlayPause) {
   EXPECT_TRUE(NavigateToURL(shell(),
                             GetTestUrl("media/session", "media-session.html")));
 
@@ -264,7 +274,17 @@ IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest, SimplePlayPause) {
   EXPECT_TRUE(IsPlaying(shell(), "long-video"));
 }
 
-IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest, MultiplePlayersPlayPause) {
+// Flaky on Linux and Android. http://crbug.com/1157239,
+// http://crbug.com/1157319
+// TODO(crbug.com/1052397): Revisit once build flag switch of lacros-chrome is
+// complete.
+#if (defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)) || defined(OS_ANDROID)
+#define MAYBE_MultiplePlayersPlayPause DISABLED_MultiplePlayersPlayPause
+#else
+#define MAYBE_MultiplePlayersPlayPause MultiplePlayersPlayPause
+#endif
+IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest,
+                       MAYBE_MultiplePlayersPlayPause) {
   EXPECT_TRUE(NavigateToURL(shell(),
                             GetTestUrl("media/session", "media-session.html")));
 
@@ -286,7 +306,7 @@ IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest, MultiplePlayersPlayPause) {
 }
 
 // Flaky on Mac. See https://crbug.com/980663
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #define MAYBE_WebContents_Muted DISABLED_WebContents_Muted
 #else
 #define MAYBE_WebContents_Muted WebContents_Muted
@@ -316,7 +336,10 @@ IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest, MAYBE_WebContents_Muted) {
 
 #if !defined(OS_ANDROID)
 // On Android, System Audio Focus would break this test.
-IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest, MultipleTabsPlayPause) {
+
+// Flaky: http://crbug.com/1157263
+IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest,
+                       DISABLED_MultipleTabsPlayPause) {
   Shell* other_shell = CreateBrowser();
 
   EXPECT_TRUE(NavigateToURL(shell(),

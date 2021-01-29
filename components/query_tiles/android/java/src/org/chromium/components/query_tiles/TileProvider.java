@@ -4,8 +4,6 @@
 
 package org.chromium.components.query_tiles;
 
-import android.graphics.Bitmap;
-
 import org.chromium.base.Callback;
 
 import java.util.List;
@@ -16,17 +14,17 @@ import java.util.List;
  */
 public interface TileProvider {
     /**
-     * Called to retrieve all the tiles.
+     * Called to retrieve all the subtiles for a parent tile with the given Id. If the Id is null,
+     * all top level tiles will be returned.
+     * @param tileId ID of the parent tile. If null, all top level tiles will be returned.
      * @param callback The {@link Callback} to be notified on completion. Returns an empty list if
      *         no tiles are found.
      */
-    void getQueryTiles(Callback<List<QueryTile>> callback);
+    void getQueryTiles(String tileId, Callback<List<QueryTile>> callback);
 
     /**
-     * Called to retrieve visuals for the given tile id.
-     * @param id The ID for a given tile.
-     * @param callback The {@link Callback} to be run after fetching the thumbnail. Returns null if
-     *         no visuals were found.
+     * Called when a tile is clicked.
+     * @param tildId ID of the tile.
      */
-    void getVisuals(String id, Callback<List<Bitmap>> callback);
+    void onTileClicked(String tileId);
 }

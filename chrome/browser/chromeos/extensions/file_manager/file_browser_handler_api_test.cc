@@ -26,6 +26,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/browser/api_test_utils.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/common/extension.h"
@@ -181,8 +182,7 @@ class FileBrowserHandlerExtensionTest : public extensions::ExtensionApiTest {
   // Creates new, test mount point.
   void AddTmpMountPoint(const std::string& extension_id) {
     BrowserContext::GetMountPoints(browser()->profile())
-        ->RegisterFileSystem("tmp",
-                             storage::kFileSystemTypeNativeLocal,
+        ->RegisterFileSystem("tmp", storage::kFileSystemTypeLocal,
                              storage::FileSystemMountOption(),
                              tmp_mount_point_);
   }

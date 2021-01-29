@@ -6,8 +6,10 @@
 #define SERVICES_NETWORK_TEST_TEST_NETWORK_CONTEXT_CLIENT_H_
 
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
+#include "services/network/public/cpp/network_service_buildflags.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 
 namespace network {
@@ -26,6 +28,9 @@ class TestNetworkContextClient : public network::mojom::NetworkContextClient {
   }
   void set_ignore_last_upload_file(bool ignore_last_upload_file) {
     ignore_last_upload_file_ = ignore_last_upload_file;
+  }
+  void set_ignore_certificate_errors(bool ignore_certificate_errors) {
+    ignore_certificate_errors_ = ignore_certificate_errors;
   }
 
   void OnAuthRequired(const base::Optional<base::UnguessableToken>& window_id,
@@ -52,7 +57,7 @@ class TestNetworkContextClient : public network::mojom::NetworkContextClient {
                              int net_error,
                              const net::SSLInfo& ssl_info,
                              bool fatal,
-                             OnSSLCertificateErrorCallback response) override {}
+                             OnSSLCertificateErrorCallback response) override;
   void OnFileUploadRequested(int32_t process_id,
                              bool async,
                              const std::vector<base::FilePath>& file_paths,
@@ -69,22 +74,6 @@ class TestNetworkContextClient : public network::mojom::NetworkContextClient {
                        const std::string& header_value,
                        int32_t load_flags,
                        OnClearSiteDataCallback callback) override {}
-  void OnCookiesChanged(
-      bool is_service_worker,
-      int32_t process_id,
-      int32_t routing_id,
-      const GURL& url,
-      const net::SiteForCookies& site_for_cookies,
-      const std::vector<net::CookieWithStatus>& cookie_list,
-      const base::Optional<std::string>& devtools_request_id) override {}
-  void OnCookiesRead(
-      bool is_service_worker,
-      int32_t process_id,
-      int32_t routing_id,
-      const GURL& url,
-      const net::SiteForCookies& site_for_cookies,
-      const std::vector<net::CookieWithStatus>& cookie_list,
-      const base::Optional<std::string>& devtools_request_id) override {}
 #if defined(OS_ANDROID)
   void OnGenerateHttpNegotiateAuthToken(
       const std::string& server_auth_token,
@@ -93,14 +82,20 @@ class TestNetworkContextClient : public network::mojom::NetworkContextClient {
       const std::string& spn,
       OnGenerateHttpNegotiateAuthTokenCallback callback) override {}
 #endif
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   void OnTrustAnchorUsed() override {}
 #endif
+#if BUILDFLAG(IS_CT_SUPPORTED)
+#endif
+  void OnTrustTokenIssuanceDivertedToSystem(
+      mojom::FulfillTrustTokenIssuanceRequestPtr request,
+      OnTrustTokenIssuanceDivertedToSystemCallback callback) override {}
 
  private:
   mojo::Receiver<mojom::NetworkContextClient> receiver_;
   bool upload_files_invalid_ = false;
   bool ignore_last_upload_file_ = false;
+  bool ignore_certificate_errors_ = false;
 };
 
 }  // namespace network

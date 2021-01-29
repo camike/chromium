@@ -10,9 +10,9 @@
 #include "base/mac/bundle_locations.h"
 #import "base/mac/scoped_nsobject.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/task/current_thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process_impl.h"
 #include "chrome/browser/first_run/first_run.h"
@@ -38,7 +38,7 @@ class FirstRunShowBridge : public base::RefCounted<FirstRunShowBridge> {
  public:
   FirstRunShowBridge(FirstRunDialogController* controller);
 
-  void ShowDialog(const base::Closure& quit_closure);
+  void ShowDialog(base::OnceClosure quit_closure);
 
  private:
   friend class base::RefCounted<FirstRunShowBridge>;
@@ -52,12 +52,12 @@ FirstRunShowBridge::FirstRunShowBridge(
     FirstRunDialogController* controller) : controller_(controller) {
 }
 
-void FirstRunShowBridge::ShowDialog(const base::Closure& quit_closure) {
+void FirstRunShowBridge::ShowDialog(base::OnceClosure quit_closure) {
   // Proceeding past the modal dialog requires user interaction. Allow nested
   // tasks to run so that signal handlers operate correctly.
-  base::MessageLoopCurrent::ScopedNestableTaskAllower allow_nested;
+  base::CurrentThread::ScopedNestableTaskAllower allow_nested;
   [controller_ show];
-  quit_closure.Run();
+  std::move(quit_closure).Run();
 }
 
 FirstRunShowBridge::~FirstRunShowBridge() {}

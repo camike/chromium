@@ -1,3 +1,11 @@
+# This file lists a limited set of web tests that are run on platforms where
+# executing all web tests is infeasible (usually due to performance or resource
+# constraints). As of Q1 2021, only Fuchsia uses this file by default (of
+# platforms that run web tests).
+#
+# Further documentation:
+# https://chromium.googlesource.com/chromium/src/+/master/docs/testing/web_test_expectations.md
+
 accessibility/aria-labelledby-on-input.html
 accessibility/aria-link-supports-press.html
 accessibility/insert-adjacent-html-causes-crash.xhtml
@@ -41,9 +49,6 @@ crypto/subtle/importKey-badParameters.html
 css1/units/rounding.html
 css3/blending/isolation-parsing.html
 css3/calc/reflection-computed-style.html
-css3/device-adapt/viewport-initial-width-zero.html
-css3/device-adapt/viewport-insert-rule-after.html
-css3/device-adapt/viewport-insert-rule-before.html
 css3/filters/crash-hw-sw-switch.html
 css3/flexbox/assert-generated-new-flexbox.html
 css3/fonts/font-feature-settings-parsing-prefixed.html
@@ -63,7 +68,6 @@ css3/supports-crash.html
 css-parser/color-escape-parsing.html
 css-parser/font-size-adjust.html
 custom-elements/array-squat-crash.html
-custom-elements/imports/upgrade-order.html
 custom-elements/spec/state-failed-create.html
 dom/attr/parent-adopt-node.html
 dom/comment/remove.html
@@ -86,7 +90,7 @@ editing/deleting/2610675-3.html
 editing/editability/empty-document-delete.html
 editing/editability/empty-document-justify-right.html
 editing/editability/empty-document-stylewithcss.html
-editing/execCommand/5190926.html
+editing/execCommand/insert_list_with_underline.html
 editing/execCommand/apply_style/justify_full_without_body_crash.html
 editing/execCommand/indent-second-paragraph-in-blockquote.html
 editing/input/set-value-on-input-and-type-input.html
@@ -94,17 +98,13 @@ editing/inserting/5156401-2.html
 editing/inserting/5685601-2.html
 editing/pasteboard/drag-prioritizes-draggable-container-over-image.html
 editing/pasteboard/drop-text-without-selection.html
-editing/pasteboard/paste-line-endings-001.html
-editing/pasteboard/paste-line-endings-002.html
-editing/pasteboard/paste-line-endings-003.html
-editing/pasteboard/paste-line-endings-004.html
-editing/pasteboard/paste-line-endings-005.html
+editing/pasteboard/paste_line_endings_2.html
 editing/pasteboard/paste-text-016.html
 editing/pasteboard/pasting-empty-html-falls-back-to-text.html
 editing/selection/select_all/select_all_in_contenteditable.html
 editing/selection/4402375.html
 editing/selection/5794920-1.html
-editing/selection/6476.html
+editing/selection/caret_at_soft_line_break.html
 editing/selection/collapse/collapse_before_select.html
 editing/selection/leave-requested-block.html
 editing/selection/modify_move/move-by-character-001.html
@@ -115,7 +115,6 @@ editing/selection/select_all/select_all_overflow_hidden_table.html
 editing/selection/selection-forces-unrooted-repaint.html
 editing/selection/set_base_and_extent/set_base_and_extent_uneditable_table.html
 editing/shadow/505092-fieldset-is-not-ua-shadow-crash.html
-editing/shadow/delete-characters-in-distributed-node-crash.html
 editing/shadow/getRangeAt-end-of-text-node.html
 editing/style/apply-style-atomic.html
 editing/style/block-styles-007.html
@@ -407,14 +406,11 @@ fast/box-sizing/css-table-collapse.html
 fast/box-sizing/table-no-collapse.html
 fast/canvas/alpha.html
 fast/canvas/canvas-set-font-with-updated-style.html
-fast/canvas/bug535171.html
 fast/canvas/canvas-hides-fallback.html
 fast/canvas/color-space/imageData-colorSpace.html
 fast/canvas/feimage-with-foreignobject-taint-canvas-2.html
 fast/canvas/imagebitmap/transferFromImageBitmap-drawImage.html
 fast/canvas/script-inside-canvas-fallback.html
-fast/canvas-api/unclosed-canvas-1.html
-fast/canvas-api/unclosed-canvas-2.html
 fast/constructors/blob-sparse-array-assertion-failure.html
 fast/constructors/constructor-as-function-crash.html
 fast/cpu/hardware-concurrency.html
@@ -574,7 +570,6 @@ fast/forms/url/url-sanitize-user-input.html
 fast/forms/week-multiple-fields/week-multiple-fields-no-shadow-event.html
 fast/forms/week/ValidityState-rangeOverflow-week.html
 fast/forms/week/week-setrangetext.html
-fast/frames/viewsource/viewsource-5.html
 fast/gradients/crash-on-tr.html
 fast/harness/check-layout-error-no-attributes.html
 fast/harness/override-preferences-2.html
@@ -593,10 +588,6 @@ fast/html/adjacent-html-context-element.html
 fast/html/crash-style-first-letter.html
 fast/html/empty-fragment-id-goto-top.html
 fast/html/font-face-empty-should-not-crash.html
-fast/html/imports/import-insert-domcontentloaded.html
-fast/html/imports/import-link-with-media-query.html
-fast/html/imports/import-same-url.html
-fast/html/imports/no-browsing-context.html
 fast/html/process-end-tag-for-inbody-crash.html
 fast/html/tabindex-removal.html
 fast/inline-block/14498-positionForCoordinates.html
@@ -719,7 +710,6 @@ fast/replaced/selection-rect-transform.html
 fast/ruby/add-text-to-block-ruby-with-after-pseudo-crash.html
 fast/ruby/before-block-doesnt-crash.html
 fast/ruby/parse-rp.html
-fast/scroll-behavior/scroll-customization/scrollstate-consume-deltas-throw.html
 fast/scrolling/scroll-without-document-element-renderer.html
 fast/scrolling/scrollable-area-overflow-auto-display-none.html
 fast/scrolling/scrollable-area-overflow-auto-display-none-in-parent.html
@@ -731,8 +721,6 @@ fast/shapes/crash-caused-by-dirtying-a-shape-while-computing-it-requires-a-long-
 fast/shapes/parsing/parsing-shape-property-aliases.html
 fast/shapes/shape-outside-floats/shape-outside-floats-ellipse-margin-right.html
 fast/shapes/shape-outside-floats/shape-outside-negative-height-crash-width.html
-fast/speech/scripted/speechrecognition-re-restart.html
-fast/speech/scripted/speechrecognition-restart-onend.html
 fast/speechsynthesis/speech-synthesis-cancel.html
 fast/speechsynthesis/speech-synthesis-utterance-basics.html
 fast/speechsynthesis/speech-synthesis-voices-changed.html
@@ -776,7 +764,6 @@ fast/xsl/xslt-fragment-in-empty-doc.html
 fragmentation/margin-top-at-top-of-fragmentainer.html
 fullscreen/full-screen-inline-split-crash.html
 fullscreen/full-screen-request-rejected.html
-geolocation-api/enabled.html
 harness-tests/wpt/console_logging.html
 hittesting/border-hittest-inlineFlowBox.html
 hittesting/hittest-inline-block-with-abspos.html
@@ -806,8 +793,6 @@ http/tests/eventsource/existent-eventsource-status-error-iframe-crash.html
 http/tests/eventsource/workers/eventsource-simple.html
 http/tests/fetch/chromium/discarded-window.html
 http/tests/history/cross-origin-replace-history-object.html
-http/tests/htmlimports/csp-block-import.html
-http/tests/htmlimports/csp-not-block-import-in-import.html
 http/tests/linkHeader/link-header-no-crash-space-invalid.php
 http/tests/loading/remove-child-triggers-parser.html
 http/tests/local/formdata/send-form-data-with-null-string.html
@@ -818,7 +803,6 @@ http/tests/preload/avoid_delaying_onload_link_preload.html
 http/tests/security/local-JavaScript-from-remote.html
 http/tests/security/no-javascript-refresh.php
 http/tests/shapes/crash-image-changed-during-layout.html
-http/tests/streams/chromium/get-reader-byob.html
 http/tests/uri/escaped-entity.html
 http/tests/uri/resolve-encoding-relative.html
 http/tests/uri/utf8-path.html
@@ -861,7 +845,6 @@ plugins/instance-available-before-stylesheets-loaded.html
 pointer-lock/lock-already-locked.html
 pointer-lock/mouse-event-api.html
 pointer-lock/pointerlockelement-null-when-pending.html
-presentation/presentationconnectionavailableevent-ctor-mock.html
 printing/css2.1/page-break-after-000.html
 printing/css2.1/page-break-before-001.html
 screen_orientation/screenorientation-api.html
@@ -875,11 +858,6 @@ security/lazy-event-listener.html
 security/set-form-autocomplete-attribute.html
 shadow-dom/crashes/slots-nested-in-document-tree-crash.html
 shadow-dom/css-cascade-outer-scope2.html
-shadow-dom/slotted-pseudo-element-in-v0-tree-crash.html
-shadow-dom/v0/event-composed-path-closed-shadowroot2.html
-shadow-dom/v0/get-destination-insertion-points.html
-shadow-dom/v0/pointer-lock-in-shadow3.html
-shadow-dom/v0/slots-api-in-v0.html
 storage/domstorage/localstorage/delete-removal.html
 storage/domstorage/localstorage/simple-usage.html
 storage/domstorage/localstorage/string-conversion.html
@@ -1002,8 +980,11 @@ webaudio/PeriodicWave/periodicwave-exceptions.html
 webaudio/ScriptProcessor/scriptprocessornode-0-output-channels.html
 webaudio/ScriptProcessor/scriptprocessornode-downmix8-2channel-input.html
 webaudio/WaveShaper/waveshaper-364379.html
-webexposed/custom-elements.html
 webexposed/internal-properties-should-not-be-exposed.html
 webexposed/permissions-attribute.html
 webexposed/web-animations-api.html
-webmidi/permission.html
+wpt_internal/geolocation-api/enabled.html
+wpt_internal/presentation/presentationconnectionavailableevent-ctor-mock.html
+wpt_internal/webmidi/permission.html
+wpt_internal/speech/scripted/speechrecognition-re-restart.html
+wpt_internal/speech/scripted/speechrecognition-restart-onend.html

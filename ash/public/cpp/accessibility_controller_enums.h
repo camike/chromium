@@ -83,6 +83,27 @@ enum class SelectToSpeakState {
   kSelectToSpeakStateSpeaking,
 };
 
+enum class SelectToSpeakPanelAction {
+  // No action.
+  kNone,
+  // Navigate to previous paragraph/block.
+  kPreviousParagraph,
+  // Navigate to previous sentence.
+  kPreviousSentence,
+  // Pause text-to-speech.
+  kPause,
+  // Resumes text-to-speech.
+  kResume,
+  // Navigate to next sentence.
+  kNextSentence,
+  // Navigate to next paragraph/block.
+  kNextParagraph,
+  // Exit Select-to-speak.
+  kExit,
+  // Change reading speed.
+  kChangeSpeed,
+};
+
 enum class SwitchAccessCommand {
   // Do not perform a command.
   kNone,
@@ -92,6 +113,19 @@ enum class SwitchAccessCommand {
   kNext,
   // Command to move focus to the previous element.
   kPrevious,
+};
+
+enum class MagnifierCommand {
+  // Stop moving magnifier viewport.
+  kMoveStop,
+  // Command to move magnifier viewport up.
+  kMoveUp,
+  // Command to move magnifier viewport down.
+  kMoveDown,
+  // Command to move magnifier viewport left.
+  kMoveLeft,
+  // Command to move magnifier viewport right.
+  kMoveRight,
 };
 
 // The type of mouse event the Automatic Clicks feature should perform when
@@ -142,6 +176,24 @@ enum class FloatingMenuPosition {
   // or the bottom right in RTL languages. Once the user explicitly picks
   // a position it will no longer change with language direction.
   kSystemDefault,
+};
+
+// Mouse panning mode for magnifier. This indicates the way the magnified
+// viewport is panned as the mouse is moved across the screen. These values are
+// written to prefs so they should not be changed. New values should be added at
+// the end.
+enum class MagnifierMousePanningMode {
+  // Default value, indicates no mouse panning mode chosen.
+  kNone,
+
+  // Continuous panning mode.
+  kContinuous,
+
+  // Centered panning mode.
+  kCentered,
+
+  // Edge panning mode.
+  kEdge,
 };
 
 }  // namespace ash

@@ -7,6 +7,7 @@
 #include "base/test/trace_event_analyzer.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/ukm/test_ukm_recorder.h"
+#include "content/public/test/browser_test.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 
 using ukm::TestUkmRecorder;
@@ -60,7 +61,9 @@ IN_PROC_BROWSER_TEST_F(TotalInputDelayIntegrationTest, NoInputEvent) {
       PageLoad::kInteractiveTiming_TotalAdjustedInputDelayName, int64_t(0), 0);
 }
 
-IN_PROC_BROWSER_TEST_F(TotalInputDelayIntegrationTest, MultipleInputEvents) {
+// Flaky: crbug.com/1163677
+IN_PROC_BROWSER_TEST_F(TotalInputDelayIntegrationTest,
+                       DISABLED_MultipleInputEvents) {
   LoadHTML(R"HTML(
     <p>Sample website</p>
   )HTML");

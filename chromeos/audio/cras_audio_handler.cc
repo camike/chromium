@@ -14,8 +14,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/feature_list.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
@@ -96,6 +95,9 @@ void CrasAudioHandler::AudioObserver::OnHotwordTriggered(
 void CrasAudioHandler::AudioObserver::OnBluetoothBatteryChanged(
     const std::string& /* address */,
     uint32_t /* level */) {}
+
+void CrasAudioHandler::AudioObserver::
+    OnNumberOfInputStreamsWithPermissionChanged() {}
 
 void CrasAudioHandler::AudioObserver::OnOutputStarted() {}
 
@@ -234,7 +236,17 @@ void CrasAudioHandler::OnVideoCaptureStoppedOnMainThread(
   // Switch to front mic properly.
   DeviceActivateType activated_by =
       HasExternalDevice(true) ? ACTIVATE_BY_USER : ACTIVATE_BY_PRIORITY;
-  SwitchToDevice(*GetDeviceByType(AUDIO_TYPE_FRONT_MIC), true, activated_by);
+  SwitchToDevice(*GetDeviceByType(AudioDeviceType::kFrontMic), true,
+                 activated_by);
+}
+
+void CrasAudioHandler::HandleMediaSessionMetadataReset() {
+  const std::map<std::string, std::string> empty_metadata_map = {
+      {"title", ""}, {"artist", ""}, {"album", ""}};
+
+  CrasAudioClient::Get()->SetPlayerMetadata(empty_metadata_map);
+  CrasAudioClient::Get()->SetPlayerIdentity("");
+  CrasAudioClient::Get()->SetPlayerPlaybackStatus("stopped");
 }
 
 void CrasAudioHandler::MediaSessionInfoChanged(
@@ -262,8 +274,10 @@ void CrasAudioHandler::MediaSessionInfoChanged(
 
 void CrasAudioHandler::MediaSessionMetadataChanged(
     const base::Optional<media_session::MediaMetadata>& metadata) {
-  if (!metadata || metadata->IsEmpty())
+  if (!metadata || metadata->IsEmpty()) {
+    HandleMediaSessionMetadataReset();
     return;
+  }
 
   const std::map<std::string, std::string> metadata_map = {
       {"title", base::UTF16ToUTF8(metadata->title)},
@@ -405,6 +419,11 @@ const AudioDevice* CrasAudioHandler::GetDeviceByType(AudioDeviceType type) {
   return nullptr;
 }
 
+base::flat_map<CrasAudioHandler::ClientType, uint32_t>
+CrasAudioHandler::GetNumberOfInputStreamsWithPermission() const {
+  return number_of_input_streams_with_permission_;
+}
+
 void CrasAudioHandler::GetDefaultOutputBufferSize(int32_t* buffer_size) const {
   *buffer_size = default_output_buffer_size_;
 }
@@ -534,7 +553,7 @@ void CrasAudioHandler::SetHotwordModel(uint64_t node_id,
 void CrasAudioHandler::SwapInternalSpeakerLeftRightChannel(bool swap) {
   for (const auto& item : audio_devices_) {
     const AudioDevice& device = item.second;
-    if (!device.is_input && device.type == AUDIO_TYPE_INTERNAL_SPEAKER) {
+    if (!device.is_input && device.type == AudioDeviceType::kInternalSpeaker) {
       CrasAudioClient::Get()->SwapLeftRight(device.id, swap);
       break;
     }
@@ -848,6 +867,17 @@ void CrasAudioHandler::BluetoothBatteryChanged(const std::string& address,
     observer.OnBluetoothBatteryChanged(address, level);
 }
 
+void CrasAudioHandler::NumberOfInputStreamsWithPermissionChanged(
+    const base::flat_map<std::string, uint32_t>& num_input_streams) {
+  HandleGetNumberOfInputStreamsWithPermission(num_input_streams);
+  for (auto& observer : observers_)
+    observer.OnNumberOfInputStreamsWithPermissionChanged();
+}
+
+void CrasAudioHandler::ResendBluetoothBattery() {
+  CrasAudioClient::Get()->ResendBluetoothBattery();
+}
+
 void CrasAudioHandler::OnAudioPolicyPrefChanged() {
   ApplyAudioPolicy();
 }
@@ -857,6 +887,15 @@ const AudioDevice* CrasAudioHandler::GetDeviceFromId(uint64_t device_id) const {
   if (it == audio_devices_.end())
     return nullptr;
   return &it->second;
+}
+
+AudioDevice CrasAudioHandler::ConvertAudioNodeWithModifiedPriority(
+    const AudioNode& node) {
+  AudioDevice device(node);
+  if (deprioritize_bt_wbs_mic_ && device.is_input &&
+      (device.type == AudioDeviceType::kBluetooth))
+    device.priority = 0;
+  return device;
 }
 
 const AudioDevice* CrasAudioHandler::GetDeviceFromStableDeviceId(
@@ -872,7 +911,7 @@ const AudioDevice* CrasAudioHandler::GetDeviceFromStableDeviceId(
 const AudioDevice* CrasAudioHandler::GetKeyboardMic() const {
   for (const auto& item : audio_devices_) {
     const AudioDevice& device = item.second;
-    if (device.is_input && device.type == AUDIO_TYPE_KEYBOARD_MIC)
+    if (device.is_input && device.type == AudioDeviceType::kKeyboardMic)
       return &device;
   }
   return nullptr;
@@ -881,7 +920,7 @@ const AudioDevice* CrasAudioHandler::GetKeyboardMic() const {
 const AudioDevice* CrasAudioHandler::GetHotwordDevice() const {
   for (const auto& item : audio_devices_) {
     const AudioDevice& device = item.second;
-    if (device.is_input && device.type == AUDIO_TYPE_HOTWORD)
+    if (device.is_input && device.type == AudioDeviceType::kHotword)
       return &device;
   }
   return nullptr;
@@ -899,8 +938,8 @@ void CrasAudioHandler::SetupAudioInputState() {
   VLOG(1) << "SetupAudioInputState for active device id="
           << "0x" << std::hex << device->id << " mute=" << input_mute_on_;
   SetInputMuteInternal(input_mute_on_);
-  // TODO(rkc,jennyz): Set input gain once we decide on how to store
-  // the gain values since the range and step are both device specific.
+
+  SetInputNodeGain(active_input_node_id_, input_gain_);
 }
 
 void CrasAudioHandler::SetupAudioOutputState() {
@@ -982,10 +1021,19 @@ void CrasAudioHandler::InitializeAudioAfterCrasServiceAvailable(
   GetSystemAecGroupId();
   GetNodes();
   GetNumberOfOutputStreams();
+  GetNumberOfInputStreamsWithPermissionInternal();
   CrasAudioClient::Get()->SetFixA2dpPacketSize(base::FeatureList::IsEnabled(
       chromeos::features::kBluetoothFixA2dpPacketSize));
-  CrasAudioClient::Get()->SetNextHandsfreeProfile(base::FeatureList::IsEnabled(
-      chromeos::features::kBluetoothNextHandsfreeProfile));
+
+  // When the BluetoothWbsDogfood feature flag is enabled, don't bother
+  // calling GetDeprioritizeBtWbsMic().
+  // Otherwise override the Bluetooth WBS mic's priority according to the
+  // |deprioritize_bt_wbs_mic| value returned by CRAS.
+  if (!base::FeatureList::IsEnabled(chromeos::features::kBluetoothWbsDogfood)) {
+    CrasAudioClient::Get()->GetDeprioritizeBtWbsMic(
+        base::BindOnce(&CrasAudioHandler::HandleGetDeprioritizeBtWbsMic,
+                       weak_ptr_factory_.GetWeakPtr()));
+  }
 }
 
 void CrasAudioHandler::ApplyAudioPolicy() {
@@ -1165,7 +1213,7 @@ bool CrasAudioHandler::HasDeviceChange(const AudioNodeList& new_nodes,
     if (is_input != node.is_input)
       continue;
     // Check if the new device is not in the old device list.
-    AudioDevice device(node);
+    AudioDevice device = ConvertAudioNodeWithModifiedPriority(node);
     DeviceStatus status = CheckDeviceStatus(device);
     if (status == NEW_DEVICE)
       new_discovered->push(device);
@@ -1263,7 +1311,7 @@ bool CrasAudioHandler::GetActiveDeviceFromUserPref(bool is_input,
     // This is an odd case which is rare but possible to happen during cras
     // initialization depeneding the audio device enumation process. The only
     // audio node coming from cras is an internal audio device not visible
-    // to user, such as AUDIO_TYPE_POST_MIX_LOOPBACK.
+    // to user, such as AudioDeviceType::kPostMixLoopback.
     return false;
   }
 
@@ -1330,8 +1378,8 @@ void CrasAudioHandler::HandleHotPlugDevice(
 
   // Whenever 35mm headphone or mic is hot plugged, always pick it as the active
   // device.
-  if (hotplug_device.type == AUDIO_TYPE_HEADPHONE ||
-      hotplug_device.type == AUDIO_TYPE_MIC) {
+  if (hotplug_device.type == AudioDeviceType::kHeadphone ||
+      hotplug_device.type == AudioDeviceType::kMic) {
     SwitchToDevice(hotplug_device, true, ACTIVATE_BY_PRIORITY);
     return;
   }
@@ -1467,7 +1515,7 @@ void CrasAudioHandler::UpdateDevicesAndSwitchActive(
   size_t new_output_device_size = 0;
   size_t new_input_device_size = 0;
   for (size_t i = 0; i < nodes.size(); ++i) {
-    AudioDevice device(nodes[i]);
+    AudioDevice device = ConvertAudioNodeWithModifiedPriority(nodes[i]);
     audio_devices_[device.id] = device;
     if (!has_alternative_input_ && device.is_input &&
         device.IsExternalDevice()) {
@@ -1574,6 +1622,15 @@ void CrasAudioHandler::HandleGetNumActiveOutputStreams(
   num_active_output_streams_ = *new_output_streams_count;
 }
 
+void CrasAudioHandler::HandleGetDeprioritizeBtWbsMic(
+    base::Optional<bool> deprioritize_bt_wbs_mic) {
+  if (!deprioritize_bt_wbs_mic.has_value()) {
+    LOG(ERROR) << "Failed to retrieve WBS mic deprioritized flag";
+    return;
+  }
+  deprioritize_bt_wbs_mic_ = *deprioritize_bt_wbs_mic;
+}
+
 void CrasAudioHandler::AddAdditionalActiveNode(uint64_t node_id, bool notify) {
   const AudioDevice* device = GetDeviceFromId(node_id);
   if (!device) {
@@ -1638,7 +1695,7 @@ void CrasAudioHandler::UpdateAudioAfterHDMIRediscoverGracePeriod() {
 
 bool CrasAudioHandler::IsHDMIPrimaryOutputDevice() const {
   const AudioDevice* device = GetDeviceFromId(active_output_node_id_);
-  return device && device->type == AUDIO_TYPE_HDMI;
+  return device && device->type == AudioDeviceType::kHdmi;
 }
 
 void CrasAudioHandler::StartHDMIRediscoverGracePeriod() {
@@ -1686,7 +1743,7 @@ void CrasAudioHandler::SwitchToFrontOrRearMic() {
   if (IsCameraOn()) {
     ActivateInternalMicForActiveCamera();
   } else {
-    SwitchToDevice(*GetDeviceByType(AUDIO_TYPE_FRONT_MIC), true,
+    SwitchToDevice(*GetDeviceByType(AudioDeviceType::kFrontMic), true,
                    ACTIVATE_BY_USER);
   }
 }
@@ -1695,9 +1752,9 @@ const AudioDevice* CrasAudioHandler::GetMicForCamera(
     media::VideoFacingMode camera_facing) {
   switch (camera_facing) {
     case media::MEDIA_VIDEO_FACING_USER:
-      return GetDeviceByType(AUDIO_TYPE_FRONT_MIC);
+      return GetDeviceByType(AudioDeviceType::kFrontMic);
     case media::MEDIA_VIDEO_FACING_ENVIRONMENT:
-      return GetDeviceByType(AUDIO_TYPE_REAR_MIC);
+      return GetDeviceByType(AudioDeviceType::kRearMic);
     default:
       NOTREACHED();
   }
@@ -1709,9 +1766,9 @@ bool CrasAudioHandler::HasDualInternalMic() const {
   bool has_rear_mic = false;
   for (const auto& item : audio_devices_) {
     const AudioDevice& device = item.second;
-    if (device.type == AUDIO_TYPE_FRONT_MIC)
+    if (device.type == AudioDeviceType::kFrontMic)
       has_front_mic = true;
-    else if (device.type == AUDIO_TYPE_REAR_MIC)
+    else if (device.type == AudioDeviceType::kRearMic)
       has_rear_mic = true;
     if (has_front_mic && has_rear_mic)
       break;
@@ -1720,8 +1777,8 @@ bool CrasAudioHandler::HasDualInternalMic() const {
 }
 
 bool CrasAudioHandler::IsFrontOrRearMic(const AudioDevice& device) const {
-  return device.is_input && (device.type == AUDIO_TYPE_FRONT_MIC ||
-                             device.type == AUDIO_TYPE_REAR_MIC);
+  return device.is_input && (device.type == AudioDeviceType::kFrontMic ||
+                             device.type == AudioDeviceType::kRearMic);
 }
 
 bool CrasAudioHandler::IsCameraOn() const {
@@ -1735,6 +1792,41 @@ bool CrasAudioHandler::HasExternalDevice(bool is_input) const {
       return true;
   }
   return false;
+}
+
+void CrasAudioHandler::GetNumberOfInputStreamsWithPermissionInternal() {
+  CrasAudioClient::Get()->GetNumberOfInputStreamsWithPermission(base::BindOnce(
+      &CrasAudioHandler::HandleGetNumberOfInputStreamsWithPermission,
+      weak_ptr_factory_.GetWeakPtr()));
+}
+
+// static
+CrasAudioHandler::ClientType CrasAudioHandler::ConvertClientTypeStringToEnum(
+    std::string client_type_str) {
+  if (client_type_str == "CRAS_CLIENT_TYPE_PLUGIN") {
+    return ClientType::VM_PLUGIN;
+  } else if (client_type_str == "CRAS_CLIENT_TYPE_CROSVM") {
+    return ClientType::VM_TERMINA;
+  } else if (client_type_str == "CRAS_CLIENT_TYPE_CHROME") {
+    return ClientType::CHROME;
+  } else if (client_type_str == "CRAS_CLIENT_TYPE_ARC") {
+    return ClientType::ARC;
+  } else {
+    return ClientType::UNKNOWN;
+  }
+}
+
+void CrasAudioHandler::HandleGetNumberOfInputStreamsWithPermission(
+    base::Optional<base::flat_map<std::string, uint32_t>> num_input_streams) {
+  if (!num_input_streams.has_value()) {
+    LOG(ERROR) << "Failed to retrieve number of input streams with permission";
+    return;
+  }
+  number_of_input_streams_with_permission_.clear();
+  for (const auto& it : *num_input_streams) {
+    number_of_input_streams_with_permission_[ConvertClientTypeStringToEnum(
+        it.first)] = it.second;
+  }
 }
 
 void CrasAudioHandler::GetDefaultOutputBufferSizeInternal() {

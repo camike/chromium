@@ -18,8 +18,8 @@ ExtensionInstallPromptTestHelper::~ExtensionInstallPromptTestHelper() {}
 
 ExtensionInstallPrompt::DoneCallback
 ExtensionInstallPromptTestHelper::GetCallback() {
-  return base::Bind(&ExtensionInstallPromptTestHelper::HandleResult,
-                    base::Unretained(this));
+  return base::BindOnce(&ExtensionInstallPromptTestHelper::HandleResult,
+                        base::Unretained(this));
 }
 
 ExtensionInstallPrompt::Result
@@ -29,6 +29,14 @@ ExtensionInstallPromptTestHelper::result() const {
     return ExtensionInstallPrompt::Result::ACCEPTED;  // Avoid crashing.
   }
   return *result_;
+}
+
+void ExtensionInstallPromptTestHelper::ClearResultForTesting() {
+  if (!result_.get()) {
+    ADD_FAILURE() << "Result was never set!";
+    return;
+  }
+  result_.reset();
 }
 
 void ExtensionInstallPromptTestHelper::HandleResult(

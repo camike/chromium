@@ -54,7 +54,7 @@ else:
 
 _log = logging.getLogger(__name__)
 
-_trailing_spaces_re = re.compile('(.*[^ ])?( +)$')
+_trailing_spaces_re = re.compile('(.*?)( +)$')
 
 
 def quote_data(data):
@@ -102,6 +102,9 @@ class ServerProcess(object):
 
     def pid(self):
         return self._pid
+
+    def cmd(self):
+        return self._cmd[:]
 
     def _reset(self):
         if getattr(self, '_proc', None):

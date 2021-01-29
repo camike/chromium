@@ -12,19 +12,20 @@
 
 #include "base/base_paths.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/one_shot_event.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
@@ -36,9 +37,12 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/lifetime/browser_shutdown.h"
+#include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
+#include "chrome/browser/profiles/profile_keep_alive_types.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/scoped_profile_keep_alive.h"
 #include "chrome/browser/status_icons/status_icon.h"
 #include "chrome/browser/status_icons/status_tray.h"
 #include "chrome/browser/ui/browser.h"
@@ -103,13 +107,44 @@ void RecordMenuItemClick(MenuItem item) {
 bool BackgroundModeManager::should_restart_in_background_ = false;
 
 BackgroundModeManager::BackgroundModeData::BackgroundModeData(
+    BackgroundModeManager* manager,
     Profile* profile,
     CommandIdHandlerVector* command_id_handler_vector)
-    : applications_(std::make_unique<BackgroundApplicationListModel>(profile)),
+    : manager_(manager),
+      applications_(std::make_unique<BackgroundApplicationListModel>(profile)),
       profile_(profile),
-      command_id_handler_vector_(command_id_handler_vector) {}
+      command_id_handler_vector_(command_id_handler_vector) {
+  profile_observer_.Add(profile_);
+}
 
-BackgroundModeManager::BackgroundModeData::~BackgroundModeData() {
+BackgroundModeManager::BackgroundModeData::~BackgroundModeData() = default;
+
+void BackgroundModeManager::BackgroundModeData::SetTracker(
+    extensions::ForceInstalledTracker* tracker) {
+  force_installed_tracker_observer_.Add(tracker);
+}
+
+void BackgroundModeManager::BackgroundModeData::UpdateProfileKeepAlive() {
+  bool background_mode =
+      (HasPersistentBackgroundClient() && manager_->IsBackgroundModeActive() &&
+       !manager_->background_mode_suspended_);
+  if (!background_mode) {
+    profile_keep_alive_.reset();
+    return;
+  }
+  if (profile_keep_alive_)
+    return;
+  profile_keep_alive_ = std::make_unique<ScopedProfileKeepAlive>(
+      profile_, ProfileKeepAliveOrigin::kBackgroundMode);
+}
+
+void BackgroundModeManager::BackgroundModeData::OnProfileWillBeDestroyed(
+    Profile* profile) {
+  DCHECK_EQ(profile_, profile);
+  profile_observer_.RemoveAll();
+  force_installed_tracker_observer_.RemoveAll();
+  DCHECK(!profile_keep_alive_);
+  profile_ = nullptr;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -127,6 +162,11 @@ void BackgroundModeManager::BackgroundModeData::ExecuteCommand(
       command_id_handler_vector_->at(command_id).Run();
       break;
   }
+}
+
+void BackgroundModeManager::BackgroundModeData::
+    OnForceInstalledExtensionsReady() {
+  manager_->ReleaseForceInstalledExtensionsKeepAlive();
 }
 
 Browser* BackgroundModeManager::BackgroundModeData::GetBrowserWindow() {
@@ -246,6 +286,8 @@ BackgroundModeManager::BackgroundModeManager(
 
   // Add self as an observer for the ProfileAttributesStorage so we know when
   // profiles are deleted and their names change.
+  // This observer is never unregistered because the BackgroundModeManager
+  // outlives the profile storage.
   profile_storage_->AddObserver(this);
 
   UMA_HISTOGRAM_BOOLEAN("BackgroundMode.OnStartup.AutoLaunchState",
@@ -271,6 +313,10 @@ BackgroundModeManager::BackgroundModeManager(
     keep_alive_for_startup_.reset(
         new ScopedKeepAlive(KeepAliveOrigin::BACKGROUND_MODE_MANAGER_STARTUP,
                             KeepAliveRestartOption::DISABLED));
+    // Wait for force-installed extensions to install, as well.
+    keep_alive_for_force_installed_extensions_.reset(new ScopedKeepAlive(
+        KeepAliveOrigin::BACKGROUND_MODE_MANAGER_FORCE_INSTALLED_EXTENSIONS,
+        KeepAliveRestartOption::DISABLED));
   } else {
     // Otherwise, start with background mode suspended in case we're launching
     // in a mode that doesn't open a browser window. It will be resumed when the
@@ -309,7 +355,7 @@ BackgroundModeManager::~BackgroundModeManager() {
 
 // static
 void BackgroundModeManager::RegisterPrefs(PrefRegistrySimple* registry) {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   registry->RegisterBooleanPref(prefs::kUserRemovedLoginItem, false);
   registry->RegisterBooleanPref(prefs::kChromeCreatedLoginItem, false);
   registry->RegisterBooleanPref(prefs::kMigratedLoginItemPref, false);
@@ -320,7 +366,7 @@ void BackgroundModeManager::RegisterPrefs(PrefRegistrySimple* registry) {
 void BackgroundModeManager::RegisterProfile(Profile* profile) {
   // We don't want to register multiple times for one profile.
   DCHECK(!base::Contains(background_mode_data_, profile));
-  auto bmd = std::make_unique<BackgroundModeData>(profile,
+  auto bmd = std::make_unique<BackgroundModeData>(this, profile,
                                                   &command_id_handler_vector_);
   BackgroundModeData* bmd_ptr = bmd.get();
   background_mode_data_[profile] = std::move(bmd);
@@ -355,7 +401,7 @@ void BackgroundModeManager::LaunchBackgroundApplication(
     const Extension* extension) {
   apps::AppServiceProxyFactory::GetForProfile(profile)
       ->BrowserAppLauncher()
-      .LaunchAppWithParams(CreateAppLaunchParamsUserContainer(
+      ->LaunchAppWithParams(CreateAppLaunchParamsUserContainer(
           profile, extension, WindowOpenDisposition::NEW_FOREGROUND_TAB,
           apps::mojom::AppLaunchSource::kSourceBackground));
 }
@@ -413,7 +459,7 @@ void BackgroundModeManager::Observe(
     it.second->applications()->RemoveObserver(this);
 }
 
-void BackgroundModeManager::OnExtensionsReady(const Profile* profile) {
+void BackgroundModeManager::OnExtensionsReady(Profile* profile) {
   BackgroundModeManager::BackgroundModeData* bmd =
       GetBackgroundModeData(profile);
   if (bmd) {
@@ -423,6 +469,14 @@ void BackgroundModeManager::OnExtensionsReady(const Profile* profile) {
   // Extensions are loaded, so we don't need to manually keep the browser
   // process alive any more when running in no-startup-window mode.
   ReleaseStartupKeepAlive();
+
+  auto* extension_service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
+  auto* tracker = extension_service->force_installed_tracker();
+  if (tracker->IsReady() || !bmd)
+    ReleaseForceInstalledExtensionsKeepAlive();
+  else
+    bmd->SetTracker(tracker);
 }
 
 void BackgroundModeManager::OnBackgroundModeEnabledPrefChanged() {
@@ -597,7 +651,6 @@ void BackgroundModeManager::ExecuteCommand(int command_id, int event_flags) {
   }
 }
 
-
 ///////////////////////////////////////////////////////////////////////////////
 //  BackgroundModeManager, private
 void BackgroundModeManager::ReleaseStartupKeepAliveCallback() {
@@ -615,6 +668,21 @@ void BackgroundModeManager::ReleaseStartupKeepAlive() {
         FROM_HERE,
         base::BindOnce(&BackgroundModeManager::ReleaseStartupKeepAliveCallback,
                        base::Unretained(this)));
+  }
+}
+
+void BackgroundModeManager::ReleaseForceInstalledExtensionsKeepAlive() {
+  if (keep_alive_for_force_installed_extensions_) {
+    // We call this via the message queue to make sure we don't try to end
+    // keep-alive (which can shutdown Chrome) before the message loop has
+    // started. This object reference is safe because it's going to be kept
+    // alive by the browser process until after the callback is called.
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(
+                       [](std::unique_ptr<ScopedKeepAlive> keep_alive) {
+                         // Cleans up unique_ptr when it goes out of scope.
+                       },
+                       std::move(keep_alive_for_force_installed_extensions_)));
   }
 }
 
@@ -670,6 +738,9 @@ void BackgroundModeManager::ResumeBackgroundMode() {
 }
 
 void BackgroundModeManager::UpdateKeepAliveAndTrayIcon() {
+  for (const auto& entry : background_mode_data_)
+    entry.second->UpdateProfileKeepAlive();
+
   if (in_background_mode_ && !background_mode_suspended_) {
     if (!keep_alive_) {
       keep_alive_ = std::make_unique<ScopedKeepAlive>(
@@ -718,7 +789,7 @@ void BackgroundModeManager::OnClientsChanged(
       StartBackgroundMode();
     }
 
-    // List of clients changed so update the UI.
+    // List of clients changed so update the UI and keep alive references.
     UpdateStatusTrayIconContextMenu();
 
     // Notify the user about any new clients.
@@ -802,10 +873,10 @@ gfx::ImageSkia GetStatusTrayIcon() {
     return gfx::ImageSkia();
 
   return family->CreateExact(size).AsImageSkia();
-#elif defined(OS_LINUX)
+#elif defined(OS_LINUX) || defined(OS_CHROMEOS)
   return *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
       IDR_PRODUCT_LOGO_128);
-#elif defined(OS_MACOSX)
+#elif defined(OS_MAC)
   return *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
       IDR_STATUS_TRAY_ICON);
 #else
@@ -820,7 +891,8 @@ void BackgroundModeManager::CreateStatusTrayIcon() {
 
   // Since there are multiple profiles which share the status tray, we now
   // use the browser process to keep track of it.
-#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
+#if !defined(OS_MAC) && !BUILDFLAG(IS_CHROMEOS_ASH) && \
+    !BUILDFLAG(IS_CHROMEOS_LACROS)
   if (!status_tray_)
     status_tray_ = g_browser_process->status_tray();
 #endif

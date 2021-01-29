@@ -13,18 +13,17 @@
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/optional.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "base/values.h"
-
-namespace gfx {
-class Image;
-}
+#include "third_party/skia/include/core/SkColor.h"
+#include "ui/gfx/image/image.h"
 
 class PrefRegistrySimple;
 class PrefService;
 class ProfileInfoCache;
+struct ProfileThemeColors;
 
 enum class SigninState {
   kNotSignedIn,
@@ -45,7 +44,9 @@ class ProfileAttributesEntry {
   static void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
 
   ProfileAttributesEntry();
-  virtual ~ProfileAttributesEntry() {}
+  ProfileAttributesEntry(const ProfileAttributesEntry&) = delete;
+  ProfileAttributesEntry& operator=(const ProfileAttributesEntry&) = delete;
+  virtual ~ProfileAttributesEntry() = default;
 
   // Returns whether the profile name is the concatenation of the Gaia name and
   // of the local profile name.
@@ -74,9 +75,16 @@ class ProfileAttributesEntry {
   // address used to sign in and the empty string for profiles that aren't
   // signed in to chrome.
   base::string16 GetUserName() const;
-  // Gets the icon used as this profile's avatar. This might not be the icon
-  // displayed in the UI if IsUsingGAIAPicture() is true.
-  const gfx::Image& GetAvatarIcon() const;
+  // Gets the icon used as this profile's avatar. High res icon are downloaded
+  // only if `download_high_res` is true, otherwise a low-res fallback is
+  // returned.
+  // TODO(crbug.com/1100835): Rename |size_for_placeholder_avatar| to |size| and
+  // make this function resize all avatars appropriately. Remove the default
+  // value of |size_for_placeholder_avatar| when all callsites pass some value.
+  // Consider adding a |shape| parameter and get rid of
+  // profiles::GetSizedAvatarIcon().
+  gfx::Image GetAvatarIcon(int size_for_placeholder_avatar = 74,
+                           bool use_high_res_file = true) const;
   std::string GetLocalAuthCredentials() const;
   std::string GetPasswordChangeDetectionToken() const;
   // Returns true if the profile is currently running any background apps. Note
@@ -104,8 +112,8 @@ class ProfileAttributesEntry {
   bool IsSupervised() const;
   // Returns true if the profile is signed in as a child account.
   bool IsChild() const;
-  // Returns true if the profile is a supervised user but not a child account.
-  bool IsLegacySupervised() const;
+  // Returns true if the profile should not be displayed to the user in the
+  // list of profiles.
   bool IsOmitted() const;
   bool IsSigninRequired() const;
   // Gets the supervised user ID of the profile's signed in account, if it's a
@@ -113,6 +121,10 @@ class ProfileAttributesEntry {
   std::string GetSupervisedUserId() const;
   // Returns true if the profile is an ephemeral profile.
   bool IsEphemeral() const;
+  // Returns true if the profile is a Guest profile.
+  // Only ephemeral Guest profiles are stored in profile attributes and
+  // therefore a Guest profile here is always ephemeral as well.
+  bool IsGuest() const;
   // Returns true if the profile is using a default name, typically of the
   // format "Person %d".
   bool IsUsingDefaultName() const;
@@ -130,6 +142,12 @@ class ProfileAttributesEntry {
   bool IsSignedInWithCredentialProvider() const;
   // Returns the index of the default icon used by the profile.
   size_t GetAvatarIconIndex() const;
+  // Returns the colors specified by the profile theme, or default colors if no
+  // theme is specified for the profile.
+  ProfileThemeColors GetProfileThemeColors() const;
+  // Returns the colors specified by the profile theme, or empty if no theme is
+  // set for the profile.
+  base::Optional<ProfileThemeColors> GetProfileThemeColorsIfSet() const;
   // Returns the metrics bucket this profile should be recorded in.
   // Note: The bucket index is assigned once and remains the same all time. 0 is
   // reserved for the guest profile.
@@ -141,7 +159,8 @@ class ProfileAttributesEntry {
   // value is UTF8 encoded.
   std::string GetHostedDomain() const;
 
-  void SetLocalProfileName(const base::string16& name);
+  // |is_using_default| should be set to false for non default profile names.
+  void SetLocalProfileName(const base::string16& name, bool is_default_name);
   void SetShortcutName(const base::string16& name);
   void SetActiveTimeToNow();
   void SetIsOmitted(bool is_omitted);
@@ -156,10 +175,14 @@ class ProfileAttributesEntry {
   void SetIsSigninRequired(bool value);
   void SetSignedInWithCredentialProvider(bool value);
   void SetIsEphemeral(bool value);
+  void SetIsGuest(bool value);
+  // TODO(msalama): Remove this function.
   void SetIsUsingDefaultName(bool value);
   void SetIsUsingDefaultAvatar(bool value);
   void SetIsAuthError(bool value);
   void SetAvatarIconIndex(size_t icon_index);
+  // base::nullopt resets colors to default.
+  void SetProfileThemeColors(const base::Optional<ProfileThemeColors>& colors);
 
   // Unlike for other string setters, the argument is expected to be UTF8
   // encoded.
@@ -186,11 +209,15 @@ class ProfileAttributesEntry {
   // via AddAccount* functions).
   void RecordAccountMetrics() const;
 
+  // TODO(crbug/1155729): Check it is not used anymore for deprecated supervised
+  // users and remove it.
   static const char kSupervisedUserId[];
+  // DEPRECATED: IsOmitted pref was moved to in memory only, see `is_omitted_`.
   static const char kIsOmittedFromProfileListKey[];
   static const char kAvatarIconKey[];
   static const char kBackgroundAppsKey[];
   static const char kProfileIsEphemeral[];
+  static const char kProfileIsGuest[];
   static const char kUserNameKey[];
   static const char kGAIAIdKey[];
   static const char kIsConsentedPrimaryAccountKey[];
@@ -199,6 +226,7 @@ class ProfileAttributesEntry {
 
  private:
   friend class ProfileInfoCache;
+  friend class ProfileThemeUpdateServiceBrowserTest;
   FRIEND_TEST_ALL_PREFIXES(ProfileAttributesStorageTest,
                            EntryInternalAccessors);
   FRIEND_TEST_ALL_PREFIXES(ProfileAttributesStorageTest, ProfileActiveTime);
@@ -223,6 +251,9 @@ class ProfileAttributesEntry {
   // Loads or uses an already loaded high resolution image of the generic
   // profile avatar.
   const gfx::Image* GetHighResAvatar() const;
+
+  // Generates the colored placeholder avatar icon for the given |size|.
+  gfx::Image GetPlaceholderAvatarIcon(int size) const;
 
   // Returns if this profile has accounts (signed-in or signed-out) with
   // different account names. This is approximate as only a short hash of an
@@ -254,6 +285,10 @@ class ProfileAttributesEntry {
   bool GetBool(const char* key) const;
   int GetInteger(const char* key) const;
 
+  // Internal getter that returns one of the profile theme colors or
+  // base::nullopt if the key is not present.
+  base::Optional<SkColor> GetProfileThemeColor(const char* key) const;
+
   // Type checking. Only IsDouble is implemented because others do not have
   // callsites.
   bool IsDouble(const char* key) const;
@@ -278,8 +313,8 @@ class ProfileAttributesEntry {
   // when this class holds the members required to fulfill its own contract.
   size_t profile_index() const;
 
-  ProfileInfoCache* profile_info_cache_;
-  PrefService* prefs_;
+  ProfileInfoCache* profile_info_cache_ = nullptr;
+  PrefService* prefs_ = nullptr;
   base::FilePath profile_path_;
   std::string storage_key_;
   base::string16 last_name_to_display_;
@@ -290,7 +325,13 @@ class ProfileAttributesEntry {
   bool is_force_signin_profile_locked_ = false;
   bool is_force_signin_enabled_;
 
-  DISALLOW_COPY_AND_ASSIGN(ProfileAttributesEntry);
+  // Indicates whether the profile should not be displayed to the user in the
+  // list of profiles. This flag is intended to work only with ephemeral
+  // profiles which get removed after the browser restart. Thus, this flag is
+  // stored in memory only. Storing in memory also allows to avoid the risk of
+  // having permanent profiles that the user cannot see or delete, in case the
+  // ephemeral profile deletion fails.
+  bool is_omitted_ = false;
 };
 
 #endif  // CHROME_BROWSER_PROFILES_PROFILE_ATTRIBUTES_ENTRY_H_

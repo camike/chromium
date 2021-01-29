@@ -10,11 +10,9 @@
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
-#include "content/browser/appcache/appcache_disk_cache_ops.h"
 #include "content/browser/service_worker/service_worker_cache_writer.h"
 #include "content/browser/service_worker/service_worker_consts.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
-#include "content/browser/service_worker/service_worker_disk_cache.h"
 #include "content/browser/service_worker/service_worker_loader_helpers.h"
 #include "content/browser/service_worker/service_worker_storage.h"
 #include "content/browser/service_worker/service_worker_version.h"
@@ -26,7 +24,6 @@
 #include "net/cert/cert_status_flags.h"
 #include "net/http/http_response_info.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
-#include "third_party/blink/public/common/service_worker/service_worker_utils.h"
 
 namespace content {
 
@@ -76,8 +73,7 @@ ServiceWorkerNewScriptLoader::ServiceWorkerNewScriptLoader(
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
     int64_t cache_resource_id)
     : request_url_(original_request.url),
-      resource_type_(static_cast<blink::mojom::ResourceType>(
-          original_request.resource_type)),
+      resource_destination_(original_request.destination),
       original_options_(options),
       version_(version),
       network_watcher_(FROM_HERE,
@@ -90,7 +86,7 @@ ServiceWorkerNewScriptLoader::ServiceWorkerNewScriptLoader(
   network::ResourceRequest resource_request(original_request);
 #if DCHECK_IS_ON()
   service_worker_loader_helpers::CheckVersionStatusBeforeWorkerScriptLoad(
-      version_->status(), resource_type_);
+      version_->status(), resource_destination_);
 #endif  // DCHECK_IS_ON()
 
   scoped_refptr<ServiceWorkerRegistration> registration =
@@ -99,10 +95,11 @@ ServiceWorkerNewScriptLoader::ServiceWorkerNewScriptLoader(
   // worker is starting up, and it must be starting up here.
   DCHECK(registration);
   const bool is_main_script =
-      resource_type_ == blink::mojom::ResourceType::kServiceWorker;
+      (resource_destination_ ==
+       network::mojom::RequestDestination::kServiceWorker);
   if (is_main_script) {
     // Request SSLInfo. It will be persisted in service worker storage and
-    // may be used by ServiceWorkerNavigationLoader for navigations handled
+    // may be used by ServiceWorkerMainResourceLoader for navigations handled
     // by this service worker.
     options |= network::mojom::kURLLoadOptionSendSSLInfoWithResponse;
 
@@ -119,9 +116,15 @@ ServiceWorkerNewScriptLoader::ServiceWorkerNewScriptLoader(
     resource_request.load_flags |= net::LOAD_VALIDATE_CACHE;
   }
 
-  ServiceWorkerStorage* storage = version_->context()->storage();
+  mojo::Remote<storage::mojom::ServiceWorkerResourceWriter> writer;
+  version_->context()
+      ->registry()
+      ->GetRemoteStorageControl()
+      ->CreateResourceWriter(cache_resource_id,
+                             writer.BindNewPipeAndPassReceiver());
+
   cache_writer_ = ServiceWorkerCacheWriter::CreateForWriteBack(
-      storage->CreateResponseWriter(cache_resource_id));
+      std::move(writer), cache_resource_id);
 
   version_->script_cache_map()->NotifyStartedCaching(request_url_,
                                                      cache_resource_id);
@@ -202,7 +205,8 @@ void ServiceWorkerNewScriptLoader::OnReceiveResponse(
     return;
   }
 
-  if (resource_type_ == blink::mojom::ResourceType::kServiceWorker) {
+  if (resource_destination_ ==
+      network::mojom::RequestDestination::kServiceWorker) {
     // Check the path restriction defined in the spec:
     // https://w3c.github.io/ServiceWorker/#service-worker-script-response
     std::string service_worker_allowed;
@@ -218,10 +222,6 @@ void ServiceWorkerNewScriptLoader::OnReceiveResponse(
       return;
     }
 
-    // TODO(arthursonzogni): Make the Cross-Origin-Embedder-Policy to be parsed
-    // when it reached this line, not matter what URLLoader it is coming from.
-    // The same mechanism as the one in NavigationURLLoader must be provided.
-    // Instead of being a "document", the main resource here is a "script".
     version_->set_cross_origin_embedder_policy(
         response_head->parsed_headers
             ? response_head->parsed_headers->cross_origin_embedder_policy

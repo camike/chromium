@@ -7,7 +7,8 @@ package org.chromium.chrome.browser.download;
 import static org.mockito.Mockito.doReturn;
 
 import android.net.Uri;
-import android.support.test.filters.MediumTest;
+
+import androidx.test.filters.MediumTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -23,6 +24,8 @@ import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Test content URI can be generated correctly by {@link DownloadFileProvider}.
@@ -34,9 +37,7 @@ public class DownloadFileProviderTest {
     private static final String EXTERNAL_SD_CARD_DOWNLOAD_DIRECTORY_PATH =
             "/storage/724E-59EE/Android/data/com.android.chrome/files/Download";
 
-    private static final File[] EXTERNAL_DIRECTORY_PATHS =
-            new File[] {new File("/storage/emulated/0/chrome_package"),
-                    new File(EXTERNAL_SD_CARD_DOWNLOAD_DIRECTORY_PATH)};
+    private static List<File> sSecondaryDownloadDirectory = new ArrayList<File>();
 
     private static final String PRIMARY_STORAGE_DOWNLOAD_PATH =
             PRIMARY_STORAGE_DOWNLOAD_DIRECTORY_PATH + "/app-wise-release.apk";
@@ -56,7 +57,10 @@ public class DownloadFileProviderTest {
         doReturn(new File(PRIMARY_STORAGE_DOWNLOAD_DIRECTORY_PATH))
                 .when(mMockDirectoryDelegate)
                 .getPrimaryDownloadDirectory();
-        doReturn(EXTERNAL_DIRECTORY_PATHS).when(mMockDirectoryDelegate).getExternalFilesDirs();
+        sSecondaryDownloadDirectory.add(new File(EXTERNAL_SD_CARD_DOWNLOAD_DIRECTORY_PATH));
+        doReturn(sSecondaryDownloadDirectory)
+                .when(mMockDirectoryDelegate)
+                .getSecondaryStorageDownloadDirectories();
     }
 
     /**

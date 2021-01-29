@@ -19,6 +19,7 @@
 #include "ash/system/status_area_widget_test_helper.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/ash_test_helper.h"
+#include "ash/wallpaper/wallpaper_controller_impl.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "base/bind.h"
 #include "base/callback_forward.h"
@@ -173,6 +174,9 @@ class ScreenRotationAnimatorSlowAnimationTest : public AshTestBase {
 
 void ScreenRotationAnimatorSlowAnimationTest::SetUp() {
   AshTestBase::SetUp();
+  // ScreenRotionAnimator skips animation if the wallpaper isn't ready.
+  Shell::Get()->wallpaper_controller()->set_bypass_decode_for_testing();
+  Shell::Get()->wallpaper_controller()->ShowDefaultWallpaperForTesting();
 
   display_ = display::Screen::GetScreen()->GetPrimaryDisplay();
   animator_ = std::make_unique<ScreenRotationAnimator>(
@@ -235,6 +239,9 @@ void ScreenRotationAnimatorSmoothAnimationTest::QuitWaitForCopyCallback() {
 
 void ScreenRotationAnimatorSmoothAnimationTest::SetUp() {
   AshTestBase::SetUp();
+  // ScreenRotionAnimator skips animation if the wallpaper isn't ready.
+  Shell::Get()->wallpaper_controller()->set_bypass_decode_for_testing();
+  Shell::Get()->wallpaper_controller()->ShowDefaultWallpaperForTesting();
 
   display_ = display::Screen::GetScreen()->GetPrimaryDisplay();
   run_loop_ = std::make_unique<base::RunLoop>();
@@ -532,7 +539,12 @@ TEST_F(ScreenRotationAnimatorSmoothAnimationTest,
 // request callback called, it should stop rotating.
 TEST_F(ScreenRotationAnimatorSmoothAnimationTest,
        RemoveExternalSecondaryDisplayBeforeSecondCopyCallback) {
-  UpdateDisplay("640x480,800x600");
+  {
+    // Disable wallpaper animation on a secondary display.
+    ui::ScopedAnimationDurationScaleMode disable(
+        ui::ScopedAnimationDurationScaleMode::ZERO_DURATION);
+    UpdateDisplay("640x480,800x600");
+  }
   EXPECT_EQ(2U, display_manager()->GetNumDisplays());
 
   const int64_t primary_display_id = display_manager()->GetDisplayAt(0).id();

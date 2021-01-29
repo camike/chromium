@@ -6,7 +6,7 @@
 #include "base/json/json_reader.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/task_environment.h"
 #include "chrome/browser/extensions/content_verifier_test_utils.h"
@@ -19,6 +19,7 @@
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/update_client/net/url_loader_post_interceptor.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/content_verifier.h"
 #include "extensions/browser/extension_registry.h"
@@ -386,8 +387,10 @@ class PolicyUpdateServiceTest : public ExtensionUpdateClientBaseTest,
   void SetUpInProcessBrowserTestFixture() override {
     ExtensionUpdateClientBaseTest::SetUpInProcessBrowserTestFixture();
 
-    EXPECT_CALL(policy_provider_, IsInitializationComplete(testing::_))
-        .WillRepeatedly(testing::Return(true));
+    ON_CALL(policy_provider_, IsInitializationComplete(testing::_))
+        .WillByDefault(testing::Return(true));
+    ON_CALL(policy_provider_, IsFirstPolicyLoadComplete(testing::_))
+        .WillByDefault(testing::Return(true));
 
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(
         &policy_provider_);
@@ -405,7 +408,7 @@ class PolicyUpdateServiceTest : public ExtensionUpdateClientBaseTest,
     const base::FilePath crx_path =
         test_data_dir_.AppendASCII("updater/v1.crx");
     ExtensionDownloader::set_test_delegate(&downloader_);
-    downloader_.AddResponse(id_, "2", crx_path);
+    downloader_.AddResponse(id_, "0.10", crx_path);
   }
 
   void SetUpNetworkInterceptors() override {
@@ -467,7 +470,7 @@ class PolicyUpdateServiceTest : public ExtensionUpdateClientBaseTest,
   std::string id_ = "aohghmighlieiainnegkcijnfilokake";
 
  private:
-  policy::MockConfigurationPolicyProvider policy_provider_;
+  testing::NiceMock<policy::MockConfigurationPolicyProvider> policy_provider_;
   content_verifier_test::DownloaderTestDelegate downloader_;
 };
 
@@ -476,7 +479,6 @@ class PolicyUpdateServiceTest : public ExtensionUpdateClientBaseTest,
 // CheckForExternalUpdates() will fail.
 IN_PROC_BROWSER_TEST_F(PolicyUpdateServiceTest, FailedUpdateRetries) {
   ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
-  ExtensionService* service = extension_service();
   ContentVerifier* verifier =
       ExtensionSystem::Get(profile())->content_verifier();
 
@@ -488,20 +490,23 @@ IN_PROC_BROWSER_TEST_F(PolicyUpdateServiceTest, FailedUpdateRetries) {
   }
 
   content_verifier_test::DelayTracker delay_tracker;
-  service->set_external_updates_disabled_for_test(true);
   TestExtensionRegistryObserver registry_observer(registry, id_);
-  verifier->VerifyFailedForTest(id_, ContentVerifyJob::HASH_MISMATCH);
-  EXPECT_TRUE(registry_observer.WaitForExtensionUnloaded());
+  {
+    base::AutoReset<bool> disable_scope =
+        ExtensionService::DisableExternalUpdatesForTesting();
 
-  const std::vector<base::TimeDelta>& calls = delay_tracker.calls();
-  ASSERT_EQ(1u, calls.size());
-  EXPECT_EQ(base::TimeDelta(), delay_tracker.calls()[0]);
+    verifier->VerifyFailedForTest(id_, ContentVerifyJob::HASH_MISMATCH);
+    EXPECT_TRUE(registry_observer.WaitForExtensionUnloaded());
 
-  delay_tracker.Proceed();
+    const std::vector<base::TimeDelta>& calls = delay_tracker.calls();
+    ASSERT_EQ(1u, calls.size());
+    EXPECT_EQ(base::TimeDelta(), delay_tracker.calls()[0]);
 
-  // Remove the override and set ExtensionService to update again. The extension
-  // should be now installed.
-  service->set_external_updates_disabled_for_test(false);
+    delay_tracker.Proceed();
+  }
+
+  // Update ExtensionService again without disabling external updates.
+  // The extension should now get installed.
   delay_tracker.StopWatching();
   delay_tracker.Proceed();
 

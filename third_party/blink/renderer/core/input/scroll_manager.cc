@@ -33,8 +33,8 @@
 #include "third_party/blink/renderer/core/scroll/scroll_animator_base.h"
 #include "third_party/blink/renderer/core/scroll/scroll_customization.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
+#include "third_party/blink/renderer/platform/widget/input/input_metrics.h"
 
 namespace blink {
 namespace {
@@ -78,7 +78,7 @@ void ScrollManager::Clear() {
   ClearGestureScrollState();
 }
 
-void ScrollManager::Trace(Visitor* visitor) {
+void ScrollManager::Trace(Visitor* visitor) const {
   visitor->Trace(frame_);
   visitor->Trace(scroll_gesture_handling_node_);
   visitor->Trace(previous_gesture_scrolled_node_);
@@ -133,8 +133,20 @@ AutoscrollController* ScrollManager::GetAutoscrollController() const {
   return nullptr;
 }
 
-static bool CanPropagate(const ScrollState& scroll_state, const Node& node) {
-  ScrollableArea* scrollable_area = node.GetLayoutBox()->GetScrollableArea();
+ScrollPropagationDirection ScrollManager::ComputePropagationDirection(
+    const ScrollState& scroll_state) {
+  if (scroll_state.deltaXHint() == 0 && scroll_state.deltaYHint() != 0)
+    return ScrollPropagationDirection::kVertical;
+  if (scroll_state.deltaXHint() != 0 && scroll_state.deltaYHint() == 0)
+    return ScrollPropagationDirection::kHorizontal;
+  if (scroll_state.deltaXHint() != 0 && scroll_state.deltaYHint() != 0)
+    return ScrollPropagationDirection::kBoth;
+  return ScrollPropagationDirection::kNone;
+}
+
+bool ScrollManager::CanPropagate(const LayoutBox* layout_box,
+                                 ScrollPropagationDirection direction) {
+  ScrollableArea* scrollable_area = layout_box->GetScrollableArea();
   if (!scrollable_area)
     return true;
 
@@ -142,61 +154,117 @@ static bool CanPropagate(const ScrollState& scroll_state, const Node& node) {
       !scrollable_area->UserInputScrollable(kVerticalScrollbar))
     return true;
 
-  return (scroll_state.deltaXHint() == 0 ||
-          node.GetComputedStyle()->OverscrollBehaviorX() ==
-              EOverscrollBehavior::kAuto) &&
-         (scroll_state.deltaYHint() == 0 ||
-          node.GetComputedStyle()->OverscrollBehaviorY() ==
-              EOverscrollBehavior::kAuto);
+  switch (direction) {
+    case ScrollPropagationDirection::kBoth:
+      return ((layout_box->StyleRef().OverscrollBehaviorX() ==
+               EOverscrollBehavior::kAuto) &&
+              (layout_box->StyleRef().OverscrollBehaviorY() ==
+               EOverscrollBehavior::kAuto));
+    case ScrollPropagationDirection::kVertical:
+      return layout_box->StyleRef().OverscrollBehaviorY() ==
+             EOverscrollBehavior::kAuto;
+    case ScrollPropagationDirection::kHorizontal:
+      return layout_box->StyleRef().OverscrollBehaviorX() ==
+             EOverscrollBehavior::kAuto;
+    case ScrollPropagationDirection::kNone:
+      return true;
+    default:
+      NOTREACHED();
+  }
 }
 
 void ScrollManager::RecomputeScrollChain(const Node& start_node,
                                          const ScrollState& scroll_state,
-                                         Deque<DOMNodeId>& scroll_chain) {
+                                         Deque<DOMNodeId>& scroll_chain,
+                                         bool is_autoscroll) {
   DCHECK(scroll_chain.IsEmpty());
   scroll_chain.clear();
 
   DCHECK(start_node.GetLayoutObject());
-  LayoutBox* cur_box = start_node.GetLayoutObject()->EnclosingBox();
 
-  // Scrolling propagates along the containing block chain and ends at the
-  // RootScroller node. The RootScroller node will have a custom applyScroll
-  // callback that performs scrolling as well as associated "root" actions like
-  // browser control movement and overscroll glow.
-  while (cur_box) {
-    Node* cur_node = cur_box->GetNode();
+  if (is_autoscroll) {
+    // Propagate the autoscroll along the layout object chain, and
+    // append only the first node which is able to consume the scroll delta.
+    // The scroll node is computed differently to regular scrolls in order to
+    // maintain consistency with the autoscroll controller.
+    LayoutBox* autoscrollable = LayoutBox::FindAutoscrollable(
+        start_node.GetLayoutObject(), is_autoscroll);
+    if (autoscrollable) {
+      Node* cur_node = autoscrollable->GetNode();
+      LayoutObject* layout_object = cur_node->GetLayoutObject();
+      while (layout_object &&
+             !CanScroll(scroll_state, *cur_node, is_autoscroll)) {
+        ScrollPropagationDirection direction =
+            ComputePropagationDirection(scroll_state);
 
-    if (cur_node) {
-      if (CanScroll(scroll_state, *cur_node))
-        scroll_chain.push_front(DOMNodeIds::IdForNode(cur_node));
+        if (!CanPropagate(cur_node->GetLayoutBox(), direction))
+          break;
 
-      if (cur_node->IsEffectiveRootScroller())
-        break;
-
-      if (!CanPropagate(scroll_state, *cur_node)) {
-        // We should add the first node with non-auto overscroll-behavior to
-        // the scroll chain regardlessly, as it's the only node we can latch to.
-        if (scroll_chain.empty() ||
-            scroll_chain.front() != DOMNodeIds::IdForNode(cur_node)) {
-          scroll_chain.push_front(DOMNodeIds::IdForNode(cur_node));
+        if (!layout_object->Parent() &&
+            layout_object->GetNode() == layout_object->GetDocument() &&
+            layout_object->GetDocument().LocalOwner()) {
+          layout_object =
+              layout_object->GetDocument().LocalOwner()->GetLayoutObject();
+        } else {
+          layout_object = layout_object->Parent();
         }
-        break;
+        LayoutBox* new_autoscrollable =
+            LayoutBox::FindAutoscrollable(layout_object, is_autoscroll);
+        if (new_autoscrollable)
+          cur_node = new_autoscrollable->GetNode();
       }
+      scroll_chain.push_front(DOMNodeIds::IdForNode(cur_node));
     }
+  } else {
+    LayoutBox* cur_box = start_node.GetLayoutObject()->EnclosingBox();
 
-    cur_box = cur_box->ContainingBlock();
+    // Scrolling propagates along the containing block chain and ends at the
+    // RootScroller node. The RootScroller node will have a custom applyScroll
+    // callback that performs scrolling as well as associated "root" actions
+    // like browser control movement and overscroll glow.
+    while (cur_box) {
+      Node* cur_node = cur_box->GetNode();
+
+      if (cur_node) {
+        if (CanScroll(scroll_state, *cur_node, /* for_autoscroll */ false))
+          scroll_chain.push_front(DOMNodeIds::IdForNode(cur_node));
+
+        if (cur_node->IsEffectiveRootScroller())
+          break;
+
+        ScrollPropagationDirection direction =
+            ComputePropagationDirection(scroll_state);
+        if (!CanPropagate(cur_node->GetLayoutBox(), direction)) {
+          // We should add the first node with non-auto overscroll-behavior to
+          // the scroll chain regardlessly, as it's the only node we can latch
+          // to.
+          if (scroll_chain.empty() ||
+              scroll_chain.front() != DOMNodeIds::IdForNode(cur_node)) {
+            scroll_chain.push_front(DOMNodeIds::IdForNode(cur_node));
+          }
+          break;
+        }
+      }
+
+      cur_box = cur_box->ContainingBlock();
+    }
   }
 }
 
 bool ScrollManager::CanScroll(const ScrollState& scroll_state,
-                              const Node& current_node) {
-  if (!current_node.GetLayoutBox())
+                              const Node& current_node,
+                              bool for_autoscroll) {
+  LayoutBox* scrolling_box = current_node.GetLayoutBox();
+  if (auto* element = DynamicTo<Element>(current_node))
+    scrolling_box = element->GetLayoutBoxForScrolling();
+  if (!scrolling_box)
     return false;
 
   // We need to always add the global root scroller even if it isn't scrollable
   // since we can always pinch-zoom and scroll as well as for overscroll
-  // effects.
-  if (current_node.GetLayoutBox()->IsGlobalRootScroller())
+  // effects. If autoscrolling, ignore this condition because we latch on
+  // to the deepest autoscrollable node.
+  if (scrolling_box->IsGlobalRootScroller() && !for_autoscroll)
     return true;
 
   // If this is the main LayoutView, and it's not the root scroller, that means
@@ -204,14 +272,14 @@ bool ScrollManager::CanScroll(const ScrollState& scroll_state,
   // scroll the LayoutView should cause panning of the visual viewport as well
   // so ensure it gets added to the scroll chain. See LTHI::ApplyScroll for the
   // equivalent behavior in CC. Node::NativeApplyScroll contains a special
-  // handler for this case.
-  if (IsA<LayoutView>(current_node.GetLayoutBox()) &&
-      current_node.GetDocument().GetFrame()->IsMainFrame()) {
+  // handler for this case. If autoscrolling, ignore this condition because we
+  // latch on to the deepest autoscrollable node.
+  if (IsA<LayoutView>(scrolling_box) &&
+      current_node.GetDocument().GetFrame()->IsMainFrame() && !for_autoscroll) {
     return true;
   }
 
-  ScrollableArea* scrollable_area =
-      current_node.GetLayoutBox()->GetScrollableArea();
+  ScrollableArea* scrollable_area = scrolling_box->GetScrollableArea();
 
   if (!scrollable_area)
     return false;
@@ -271,13 +339,14 @@ bool ScrollManager::LogicalScroll(mojom::blink::ScrollDirection direction,
       std::make_unique<ScrollStateData>();
   auto* scroll_state =
       MakeGarbageCollected<ScrollState>(std::move(scroll_state_data));
-  RecomputeScrollChain(*node, *scroll_state, scroll_chain);
+  RecomputeScrollChain(*node, *scroll_state, scroll_chain,
+                       /* is_autoscroll */ false);
 
   while (!scroll_chain.IsEmpty()) {
     Node* scroll_chain_node = DOMNodeIds::NodeForId(scroll_chain.TakeLast());
     DCHECK(scroll_chain_node);
 
-    LayoutBox* box = ToLayoutBox(scroll_chain_node->GetLayoutObject());
+    auto* box = To<LayoutBox>(scroll_chain_node->GetLayoutObject());
     DCHECK(box);
 
     ScrollDirectionPhysical physical_direction =
@@ -420,23 +489,23 @@ void ScrollManager::RecordScrollRelatedMetrics(const WebGestureDevice device) {
   if (non_composited_main_thread_scrolling_reasons) {
     DCHECK(cc::MainThreadScrollingReason::HasNonCompositedScrollReasons(
         non_composited_main_thread_scrolling_reasons));
-    uint32_t main_thread_scrolling_reason_enum_max =
-        cc::MainThreadScrollingReason::kMainThreadScrollingReasonCount + 1;
+    // The enum in cc::MainThreadScrollingReason simultaneously defines actual
+    // bitmask values and indices into the bitmask, making this loop a bit
+    // confusing.
+    //
+    // This stems from the fact that kNotScrollingOnMain is recorded in the
+    // histograms as value 0. However, the 0th bit is not actually reserved and
+    // has a separate, well-defined meaning. kNotScrollingOnMain is only
+    // recorded when *no* bits are set.
+    //
+    // As such, when recording any reason that's not kNotScrollingOnMain (i.e.
+    // recording the index of a set bit), the index must be incremented by 1 to
+    // be recorded properly.
     for (uint32_t i = cc::MainThreadScrollingReason::kNonCompositedReasonsFirst;
          i <= cc::MainThreadScrollingReason::kNonCompositedReasonsLast; ++i) {
       unsigned val = 1 << i;
       if (non_composited_main_thread_scrolling_reasons & val) {
-        if (device == WebGestureDevice::kTouchscreen) {
-          DEFINE_STATIC_LOCAL(EnumerationHistogram, touch_histogram,
-                              ("Renderer4.MainThreadGestureScrollReason",
-                               main_thread_scrolling_reason_enum_max));
-          touch_histogram.Count(i + 1);
-        } else {
-          DEFINE_STATIC_LOCAL(EnumerationHistogram, wheel_histogram,
-                              ("Renderer4.MainThreadWheelScrollReason",
-                               main_thread_scrolling_reason_enum_max));
-          wheel_histogram.Count(i + 1);
-        }
+        RecordScrollReasonMetric(device, i + 1);
       }
     }
   }
@@ -445,6 +514,11 @@ void ScrollManager::RecordScrollRelatedMetrics(const WebGestureDevice device) {
 WebInputEventResult ScrollManager::HandleGestureScrollBegin(
     const WebGestureEvent& gesture_event) {
   TRACE_EVENT0("input", "ScrollManager::handleGestureScrollBegin");
+  DCHECK(!RuntimeEnabledFeatures::ScrollUnificationEnabled());
+  if (RuntimeEnabledFeatures::ScrollUnificationEnabled()) {
+    return WebInputEventResult::kNotHandled;
+  }
+
   Document* document = frame_->GetDocument();
 
   if (!document->GetLayoutView())
@@ -490,21 +564,11 @@ WebInputEventResult ScrollManager::HandleGestureScrollBegin(
       delta_consumed_for_scroll_sequence_;
   auto* scroll_state =
       MakeGarbageCollected<ScrollState>(std::move(scroll_state_data));
-  // For middle click autoscroll, only scrollable area for
-  // |scroll_gesture_handling_node_| should receive and handle all scroll
-  // events. It should not bubble up to the ancestor.
-  if (gesture_event.SourceDevice() == WebGestureDevice::kSyntheticAutoscroll) {
-    LayoutBox* scrollable = LayoutBox::FindAutoscrollable(
-        scroll_gesture_handling_node_->GetLayoutObject(),
-        /*is_middle_click_autoscroll*/ true);
-    if (scrollable) {
-      Node* scrollable_node = scrollable->GetNode();
-      current_scroll_chain_.push_back(DOMNodeIds::IdForNode(scrollable_node));
-    }
-  } else {
-    RecomputeScrollChain(*scroll_gesture_handling_node_.Get(), *scroll_state,
-                         current_scroll_chain_);
-  }
+
+  RecomputeScrollChain(
+      *scroll_gesture_handling_node_.Get(), *scroll_state,
+      current_scroll_chain_,
+      gesture_event.SourceDevice() == WebGestureDevice::kSyntheticAutoscroll);
 
   TRACE_EVENT_INSTANT1("input", "Computed Scroll Chain",
                        TRACE_EVENT_SCOPE_THREAD, "length",
@@ -537,6 +601,11 @@ WebInputEventResult ScrollManager::HandleGestureScrollUpdate(
     const WebGestureEvent& gesture_event) {
   TRACE_EVENT0("input", "ScrollManager::handleGestureScrollUpdate");
   DCHECK_EQ(gesture_event.GetType(), WebInputEvent::Type::kGestureScrollUpdate);
+
+  DCHECK(!RuntimeEnabledFeatures::ScrollUnificationEnabled());
+  if (RuntimeEnabledFeatures::ScrollUnificationEnabled()) {
+    return WebInputEventResult::kNotHandled;
+  }
 
   Node* node = scroll_gesture_handling_node_.Get();
   if (!node || !node->GetLayoutObject()) {
@@ -672,6 +741,12 @@ void ScrollManager::HandleDeferredGestureScrollEnd(
 WebInputEventResult ScrollManager::HandleGestureScrollEnd(
     const WebGestureEvent& gesture_event) {
   TRACE_EVENT0("input", "ScrollManager::handleGestureScrollEnd");
+
+  DCHECK(!RuntimeEnabledFeatures::ScrollUnificationEnabled());
+  if (RuntimeEnabledFeatures::ScrollUnificationEnabled()) {
+    return WebInputEventResult::kNotHandled;
+  }
+
   GetPage()->GetBrowserControls().ScrollEnd();
 
   Node* node = scroll_gesture_handling_node_;
@@ -889,12 +964,11 @@ WebInputEventResult ScrollManager::PassScrollGestureEvent(
     LayoutObject* layout_object) {
   DCHECK(gesture_event.IsScrollEvent());
 
-  if (!last_gesture_scroll_over_embedded_content_view_ || !layout_object ||
-      !layout_object->IsLayoutEmbeddedContent())
+  auto* embedded = DynamicTo<LayoutEmbeddedContent>(layout_object);
+  if (!last_gesture_scroll_over_embedded_content_view_ || !embedded)
     return WebInputEventResult::kNotHandled;
 
-  FrameView* frame_view =
-      ToLayoutEmbeddedContent(layout_object)->ChildFrameView();
+  FrameView* frame_view = embedded->ChildFrameView();
 
   if (!frame_view)
     return WebInputEventResult::kNotHandled;
@@ -1063,7 +1137,7 @@ Node* ScrollManager::NodeTargetForScrollableAreaElementId(
 
   Node* event_target = nullptr;
   if (layout_box->GetDocument().GetFrame() == frame_) {
-    event_target = scrollable_area->GetLayoutBox()->GetNode();
+    event_target = scrollable_area->EventTargetNode();
   } else {
     // The targeted ScrollableArea may not belong to this frame. If that
     // is the case, target its ancestor HTMLFrameOwnerElement that exists
@@ -1072,6 +1146,11 @@ Node* ScrollManager::NodeTargetForScrollableAreaElementId(
     LocalFrame* current_frame = layout_box->GetDocument().GetFrame();
     while (current_frame) {
       HTMLFrameOwnerElement* owner = current_frame->GetDocument()->LocalOwner();
+      // If the hosting element has no layout box, don't return it for targeting
+      // since there's nothing to scroll.
+      if (!owner->GetLayoutBox())
+        break;
+
       LocalFrame* owner_frame =
           owner ? owner->GetDocument().GetFrame() : nullptr;
       if (owner_frame == frame_) {

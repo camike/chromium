@@ -57,6 +57,8 @@ bool StructTraits<tracing::mojom::PerfettoBuiltinDataSourceDataView,
   out->set_disable_trace_config(data.disable_trace_config());
   out->set_disable_system_info(data.disable_system_info());
   out->set_disable_service_events(data.disable_service_events());
+  out->set_primary_trace_clock(static_cast<perfetto::protos::gen::BuiltinClock>(
+      data.primary_trace_clock_id()));
   return true;
 }
 
@@ -91,6 +93,7 @@ bool StructTraits<tracing::mojom::TraceConfigDataView, perfetto::TraceConfig>::
   }
 
   out->set_duration_ms(data.duration_ms());
+  out->set_write_into_file(data.write_into_file());
   return true;
 }
 

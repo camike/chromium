@@ -5,9 +5,11 @@
 #include "components/sync/nigori/nigori_state.h"
 
 #include "base/base64.h"
+#include "base/notreached.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/base/time.h"
 #include "components/sync/engine/sync_encryption_handler.h"
+#include "components/sync/engine/sync_engine_switches.h"
 #include "components/sync/nigori/cryptographer_impl.h"
 #include "components/sync/nigori/keystore_keys_cryptographer.h"
 #include "components/sync/protocol/nigori_local_data.pb.h"
@@ -61,7 +63,7 @@ bool EncryptKeyBag(const CryptographerImpl& cryptographer,
 void UpdateNigoriSpecificsFromEncryptedTypes(
     ModelTypeSet encrypted_types,
     sync_pb::NigoriSpecifics* specifics) {
-  static_assert(41 == ModelType::NUM_ENTRIES,
+  static_assert(39 == ModelType::NUM_ENTRIES,
                 "If adding an encryptable type, update handling below.");
   specifics->set_encrypt_bookmarks(encrypted_types.Has(BOOKMARKS));
   specifics->set_encrypt_preferences(encrypted_types.Has(PREFERENCES));
@@ -80,10 +82,6 @@ void UpdateNigoriSpecificsFromEncryptedTypes(
   specifics->set_encrypt_extension_settings(
       encrypted_types.Has(EXTENSION_SETTINGS));
   specifics->set_encrypt_dictionary(encrypted_types.Has(DICTIONARY));
-  specifics->set_encrypt_favicon_images(
-      encrypted_types.Has(DEPRECATED_FAVICON_IMAGES));
-  specifics->set_encrypt_favicon_tracking(
-      encrypted_types.Has(DEPRECATED_FAVICON_TRACKING));
   specifics->set_encrypt_app_list(encrypted_types.Has(APP_LIST));
   specifics->set_encrypt_arc_package(encrypted_types.Has(ARC_PACKAGE));
   specifics->set_encrypt_printers(encrypted_types.Has(PRINTERS));
@@ -273,8 +271,6 @@ sync_pb::NigoriSpecifics NigoriState::ToSpecificsProto() const {
     specifics.set_custom_passphrase_time(
         TimeToProtoTime(custom_passphrase_time));
   }
-  // TODO(crbug.com/922900): add other fields support.
-  NOTIMPLEMENTED();
   return specifics;
 }
 
@@ -295,12 +291,22 @@ NigoriState NigoriState::Clone() const {
   return result;
 }
 
-bool NigoriState::NeedsKeystoreKeyRotation() const {
-  return !keystore_keys_cryptographer->IsEmpty() &&
-         passphrase_type == sync_pb::NigoriSpecifics::KEYSTORE_PASSPHRASE &&
-         !pending_keys.has_value() &&
-         !cryptographer->HasKey(
-             keystore_keys_cryptographer->GetLastKeystoreKeyName());
+bool NigoriState::NeedsKeystoreReencryption() const {
+  if (keystore_keys_cryptographer->IsEmpty() ||
+      passphrase_type != sync_pb::NigoriSpecifics::KEYSTORE_PASSPHRASE ||
+      pending_keys.has_value() ||
+      cryptographer->GetDefaultEncryptionKeyName() ==
+          keystore_keys_cryptographer->GetLastKeystoreKeyName()) {
+    return false;
+  }
+  if (!cryptographer->HasKey(
+          keystore_keys_cryptographer->GetLastKeystoreKeyName())) {
+    // Keystore key rotation.
+    return true;
+  }
+  // Migration from backward compatible to full keystore mode.
+  return base::FeatureList::IsEnabled(
+      switches::kSyncTriggerFullKeystoreMigration);
 }
 
 }  // namespace syncer

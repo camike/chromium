@@ -27,7 +27,11 @@
 
 // Returns the number of entries in the history database. Returns -1 if there
 // was an error.
-+ (NSInteger)getBrowsingHistoryEntryCount;
++ (NSInteger)browsingHistoryEntryCountWithError:
+    (NSError* __autoreleasing*)error;
+
+// Gets the number of items in the back list. Returns -1 in case of error.
++ (NSInteger)navigationBackListItemsCount;
 
 // Clears browsing cache. Returns nil on success, or else an NSError indicating
 // the operation failed.
@@ -80,6 +84,9 @@
 // Returns the number of open incognito tabs.
 + (NSUInteger)incognitoTabCount WARN_UNUSED_RESULT;
 
+// Returns the number of open browsers.
++ (NSUInteger)browserCount WARN_UNUSED_RESULT;
+
 // Simulates a backgrounding.
 // If not succeed returns an NSError indicating  why the
 // operation failed, otherwise nil.
@@ -108,7 +115,8 @@
 + (void)openNewTab;
 
 // Simulates opening http://www.example.com/ from another application.
-+ (void)simulateExternalAppURLOpening;
+// Returns the opened URL.
++ (NSURL*)simulateExternalAppURLOpening;
 
 // Simulates opening the add account sign-in flow from the web.
 + (void)simulateAddAccountFromWeb;
@@ -158,6 +166,52 @@
 // Returns the index of active tab in normal mode.
 + (NSUInteger)indexOfActiveNormalTab;
 
+// Resets Close All Tabs Confirmation feature to its default value.
++ (void)resetCloseAllTabsConfirmation;
+
+// Disables Close All Tabs Confirmation feature.
++ (void)disableCloseAllTabsConfirmation;
+
+#pragma mark - Window utilities (EG2)
+
+// Returns the number of windows, including background and disconnected or
+// archived windows.
++ (NSUInteger)windowCount WARN_UNUSED_RESULT;
+
+// Returns the number of foreground (visible on screen) windows.
++ (NSUInteger)foregroundWindowCount WARN_UNUSED_RESULT;
+
+// Closes all but one window, including all non-foreground windows.
++ (void)closeAllExtraWindows;
+
+// Open a new window. Returns an error if multiwindow is not supported.
++ (NSError*)openNewWindow;
+
+// Closes the window with given number.
++ (void)closeWindowWithNumber:(int)windowNumber;
+
+// Renumbers given window with current number to new number.
++ (void)changeWindowWithNumber:(int)windowNumber
+                   toNewNumber:(int)newWindowNumber;
+
+// Loads the URL |spec| in the current WebState in window with given number with
+// transition type ui::PAGE_TRANSITION_TYPED and returns without waiting for the
+// page to load.
++ (void)startLoadingURL:(NSString*)spec inWindowWithNumber:(int)windowNumber;
+
+// Returns YES if the current WebState in window with given number is loading.
++ (BOOL)isLoadingInWindowWithNumber:(int)windowNumber WARN_UNUSED_RESULT;
+
+// If the current WebState in window with given number is HTML content, will
+// wait until the window ID is injected. Returns YES if the injection is
+// successful or if the WebState is not HTML content.
++ (BOOL)waitForWindowIDInjectionIfNeededInWindowWithNumber:(int)windowNumber;
+
+// Returns YES if the current WebState in window with given number contains
+// |text|.
++ (BOOL)webStateContainsText:(NSString*)text
+          inWindowWithNumber:(int)windowNumber;
+
 #pragma mark - WebState Utilities (EG2)
 
 // Attempts to tap the element with |element_id| within window.frames[0] of the
@@ -185,6 +239,9 @@
 // Returns nil on success, or else an NSError indicating why the operation
 // failed.
 + (NSError*)submitWebStateFormWithID:(NSString*)formID;
+
+// Returns YES if the current WebState contains an element matching |selector|.
++ (BOOL)webStateContainsElement:(ElementSelector*)selector;
 
 // Returns YES if the current WebState contains |text|.
 + (BOOL)webStateContainsText:(NSString*)text;
@@ -256,7 +313,7 @@
 
 #pragma mark - Sync Utilities (EG2)
 
-// Clears fake sync server data.
+// Clears fake sync server data if the server is running.
 + (void)clearSyncServerData;
 
 // Starts the sync server. The server should not be running when calling this.
@@ -274,6 +331,13 @@
 // Returns the current sync cache GUID. The sync server must be running when
 // calling this.
 + (NSString*)syncCacheGUID;
+
+// Waits for sync invalidation field presence in the DeviceInfo data type on the
+// server.
++ (NSError*)waitForSyncInvalidationFields;
+
+// Whether or not the fake sync server has been setup.
++ (BOOL)isFakeSyncServerSetUp;
 
 // Sets up a fake sync server to be used by the ProfileSyncService.
 + (void)setUpFakeSyncServer;
@@ -352,6 +416,10 @@
                                           name:(NSString*)name
                                          count:(NSUInteger)count;
 
+// Adds a bookmark with a sync passphrase. The sync server will need the sync
+// passphrase to start.
++ (void)addBookmarkWithSyncPassphrase:(NSString*)syncPassphrase;
+
 #pragma mark - JavaScript Utilities (EG2)
 
 // Executes JavaScript on current WebState, and waits for either the completion
@@ -393,12 +461,6 @@
 // Returns YES if kTestFeature is enabled.
 + (BOOL)isTestFeatureEnabled;
 
-// Returns YES if CreditCardScanner feature is enabled.
-+ (BOOL)isCreditCardScannerEnabled WARN_UNUSED_RESULT;
-
-// Returns YES if AutofillEnableCompanyName feature is enabled.
-+ (BOOL)isAutofillCompanyNameEnabled WARN_UNUSED_RESULT;
-
 // Returns YES if DemographicMetricsReporting feature is enabled.
 + (BOOL)isDemographicMetricsReportingEnabled WARN_UNUSED_RESULT;
 
@@ -412,6 +474,22 @@
 
 // Returns YES if collections are presented in cards.
 + (BOOL)isCollectionsCardPresentationStyleEnabled WARN_UNUSED_RESULT;
+
+// Returns whether the mobile version of the websites are requested by default.
++ (BOOL)isMobileModeByDefault WARN_UNUSED_RESULT;
+
+// Returns whether the illustrated empty states feature is enabled.
++ (BOOL)isIllustratedEmptyStatesEnabled;
+
+// Returns whether the native context menus feature is enabled or not.
++ (BOOL)isNativeContextMenusEnabled;
+
+// Returns whether the app is configured to, and running in an environment which
+// can, open multiple windows.
++ (BOOL)areMultipleWindowsSupported;
+
+// Returns whether the Close All Tabs Confirmation feature is enabled.
++ (BOOL)isCloseAllTabsConfirmationEnabled;
 
 #pragma mark - Popup Blocking
 
@@ -442,6 +520,11 @@
 // clearing Browsing data.
 + (void)resetBrowsingDataPrefs;
 
+#pragma mark - Unified Consent utilities
+
+// Enables or disables URL-keyed anonymized data collection.
++ (void)setURLKeyedAnonymizedDataCollectionEnabled:(BOOL)enabled;
+
 #pragma mark - Keyboard Command utilities
 
 // The count of key commands registered with the currently active BVC.
@@ -454,6 +537,19 @@
 // UIKeyInputEscape constants as |input|.
 + (void)simulatePhysicalKeyboardEvent:(NSString*)input
                                 flags:(UIKeyModifierFlags)flags;
+
+#pragma mark - Pasteboard utilities
+
+// Clears the URLs stored in the pasteboard, from the tested app's perspective.
++ (void)clearPasteboardURLs;
+
+// Retrieves the currently stored string on the pasteboard from the tested app's
+// perspective.
++ (NSString*)pasteboardString;
+
+// Retrieves the currently stored URL on the pasteboard from the tested app's
+// perspective.
++ (NSString*)pasteboardURLSpec;
 
 @end
 

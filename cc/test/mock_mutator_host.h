@@ -70,11 +70,8 @@ class MockMutatorHost : public MutatorHost {
                      bool(ElementId element_id, TargetProperty::Type property));
   MOCK_CONST_METHOD1(AnimationsPreserveAxisAlignment,
                      bool(ElementId element_id));
-  MOCK_CONST_METHOD4(GetAnimationScales,
-                     void(ElementId element_id,
-                          ElementListType list_type,
-                          float* maximum_scale,
-                          float* starting_scale));
+  MOCK_CONST_METHOD2(MaximumScale,
+                     float(ElementId element_id, ElementListType list_type));
   MOCK_CONST_METHOD1(IsElementAnimating, bool(ElementId element_id));
   MOCK_CONST_METHOD1(HasTickingKeyframeModelForTesting,
                      bool(ElementId element_id));
@@ -97,13 +94,14 @@ class MockMutatorHost : public MutatorHost {
                     base::TimeDelta delayed_by));
   MOCK_METHOD0(ScrollAnimationAbort, void());
   MOCK_CONST_METHOD0(ImplOnlyScrollAnimatingElement, ElementId());
-  MOCK_CONST_METHOD0(CompositedAnimationsCount, size_t());
   MOCK_CONST_METHOD0(MainThreadAnimationsCount, size_t());
   MOCK_CONST_METHOD0(HasCustomPropertyAnimations, bool());
   MOCK_CONST_METHOD0(CurrentFrameHadRAF, bool());
   MOCK_CONST_METHOD0(NextFrameHasPendingRAF, bool());
   MOCK_METHOD0(TakePendingThroughputTrackerInfos,
                PendingThroughputTrackerInfos());
+  MOCK_CONST_METHOD0(HasCanvasInvalidation, bool());
+  MOCK_CONST_METHOD0(HasJSAnimation, bool());
 };
 
 }  // namespace cc

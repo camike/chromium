@@ -4,11 +4,13 @@
 
 #include "ui/gl/gl_surface_egl_x11.h"
 
+#include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/base/x/x11_display_util.h"
-#include "ui/gfx/x/connection.h"
-#include "ui/gfx/x/x11.h"
+#include "ui/base/x/x11_util.h"
+#include "ui/gfx/x/randr.h"
 #include "ui/gfx/x/xproto.h"
+#include "ui/gfx/x/xproto_util.h"
 #include "ui/gl/egl_util.h"
 
 namespace gl {
@@ -17,13 +19,13 @@ namespace {
 
 class XrandrIntervalOnlyVSyncProvider : public gfx::VSyncProvider {
  public:
-  explicit XrandrIntervalOnlyVSyncProvider(Display* display)
-      : display_(display), interval_(base::TimeDelta::FromSeconds(1 / 60.)) {}
+  explicit XrandrIntervalOnlyVSyncProvider()
+      : interval_(base::TimeDelta::FromSeconds(1 / 60.)) {}
 
   void GetVSyncParameters(UpdateVSyncCallback callback) override {
     if (++calls_since_last_update_ >= kCallsBetweenUpdates) {
       calls_since_last_update_ = 0;
-      interval_ = ui::GetPrimaryDisplayRefreshIntervalFromXrandr(display_);
+      interval_ = ui::GetPrimaryDisplayRefreshIntervalFromXrandr();
     }
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
@@ -38,7 +40,6 @@ class XrandrIntervalOnlyVSyncProvider : public gfx::VSyncProvider {
   bool IsHWClock() const override { return false; }
 
  private:
-  Display* const display_ = nullptr;
   base::TimeDelta interval_;
   static const int kCallsBetweenUpdates = 100;
   int calls_since_last_update_ = kCallsBetweenUpdates;
@@ -46,30 +47,36 @@ class XrandrIntervalOnlyVSyncProvider : public gfx::VSyncProvider {
 
 }  // namespace
 
-NativeViewGLSurfaceEGLX11::NativeViewGLSurfaceEGLX11(EGLNativeWindowType window)
-    : NativeViewGLSurfaceEGL(window, nullptr) {}
+NativeViewGLSurfaceEGLX11::NativeViewGLSurfaceEGLX11(x11::Window window)
+    : NativeViewGLSurfaceEGL(static_cast<uint32_t>(window), nullptr) {}
 
 bool NativeViewGLSurfaceEGLX11::Initialize(GLSurfaceFormat format) {
   if (!NativeViewGLSurfaceEGL::Initialize(format))
     return false;
 
+  auto* connection = x11::Connection::Get();
   // Query all child windows and store them. ANGLE creates a child window when
-  // eglCreateWidnowSurface is called on X11 and expose events from this window
-  // need to be received by this class.
-  if (auto reply = x11::Connection::Get()->QueryTree({window_}).Sync())
+  // eglCreateWindowSurface is called on X11 and expose events from this window
+  // need to be received by this class.  Since ANGLE is using a separate
+  // connection, we have to select expose events on our own connection.
+  if (auto reply =
+          connection->QueryTree({static_cast<x11::Window>(window_)}).Sync()) {
     children_ = std::move(reply->children);
-
-  if (ui::X11EventSource::HasInstance()) {
-    dispatcher_set_ = true;
-    ui::X11EventSource::GetInstance()->AddXEventDispatcher(this);
   }
+  for (auto child : children_) {
+    connection->ChangeWindowAttributes(
+        {.window = child, .event_mask = x11::EventMask::Exposure});
+  }
+
+  dispatcher_set_ = true;
+  connection->AddEventObserver(this);
   return true;
 }
 
 void NativeViewGLSurfaceEGLX11::Destroy() {
   NativeViewGLSurfaceEGL::Destroy();
-  if (dispatcher_set_ && ui::X11EventSource::HasInstance())
-    ui::X11EventSource::GetInstance()->RemoveXEventDispatcher(this);
+  if (dispatcher_set_)
+    x11::Connection::Get()->RemoveEventObserver(this);
 }
 
 gfx::SwapResult NativeViewGLSurfaceEGLX11::SwapBuffers(
@@ -82,8 +89,12 @@ gfx::SwapResult NativeViewGLSurfaceEGLX11::SwapBuffers(
   // views::DesktopWindowTreeHostX11::InitX11Window back to None for the
   // XWindow associated to this surface after the first SwapBuffers has
   // happened, to avoid showing a weird white background while resizing.
-  if (GetXNativeDisplay() && !has_swapped_buffers_) {
-    XSetWindowBackgroundPixmap(GetXNativeDisplay(), window_, 0);
+  if (GetXNativeConnection()->Ready() && !has_swapped_buffers_) {
+    GetXNativeConnection()->ChangeWindowAttributes({
+        .window = static_cast<x11::Window>(window_),
+        .background_pixmap = x11::Pixmap::None,
+    });
+    GetXNativeConnection()->Flush();
     has_swapped_buffers_ = true;
   }
   return result;
@@ -93,30 +104,27 @@ NativeViewGLSurfaceEGLX11::~NativeViewGLSurfaceEGLX11() {
   Destroy();
 }
 
-Display* NativeViewGLSurfaceEGLX11::GetXNativeDisplay() const {
-  return reinterpret_cast<Display*>(GetNativeDisplay());
+x11::Connection* NativeViewGLSurfaceEGLX11::GetXNativeConnection() const {
+  return x11::Connection::Get();
 }
 
 std::unique_ptr<gfx::VSyncProvider>
 NativeViewGLSurfaceEGLX11::CreateVsyncProviderInternal() {
-  return std::make_unique<XrandrIntervalOnlyVSyncProvider>(GetXNativeDisplay());
+  return std::make_unique<XrandrIntervalOnlyVSyncProvider>();
 }
 
-bool NativeViewGLSurfaceEGLX11::DispatchXEvent(XEvent* x_event) {
+void NativeViewGLSurfaceEGLX11::OnEvent(const x11::Event& x11_event) {
   // When ANGLE is used for EGL, it creates an X11 child window. Expose events
   // from this window need to be forwarded to this class.
-  bool can_dispatch = x_event->type == Expose &&
-                      std::find(children_.begin(), children_.end(),
-                                x_event->xexpose.window) != children_.end();
+  auto* expose = x11_event.As<x11::ExposeEvent>();
+  if (!expose || !base::Contains(children_, expose->window))
+    return;
 
-  if (!can_dispatch)
-    return false;
-
-  x_event->xexpose.window = window_;
-  Display* x11_display = GetXNativeDisplay();
-  XSendEvent(x11_display, window_, x11::False, ExposureMask, x_event);
-  XFlush(x11_display);
-  return true;
+  auto expose_copy = *expose;
+  auto window = static_cast<x11::Window>(window_);
+  expose_copy.window = window;
+  x11::SendEvent(expose_copy, window, x11::EventMask::Exposure);
+  x11::Connection::Get()->Flush();
 }
 
 }  // namespace gl

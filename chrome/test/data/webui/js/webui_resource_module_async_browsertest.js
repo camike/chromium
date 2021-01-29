@@ -6,6 +6,8 @@
  * @fileoverview JS tests for various chrome://resources JS modules.
  */
 
+GEN('#include "content/public/test/browser_test.h"');
+
 /** Test fixture for testing shared JS module resources. */
 var WebUIResourceModuleAsyncTest = class extends testing.Test {
   /** @override */
@@ -22,20 +24,12 @@ var WebUIResourceModuleAsyncTest = class extends testing.Test {
   get webuiHost() {
     return 'dummyurl';
   }
-
-  /** @override */
-  get extraLibraries() {
-    return [
-      '//third_party/mocha/mocha.js',
-      '//chrome/test/data/webui/mocha_adapter.js',
-    ];
-  }
 };
 
 var CrModuleTest = class extends WebUIResourceModuleAsyncTest {
   /** @override */
   get browsePreload() {
-    return 'chrome://test?module=js/cr_test.js';
+    return 'chrome://test/test_loader.html?module=js/cr_test.js';
   }
 };
 
@@ -54,7 +48,7 @@ TEST_F('CrModuleTest', 'WebUIListeners', function() {
 var PromiseResolverModuleTest = class extends WebUIResourceModuleAsyncTest {
   /** @override */
   get browsePreload() {
-    return 'chrome://test?module=js/promise_resolver_test.js';
+    return 'chrome://test/test_loader.html?module=js/promise_resolver_test.js';
   }
 };
 
@@ -65,7 +59,7 @@ TEST_F('PromiseResolverModuleTest', 'All', function() {
 var ParseHtmlSubsetModuleTest = class extends WebUIResourceModuleAsyncTest {
   /** @override */
   get browsePreload() {
-    return 'chrome://test?module=js/parse_html_subset_test.js';
+    return 'chrome://test/test_loader.html?module=js/parse_html_subset_test.js';
   }
 };
 
@@ -73,10 +67,22 @@ TEST_F('ParseHtmlSubsetModuleTest', 'All', function() {
   mocha.run();
 });
 
+var ParseHtmlSubsetTrustedTypesTest =
+    class extends WebUIResourceModuleAsyncTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://test/test_loader.html?module=js/parse_html_subset_trusted_types_test.js';
+  }
+};
+
+TEST_F('ParseHtmlSubsetTrustedTypesTest', 'All', function() {
+  mocha.run();
+});
+
 var UtilModuleTest = class extends WebUIResourceModuleAsyncTest {
   /** @override */
   get browsePreload() {
-    return 'chrome://test?module=js/util_test.js';
+    return 'chrome://test/test_loader.html?module=js/util_test.js';
   }
 };
 
@@ -87,7 +93,7 @@ TEST_F('UtilModuleTest', 'All', function() {
 var LoadTimeDataModuleTest = class extends WebUIResourceModuleAsyncTest {
   /** @override */
   get browsePreload() {
-    return 'chrome://test?module=js/load_time_data_test.js';
+    return 'chrome://test/test_loader.html?module=js/load_time_data_test.js';
   }
 };
 
@@ -98,10 +104,21 @@ TEST_F('LoadTimeDataModuleTest', 'All', function() {
 var I18nBehaviorModuleTest = class extends WebUIResourceModuleAsyncTest {
   /** @override */
   get browsePreload() {
-    return 'chrome://test?module=js/i18n_behavior_test.js';
+    return 'chrome://test/test_loader.html?module=js/i18n_behavior_test.js';
   }
 };
 
 TEST_F('I18nBehaviorModuleTest', 'All', function() {
+  mocha.run();
+});
+
+var ColorUtilsModuleTest = class extends WebUIResourceModuleAsyncTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://test/test_loader.html?module=js/color_utils_test.js';
+  }
+};
+
+TEST_F('ColorUtilsModuleTest', 'All', function() {
   mocha.run();
 });

@@ -26,17 +26,11 @@ namespace base {
 class CommandLine;
 }
 
-namespace color_utils {
-struct HSL;
-}
-
 namespace ui {
 class KeyEvent;
 }
 
 namespace gtk {
-
-extern const color_utils::HSL kDefaultTintFrameIncognito;
 
 void GtkInitFromCommandLine(const base::CommandLine& command_line);
 
@@ -48,7 +42,7 @@ void SetGtkTransientForAura(GtkWidget* dialog, aura::Window* parent);
 aura::Window* GetAuraTransientParent(GtkWidget* dialog);
 
 // Clears the transient parent for |dialog|.
-void ClearAuraTransientParent(GtkWidget* dialog);
+void ClearAuraTransientParent(GtkWidget* dialog, aura::Window* parent);
 
 // Parses |button_string| into |leading_buttons| and
 // |trailing_buttons|.  The string is of the format

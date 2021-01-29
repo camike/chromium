@@ -38,22 +38,18 @@ class AXMenuListOption final : public AXNodeObject {
  public:
   AXMenuListOption(HTMLOptionElement*, AXObjectCacheImpl&);
   ~AXMenuListOption() override;
+  bool IsDetached() const override { return !element_; }
 
-  int PosInSet() const override;
-  int SetSize() const override;
+  void Trace(Visitor*) const override;
 
  private:
-  void Trace(Visitor*) override;
-
   bool IsMenuListOption() const override { return true; }
 
   Node* GetNode() const override { return element_; }
   void Detach() override;
-  bool IsDetached() const override { return !element_; }
   LocalFrameView* DocumentFrameView() const override;
-  ax::mojom::Role RoleValue() const override;
   bool CanHaveChildren() const override { return false; }
-  AXObject* ComputeParent() const override;
+  AXObject* ComputeParentImpl() const override;
 
   Element* ActionElement() const override;
   bool IsVisible() const override;

@@ -10,8 +10,9 @@
 #include "third_party/blink/renderer/platform/context_lifecycle_notifier.h"
 #include "third_party/blink/renderer/platform/heap/heap_test_utilities.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
-#include "third_party/blink/renderer/platform/heap_observer_list.h"
+#include "third_party/blink/renderer/platform/heap_observer_set.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
+#include "third_party/blink/renderer/platform/mojo_binding_context.h"
 
 namespace blink {
 
@@ -19,8 +20,6 @@ namespace {
 
 class FakeContextNotifier final : public GarbageCollected<FakeContextNotifier>,
                                   public ContextLifecycleNotifier {
-  USING_GARBAGE_COLLECTED_MIXIN(FakeContextNotifier);
-
  public:
   FakeContextNotifier() = default;
 
@@ -35,24 +34,24 @@ class FakeContextNotifier final : public GarbageCollected<FakeContextNotifier>,
 
   void NotifyContextDestroyed() {
     observers_.ForEachObserver([](ContextLifecycleObserver* observer) {
-      observer->ContextDestroyed();
+      observer->NotifyContextDestroyed();
     });
   }
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(observers_);
     ContextLifecycleNotifier::Trace(visitor);
   }
 
  private:
-  HeapObserverList<ContextLifecycleObserver> observers_;
+  HeapObserverSet<ContextLifecycleObserver> observers_;
 };
 
 template <HeapMojoWrapperMode Mode>
 class GCOwner : public GarbageCollected<GCOwner<Mode>> {
  public:
   explicit GCOwner(FakeContextNotifier* context) : receiver_set_(context) {}
-  void Trace(Visitor* visitor) { visitor->Trace(receiver_set_); }
+  void Trace(Visitor* visitor) const { visitor->Trace(receiver_set_); }
 
   HeapMojoUniqueReceiverSet<sample::blink::Service,
                             std::default_delete<sample::blink::Service>,
@@ -100,7 +99,7 @@ class HeapMojoUniqueReceiverSetWithContextObserverTest
           HeapMojoWrapperMode::kWithContextObserver> {};
 class HeapMojoUniqueReceiverSetWithoutContextObserverTest
     : public HeapMojoUniqueReceiverSetBaseTest<
-          HeapMojoWrapperMode::kWithoutContextObserver> {};
+          HeapMojoWrapperMode::kForceWithoutContextObserver> {};
 
 }  // namespace
 
@@ -124,50 +123,6 @@ class MockService : public sample::blink::Service {
 };
 
 }  // namespace
-
-// GC the HeapMojoUniqueReceiverSet with context observer and verify that the
-// receiver is no longer part of the set, and that the service was deleted.
-TEST_F(HeapMojoUniqueReceiverSetWithContextObserverTest, ResetsOnGC) {
-  auto& receiver_set = owner()->receiver_set();
-  auto service = std::make_unique<
-      MockService<HeapMojoUniqueReceiverSetWithContextObserverTest>>(this);
-  auto receiver = mojo::PendingReceiver<sample::blink::Service>(
-      mojo::MessagePipe().handle0);
-
-  mojo::ReceiverId rid =
-      receiver_set.Add(std::move(service), std::move(receiver), task_runner());
-  EXPECT_TRUE(receiver_set.HasReceiver(rid));
-  EXPECT_FALSE(service_deleted_);
-
-  ClearOwner();
-  PreciselyCollectGarbage();
-
-  EXPECT_TRUE(service_deleted_);
-
-  CompleteSweepingIfNeeded();
-}
-
-// GC the HeapMojoUniqueReceiverSet without context observer and verify that the
-// receiver is no longer part of the set, and that the service was deleted.
-TEST_F(HeapMojoUniqueReceiverSetWithoutContextObserverTest, ResetsOnGC) {
-  auto& receiver_set = owner()->receiver_set();
-  auto service = std::make_unique<
-      MockService<HeapMojoUniqueReceiverSetWithoutContextObserverTest>>(this);
-  auto receiver = mojo::PendingReceiver<sample::blink::Service>(
-      mojo::MessagePipe().handle0);
-
-  mojo::ReceiverId rid =
-      receiver_set.Add(std::move(service), std::move(receiver), task_runner());
-  EXPECT_TRUE(receiver_set.HasReceiver(rid));
-  EXPECT_FALSE(service_deleted_);
-
-  ClearOwner();
-  PreciselyCollectGarbage();
-
-  EXPECT_TRUE(service_deleted_);
-
-  CompleteSweepingIfNeeded();
-}
 
 // Destroy the context with context observer and verify that the receiver is no
 // longer part of the set, and that the service was deleted.

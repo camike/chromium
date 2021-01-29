@@ -8,6 +8,7 @@
 #include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/signin/signin_ui_util.h"
 #include "chrome/browser/ui/browser.h"
@@ -38,7 +39,7 @@
 #include "ui/views/controls/link.h"
 #include "ui/views/layout/box_layout.h"
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/ui/views/sync/dice_bubble_sync_promo_view.h"
 #endif
 
@@ -72,7 +73,7 @@ views::View* AnchorViewForBrowser(const ExtensionInstalledBubbleModel* model,
           browser_view->toolbar()->browser_actions();
       // Hitting this DCHECK means |ShouldShow| failed.
       DCHECK(container);
-      DCHECK(!container->animating());
+      DCHECK(!container->GetAnimating());
 
       reference_view = container->GetViewForId(model->extension_id());
     }
@@ -91,7 +92,7 @@ views::View* AnchorViewForBrowser(const ExtensionInstalledBubbleModel* model,
 std::unique_ptr<views::View> CreateSigninPromoView(
     Profile* profile,
     BubbleSyncPromoDelegate* delegate) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // ChromeOS does not show the signin promo.
   return nullptr;
 #else
@@ -132,21 +133,15 @@ class ExtensionInstalledBubbleView : public BubbleSyncPromoDelegate,
 
  private:
   // views::BubbleDialogDelegateView:
-  base::string16 GetWindowTitle() const override;
-  gfx::ImageSkia GetWindowIcon() override;
-  bool ShouldShowWindowIcon() const override;
-  bool ShouldShowCloseButton() const override;
   void Init() override;
 
   // BubbleSyncPromoDelegate:
-  void OnEnableSync(const AccountInfo& account_info,
-                    bool is_default_promo_account) override;
+  void OnEnableSync(const AccountInfo& account_info) override;
 
   void LinkClicked();
 
   Browser* const browser_;
   const std::unique_ptr<ExtensionInstalledBubbleModel> model_;
-  gfx::ImageSkia icon_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionInstalledBubbleView);
 };
@@ -159,7 +154,7 @@ void ExtensionInstalledBubbleView::Show(
       std::make_unique<ExtensionInstalledBubbleView>(browser, std::move(model));
   auto* weak_delegate = delegate.get();
   views::Widget* const widget =
-      views::BubbleDialogDelegateView::CreateBubble(delegate.release());
+      views::BubbleDialogDelegateView::CreateBubble(std::move(delegate));
   // When the extension is installed to the ExtensionsToolbarContainer, use the
   // container to pop out the extension icon and show the widget. Otherwise show
   // the widget directly.
@@ -184,14 +179,20 @@ ExtensionInstalledBubbleView::ExtensionInstalledBubbleView(
                                    ? views::BubbleBorder::TOP_LEFT
                                    : views::BubbleBorder::TOP_RIGHT),
       browser_(browser),
-      model_(std::move(model)),
-      icon_(model_->MakeIconOfSize(kMaxIconSize)) {
+      model_(std::move(model)) {
   chrome::RecordDialogCreation(chrome::DialogIdentifier::EXTENSION_INSTALLED);
-  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_NONE);
+  SetButtons(ui::DIALOG_BUTTON_NONE);
   if (model_->show_sign_in_promo()) {
-    DialogDelegate::SetFootnoteView(
-        CreateSigninPromoView(browser->profile(), this));
+    SetFootnoteView(CreateSigninPromoView(browser->profile(), this));
   }
+  SetIcon(model_->MakeIconOfSize(kMaxIconSize));
+  SetShowIcon(true);
+  SetShowCloseButton(true);
+
+  base::string16 extension_name = base::UTF8ToUTF16(model_->extension_name());
+  base::i18n::AdjustStringForLocaleDirection(&extension_name);
+  SetTitle(l10n_util::GetStringFUTF16(IDS_EXTENSION_INSTALLED_HEADING,
+                                      extension_name));
 }
 
 ExtensionInstalledBubbleView::~ExtensionInstalledBubbleView() = default;
@@ -200,26 +201,6 @@ void ExtensionInstalledBubbleView::UpdateAnchorView() {
   views::View* reference_view = AnchorViewForBrowser(model_.get(), browser_);
   DCHECK(reference_view);
   SetAnchorView(reference_view);
-}
-
-base::string16 ExtensionInstalledBubbleView::GetWindowTitle() const {
-  // Add the heading (for all options).
-  base::string16 extension_name = base::UTF8ToUTF16(model_->extension_name());
-  base::i18n::AdjustStringForLocaleDirection(&extension_name);
-  return l10n_util::GetStringFUTF16(IDS_EXTENSION_INSTALLED_HEADING,
-                                    extension_name);
-}
-
-gfx::ImageSkia ExtensionInstalledBubbleView::GetWindowIcon() {
-  return icon_;
-}
-
-bool ExtensionInstalledBubbleView::ShouldShowWindowIcon() const {
-  return true;
-}
-
-bool ExtensionInstalledBubbleView::ShouldShowCloseButton() const {
-  return true;
 }
 
 void ExtensionInstalledBubbleView::Init() {
@@ -250,7 +231,7 @@ void ExtensionInstalledBubbleView::Init() {
   // Indent by the size of the icon.
   layout->set_inside_border_insets(gfx::Insets(
       0,
-      icon_.width() +
+      GetWindowIcon().width() +
           provider->GetDistanceMetric(DISTANCE_UNRELATED_CONTROL_HORIZONTAL),
       0, 0));
   layout->set_cross_axis_alignment(
@@ -263,7 +244,7 @@ void ExtensionInstalledBubbleView::Init() {
   if (model_->show_key_binding()) {
     auto* manage_shortcut = AddChildView(std::make_unique<views::Link>(
         l10n_util::GetStringUTF16(IDS_EXTENSION_INSTALLED_MANAGE_SHORTCUTS)));
-    manage_shortcut->set_callback(base::BindRepeating(
+    manage_shortcut->SetCallback(base::BindRepeating(
         &ExtensionInstalledBubbleView::LinkClicked, base::Unretained(this)));
   }
 
@@ -273,12 +254,10 @@ void ExtensionInstalledBubbleView::Init() {
   }
 }
 
-void ExtensionInstalledBubbleView::OnEnableSync(const AccountInfo& account,
-                                                bool is_default_promo_account) {
-  signin_ui_util::EnableSyncFromPromo(
+void ExtensionInstalledBubbleView::OnEnableSync(const AccountInfo& account) {
+  signin_ui_util::EnableSyncFromSingleAccountPromo(
       browser_, account,
-      signin_metrics::AccessPoint::ACCESS_POINT_EXTENSION_INSTALL_BUBBLE,
-      is_default_promo_account);
+      signin_metrics::AccessPoint::ACCESS_POINT_EXTENSION_INSTALL_BUBBLE);
   GetWidget()->Close();
 }
 
@@ -325,8 +304,8 @@ class IconAnimationWaiter {
                                                             icon)) {
     removal_watcher_ = std::make_unique<ExtensionRemovalWatcher>(
         browser, extension,
-        base::Bind(&IconAnimationWaiter::OnExtensionRemoved,
-                   weak_factory_.GetWeakPtr()));
+        base::BindOnce(&IconAnimationWaiter::OnExtensionRemoved,
+                       weak_factory_.GetWeakPtr()));
   }
   virtual ~IconAnimationWaiter() = default;
 
@@ -367,7 +346,7 @@ class IconAnimationWaiter {
           BrowserView::GetBrowserViewForBrowser(browser_)
               ->toolbar()
               ->browser_actions();
-      return container && !container->animating();
+      return container && !container->GetAnimating();
     }
     return true;
   }

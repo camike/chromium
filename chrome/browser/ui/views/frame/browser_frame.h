@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_FRAME_H_
 
 #include "base/compiler_specific.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
@@ -65,8 +64,9 @@ class BrowserFrame : public views::Widget, public views::ContextMenuController {
   int GetMinimizeButtonOffset() const;
 
   // Retrieves the bounds in non-client view coordinates for the
-  // TabStripRegionView that contains the specified TabStrip view.
-  gfx::Rect GetBoundsForTabStripRegion(const views::View* tabstrip) const;
+  // TabStripRegionView that contains the TabStrip view.
+  gfx::Rect GetBoundsForTabStripRegion(
+      const gfx::Size& tabstrip_minimum_size) const;
 
   // Returns the inset of the topmost view in the client view from the top of
   // the non-client view. The topmost view depends on the window type. The
@@ -111,12 +111,10 @@ class BrowserFrame : public views::Widget, public views::ContextMenuController {
   // Called when BrowserView creates all it's child views.
   void OnBrowserViewInitViewsComplete();
 
-  // Returns whether this window should be themed with the user's theme or not.
-  bool ShouldUseTheme() const;
-
   // views::Widget:
   views::internal::RootView* CreateRootView() override;
-  views::NonClientFrameView* CreateNonClientFrameView() override;
+  std::unique_ptr<views::NonClientFrameView> CreateNonClientFrameView()
+      override;
   bool GetAccelerator(int command_id,
                       ui::Accelerator* accelerator) const override;
   const ui::ThemeProvider* GetThemeProvider() const override;
@@ -170,7 +168,7 @@ class BrowserFrame : public views::Widget, public views::ContextMenuController {
   // NativeBrowserFrame::UsesNativeSystemMenu() returns false.
   std::unique_ptr<views::MenuRunner> menu_runner_;
 
-  std::unique_ptr<ui::TouchUiController::Subscription> subscription_ =
+  base::CallbackListSubscription subscription_ =
       ui::TouchUiController::Get()->RegisterCallback(
           base::BindRepeating(&BrowserFrame::OnTouchUiChanged,
                               base::Unretained(this)));
@@ -184,6 +182,14 @@ class BrowserFrame : public views::Widget, public views::ContextMenuController {
   // may change, the fast resize strategy will be used to resize its web
   // contents for smoother dragging.
   TabDragKind tab_drag_kind_ = TabDragKind::kNone;
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // Store the number of virtual desks that currently exist. Used to determine
+  // whether the system menu should be reset. If the value is -1, then either
+  // the ash::DesksHelper does not exist or haven't retrieved the system menu
+  // model yet.
+  int num_desks_ = -1;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(BrowserFrame);
 };

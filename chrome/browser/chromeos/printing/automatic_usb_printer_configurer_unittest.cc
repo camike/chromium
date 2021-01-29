@@ -5,16 +5,15 @@
 #include "chrome/browser/chromeos/printing/automatic_usb_printer_configurer.h"
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/containers/flat_set.h"
 #include "base/optional.h"
-#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/chromeos/printing/cups_printers_manager.h"
 #include "chrome/browser/chromeos/printing/printers_map.h"
 #include "chrome/browser/chromeos/printing/test_printer_configurer.h"
 #include "chrome/browser/chromeos/printing/usb_printer_notification_controller.h"
-#include "chrome/common/chrome_features.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -23,21 +22,21 @@ namespace {
 Printer CreateUsbPrinter(const std::string& id) {
   Printer printer;
   printer.set_id(id);
-  printer.set_uri("usb:printer");
+  printer.SetUri("usb://usb/printer");
   return printer;
 }
 
 Printer CreateIppUsbPrinter(const std::string& id) {
   Printer printer;
   printer.set_id(id);
-  printer.set_uri("ippusb:printer");
+  printer.SetUri("ippusb://usb/printer");
   return printer;
 }
 
 Printer CreateIppPrinter(const std::string& id) {
   Printer printer;
   printer.set_id(id);
-  printer.set_uri("ipp:printer");
+  printer.SetUri("ipp://usb/printer");
   return printer;
 }
 
@@ -95,9 +94,7 @@ class FakePrinterInstallationManager : public PrinterInstallationManager {
   ~FakePrinterInstallationManager() override = default;
 
   // CupsPrintersManager overrides
-  void PrinterInstalled(const Printer& printer,
-                        bool is_automatic,
-                        PrinterSetupSource source) override {
+  void PrinterInstalled(const Printer& printer, bool is_automatic) override {
     DCHECK(is_automatic);
 
     installed_printers_.insert(printer.id());
@@ -107,8 +104,17 @@ class FakePrinterInstallationManager : public PrinterInstallationManager {
     return installed_printers_.contains(printer.id());
   }
 
+  void PrinterIsNotAutoconfigurable(const Printer& printer) override {
+    printers_marked_as_not_autoconf_.insert(printer.id());
+  }
+
+  bool IsMarkedAsNotAutoconfigurable(const Printer& printer) {
+    return printers_marked_as_not_autoconf_.contains(printer.id());
+  }
+
  private:
   base::flat_set<std::string> installed_printers_;
+  base::flat_set<std::string> printers_marked_as_not_autoconf_;
 };
 
 class FakeUsbPrinterNotificationController
@@ -144,8 +150,6 @@ class FakeUsbPrinterNotificationController
 class AutomaticUsbPrinterConfigurerTest : public testing::Test {
  public:
   AutomaticUsbPrinterConfigurerTest() {
-    scoped_feature_list_.InitAndEnableFeature(
-        features::kStreamlinedUsbPrinterSetup);
     fake_installation_manager_ =
         std::make_unique<FakePrinterInstallationManager>();
     auto printer_configurer = std::make_unique<TestPrinterConfigurer>();
@@ -171,9 +175,6 @@ class AutomaticUsbPrinterConfigurerTest : public testing::Test {
   std::unique_ptr<FakeUsbPrinterNotificationController>
       fake_notification_controller_;
   std::unique_ptr<AutomaticUsbPrinterConfigurer> auto_usb_printer_configurer_;
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
 
   DISALLOW_COPY_AND_ASSIGN(AutomaticUsbPrinterConfigurerTest);
 };
@@ -332,6 +333,24 @@ TEST_F(AutomaticUsbPrinterConfigurerTest, NotificationOpenedForNewDiscovered) {
 
   EXPECT_TRUE(
       fake_notification_controller_->IsNotificationDisplayed(printer_id));
+}
+
+TEST_F(AutomaticUsbPrinterConfigurerTest, RegisterAutoconfFailureForIppUsb) {
+  const std::string printer1_id = "id1";
+  const std::string printer2_id = "id2";
+  const Printer printer1 = CreateIppUsbPrinter(printer1_id);
+  const Printer printer2 = CreateIppUsbPrinter(printer2_id);
+
+  fake_printer_configurer_->AssignPrinterSetupResult(
+      printer1_id, PrinterSetupResult::kPrinterIsNotAutoconfigurable);
+
+  fake_observable_printers_manager_.AddNearbyAutomaticPrinter(printer1);
+  fake_observable_printers_manager_.AddNearbyAutomaticPrinter(printer2);
+
+  EXPECT_TRUE(
+      fake_installation_manager_->IsMarkedAsNotAutoconfigurable(printer1));
+  EXPECT_FALSE(
+      fake_installation_manager_->IsMarkedAsNotAutoconfigurable(printer2));
 }
 
 }  // namespace chromeos

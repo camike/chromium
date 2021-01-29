@@ -7,7 +7,7 @@ import inspect
 import itertools
 import mock
 import os
-import tempfile
+import re
 import unittest
 
 from gpu_tests import gpu_helper
@@ -18,6 +18,7 @@ from gpu_tests import webgl_conformance_integration_test
 from gpu_tests import webgl_test_util
 
 from py_utils import discover
+from py_utils import tempfile_ext
 
 from typ import expectations_parser
 from typ import json_results
@@ -56,6 +57,13 @@ ANDROID_CONDITIONS = [
     'android-kitkat',
 ]
 GENERIC_CONDITIONS = OS_CONDITIONS + GPU_CONDITIONS
+
+VALID_BUG_REGEXES = [
+    re.compile(r'crbug\.com\/\d+'),
+    re.compile(r'crbug\.com\/angleproject\/\d+'),
+    re.compile(r'crbug\.com\/swiftshader\/\d+'),
+    re.compile(r'skbug\.com\/\d+'),
+]
 
 _map_specific_to_generic = {sos: 'win' for sos in WIN_CONDITIONS}
 _map_specific_to_generic.update({sos: 'mac' for sos in MAC_CONDITIONS})
@@ -112,6 +120,9 @@ def _MapGpuDevicesToVendors(tag_sets):
       break
 
 
+# No good way to reduce the number of return statements to the required level
+# without harming readability.
+# pylint: disable=too-many-return-statements,too-many-branches
 def _IsDriverTagDuplicated(driver_tag1, driver_tag2):
   if driver_tag1 == driver_tag2:
     return True
@@ -157,6 +168,7 @@ def _IsDriverTagDuplicated(driver_tag1, driver_tag2):
     return not gpu_helper.EvaluateVersionComparison(version1, 'le', version2)
   else:
     assert False
+# pylint: enable=too-many-return-statements,too-many-branches
 
 
 def _DoTagsConflict(t1, t2):
@@ -193,7 +205,8 @@ def _ExtractUnitTestTestExpectations(file_name):
   return test_expectations_list
 
 
-def CheckTestExpectationsAreForExistingTests(test_class,
+def CheckTestExpectationsAreForExistingTests(unittest_testcase,
+                                             test_class,
                                              mock_options,
                                              test_names=None):
   test_names = test_names or [
@@ -209,11 +222,10 @@ def CheckTestExpectationsAreForExistingTests(test_class,
                                                   test_class.Name())
         for exp in test_expectations.check_for_broken_expectations(test_names)
     ])
-    if broke_expectations:
-      broke_expectations = ('The following expectations were found to'
-                            ' not apply to any tests in the %s test suite\n' %
-                            (test_class.Name()) + broke_expectations)
-      assert not broke_expectations, broke_expectations
+    unittest_testcase.assertEqual(
+        broke_expectations, '',
+        'The following expectations were found to not apply to any tests in '
+        'the %s test suite:\n%s' % (test_class.Name(), broke_expectations))
 
 
 def CheckTestExpectationPatternsForConflicts(expectations, file_name):
@@ -222,15 +234,6 @@ def CheckTestExpectationPatternsForConflicts(expectations, file_name):
       expectations, file_name=file_name, tags_conflict=_DoTagsConflict)
   _MapGpuDevicesToVendors(test_expectations.tag_sets)
   return test_expectations.check_test_expectations_patterns_for_conflicts()
-
-
-def _CheckWebglConformanceTestPathIsValid(pattern):
-  if not 'WebglExtension_' in pattern:
-    full_path = os.path.normpath(
-        os.path.join(webgl_test_util.conformance_path, pattern))
-    if not os.path.exists(full_path):
-      raise Exception('The WebGL conformance test path specified in ' +
-                      'expectation does not exist: ' + full_path)
 
 
 def _FindTestCases():
@@ -261,7 +264,7 @@ class GpuTestExpectationsValidation(unittest.TestCase):
             with open(test_case.ExpectationsFiles()[0]) as f:
               errors += CheckTestExpectationPatternsForConflicts(
                   f.read(), os.path.basename(f.name))
-    assert not errors, errors
+    self.assertEqual(errors, '')
 
   def testExpectationsFilesCanBeParsed(self):
     webgl_conformance_test_class = (
@@ -278,11 +281,17 @@ class GpuTestExpectationsValidation(unittest.TestCase):
             with open(test_case.ExpectationsFiles()[0]) as f:
               test_expectations = expectations_parser.TestExpectations()
               ret, err = test_expectations.parse_tagged_list(f.read(), f.name)
-              assert not ret, (
-                  'There was an error parsing %s, the error is:\n\t%s' %
-                  (os.path.basename(f.name), err))
+              self.assertEqual(
+                  ret, 0,
+                  'Error parsing %s:\n\t%s' % (os.path.basename(f.name), err))
 
   def testWebglTestPathsExist(self):
+    def _CheckWebglConformanceTestPathIsValid(pattern):
+      if not 'WebglExtension_' in pattern:
+        full_path = os.path.normpath(
+            os.path.join(webgl_test_util.conformance_path, pattern))
+        self.assertTrue(os.path.exists(full_path))
+
     webgl_test_class = (
         webgl_conformance_integration_test.WebGLConformanceIntegrationTest)
     for webgl_version in xrange(1, 3):
@@ -321,7 +330,7 @@ class GpuTestExpectationsValidation(unittest.TestCase):
           msg += ("Expectations with pattern '{0}' in {1} do not apply to any "
                   "webgl version {2} extension tests\n".format(
                       ununsed_pattern, os.path.basename(f.name), webgl_version))
-        assert not msg, msg
+        self.assertEqual(msg, '')
 
   def testForBrokenPixelTestExpectations(self):
     pixel_test_names = []
@@ -332,8 +341,8 @@ class GpuTestExpectationsValidation(unittest.TestCase):
                                  test_base_name)
       ])
     CheckTestExpectationsAreForExistingTests(
-        pixel_integration_test.PixelIntegrationTest, gpu_helper.GetMockArgs(),
-        pixel_test_names)
+        self, pixel_integration_test.PixelIntegrationTest,
+        gpu_helper.GetMockArgs(), pixel_test_names)
 
   def testForBrokenGpuTestExpectations(self):
     options = gpu_helper.GetMockArgs()
@@ -341,7 +350,23 @@ class GpuTestExpectationsValidation(unittest.TestCase):
       if 'gpu_tests.gpu_integration_test_unittest' not in test_case.__module__:
         if (test_case.Name() not in ('pixel', 'webgl_conformance')
             and test_case.ExpectationsFiles()):
-          CheckTestExpectationsAreForExistingTests(test_case, options)
+          CheckTestExpectationsAreForExistingTests(self, test_case, options)
+
+  def testExpectationBugValidity(self):
+    expectation_dir = os.path.join(os.path.dirname(__file__),
+                                   'test_expectations')
+    for expectation_file in os.listdir(expectation_dir):
+      with open(os.path.join(expectation_dir, expectation_file)) as f:
+        content = f.read()
+      list_parser = expectations_parser.TaggedTestListParser(content)
+      for expectation in list_parser.expectations:
+        reason = expectation.reason
+        if not reason:
+          continue
+        if not any(r.match(reason) for r in VALID_BUG_REGEXES):
+          self.fail('Bug string "%s" in expectation file %s is either not in a '
+                    'recognized format or references an unknown project.' %
+                    (reason, expectation_file))
 
   def testWebglTestExpectationsForDriverTags(self):
     webgl_conformance_test_class = (
@@ -359,16 +384,15 @@ class GpuTestExpectationsValidation(unittest.TestCase):
           if gpu_helper.MatchDriverTag(list(tag_set)[0]):
             for tag in tag_set:
               match = gpu_helper.MatchDriverTag(tag)
-              assert match
+              self.assertIsNotNone(match)
               if match.group(1) == 'intel':
-                if not check_intel_driver_version(match.group(3)):
-                  assert False, INTEL_DRIVER_VERSION_SCHEMA
+                self.assertTrue(check_intel_driver_version(match.group(3)))
 
-            assert not driver_tag_set
+            self.assertSetEqual(driver_tag_set, set())
             driver_tag_set = tag_set
           else:
             for tag in tag_set:
-              assert not gpu_helper.MatchDriverTag(tag)
+              self.assertIsNone(gpu_helper.MatchDriverTag(tag))
         expectations_driver_tags |= driver_tag_set
 
     self.assertEqual(gpu_helper.ExpectationsDriverTags(),
@@ -396,10 +420,10 @@ class TestGpuTestExpectationsValidators(unittest.TestCase):
   def testConflictsBetweenAngleAndNonAngleConfigurations(self):
     test_expectations = '''
     # tags: [ android ]
-    # tags: [ qualcomm-adreno-(tm)-418 ]
+    # tags: [ android-nexus-5x ]
     # tags: [ opengles ]
     # results: [ RetryOnFailure Skip ]
-    [ android qualcomm-adreno-(tm)-418 ] a/b/c/d [ RetryOnFailure ]
+    [ android android-nexus-5x ] a/b/c/d [ RetryOnFailure ]
     [ android opengles ] a/b/c/d [ Skip ]
     '''
     errors = CheckTestExpectationPatternsForConflicts(test_expectations,
@@ -461,30 +485,29 @@ class TestGpuTestExpectationsValidators(unittest.TestCase):
                          '[ mac ] a/b/d [ Failure ]\n'
                          'a/c/* [ Failure ]\n')
     options = gpu_helper.GetMockArgs()
-    expectations_file = tempfile.NamedTemporaryFile(delete=False)
-    expectations_file.write(test_expectations)
-    expectations_file.close()
     test_class = gpu_integration_test.GpuIntegrationTest
-    with mock.patch.object(
-        test_class, 'GenerateGpuTests', return_value=[('a/b/c', ())]):
-      with mock.patch.object(
-          test_class,
-          'ExpectationsFiles',
-          return_value=[expectations_file.name]):
-        with self.assertRaises(AssertionError) as context:
-          CheckTestExpectationsAreForExistingTests(test_class, options)
-        self.assertIn(
-            'The following expectations were found to not apply'
-            ' to any tests in the GpuIntegrationTest test suite',
-            str(context.exception))
-        self.assertIn(
-            '4: Expectation with pattern \'a/c/*\' does not match'
-            ' any tests in the GpuIntegrationTest test suite',
-            str(context.exception))
-        self.assertIn(
-            '3: Expectation with pattern \'a/b/d\' does not match'
-            ' any tests in the GpuIntegrationTest test suite',
-            str(context.exception))
+    with tempfile_ext.NamedTemporaryFile() as expectations_file,            \
+         mock.patch.object(
+             test_class, 'GenerateGpuTests', return_value=[('a/b/c', ())]), \
+         mock.patch.object(
+             test_class,
+             'ExpectationsFiles', return_value=[expectations_file.name]):
+      expectations_file.write(test_expectations)
+      expectations_file.close()
+      with self.assertRaises(AssertionError) as context:
+        CheckTestExpectationsAreForExistingTests(self, test_class, options)
+      self.assertIn(
+          'The following expectations were found to not apply'
+          ' to any tests in the GpuIntegrationTest test suite',
+          str(context.exception))
+      self.assertIn(
+          '4: Expectation with pattern \'a/c/*\' does not match'
+          ' any tests in the GpuIntegrationTest test suite',
+          str(context.exception))
+      self.assertIn(
+          '3: Expectation with pattern \'a/b/d\' does not match'
+          ' any tests in the GpuIntegrationTest test suite',
+          str(context.exception))
 
 
 def testDriverVersionComparision(self):

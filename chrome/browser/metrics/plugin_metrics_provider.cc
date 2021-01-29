@@ -11,7 +11,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/stl_util.h"
+#include "base/containers/contains.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -164,7 +164,6 @@ void PluginMetricsProvider::ProvideStabilityMetrics(
     }
 
     if (!system_profile_plugin) {
-      NOTREACHED();
       continue;
     }
 

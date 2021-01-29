@@ -17,11 +17,10 @@ namespace {
 class TestSystemWebAppWebUIController : public content::WebUIController {
  public:
   explicit TestSystemWebAppWebUIController(std::string source_name,
-                                           const std::string* manifest,
                                            content::WebUI* web_ui)
       : WebUIController(web_ui) {
     web_app::AddTestURLDataSource(
-        source_name, manifest, web_ui->GetWebContents()->GetBrowserContext());
+        source_name, web_ui->GetWebContents()->GetBrowserContext());
   }
   TestSystemWebAppWebUIController(const TestSystemWebAppWebUIController&) =
       delete;
@@ -33,21 +32,25 @@ class TestSystemWebAppWebUIController : public content::WebUIController {
 
 TestSystemWebAppWebUIControllerFactory::TestSystemWebAppWebUIControllerFactory(
     std::string source_name)
-    : source_name_(std::move(source_name)),
-      manifest_(web_app::kSystemAppManifestText) {}
+    : source_name_(std::move(source_name)) {}
 
 std::unique_ptr<content::WebUIController>
 TestSystemWebAppWebUIControllerFactory::CreateWebUIControllerForURL(
     content::WebUI* web_ui,
     const GURL& url) {
+  if (!url.SchemeIs(content::kChromeUIScheme) ||
+      url.host_piece() != source_name_) {
+    return nullptr;
+  }
+
   return std::make_unique<TestSystemWebAppWebUIController>(source_name_,
-                                                           &manifest_, web_ui);
+                                                           web_ui);
 }
 
 content::WebUI::TypeID TestSystemWebAppWebUIControllerFactory::GetWebUIType(
     content::BrowserContext* browser_context,
     const GURL& url) {
-  if (url.SchemeIs(content::kChromeUIScheme))
+  if (UseWebUIForURL(browser_context, url))
     return reinterpret_cast<content::WebUI::TypeID>(1);
 
   return content::WebUI::kNoWebUI;
@@ -56,11 +59,6 @@ content::WebUI::TypeID TestSystemWebAppWebUIControllerFactory::GetWebUIType(
 bool TestSystemWebAppWebUIControllerFactory::UseWebUIForURL(
     content::BrowserContext* browser_context,
     const GURL& url) {
-  return url.SchemeIs(content::kChromeUIScheme);
-}
-
-bool TestSystemWebAppWebUIControllerFactory::UseWebUIBindingsForURL(
-    content::BrowserContext* browser_context,
-    const GURL& url) {
-  return url.SchemeIs(content::kChromeUIScheme);
+  return url.SchemeIs(content::kChromeUIScheme) &&
+         url.host_piece() == source_name_;
 }

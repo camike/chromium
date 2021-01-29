@@ -11,9 +11,10 @@
 #include "chrome/browser/chromeos/crostini/crostini_export_import.h"
 #include "chrome/browser/chromeos/crostini/crostini_manager.h"
 #include "chrome/browser/chromeos/crostini/crostini_port_forwarder.h"
-#include "chrome/browser/chromeos/usb/cros_usb_detector.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
 #include "chromeos/dbus/session_manager/session_manager_client.h"
+#include "components/prefs/pref_change_registrar.h"
 
 class Profile;
 
@@ -29,8 +30,10 @@ class CrostiniHandler : public ::settings::SettingsPageUIHandler,
                         public crostini::CrostiniDialogStatusObserver,
                         public crostini::CrostiniExportImport::Observer,
                         public crostini::CrostiniContainerPropertiesObserver,
+                        public crostini::CrostiniMicSharingEnabledObserver,
                         public crostini::CrostiniPortForwarder::Observer,
-                        public chromeos::CrosUsbDeviceObserver {
+                        public crostini::ContainerStartedObserver,
+                        public crostini::ContainerShutdownObserver {
  public:
   explicit CrostiniHandler(Profile* profile);
   ~CrostiniHandler() override;
@@ -43,22 +46,6 @@ class CrostiniHandler : public ::settings::SettingsPageUIHandler,
  private:
   void HandleRequestCrostiniInstallerView(const base::ListValue* args);
   void HandleRequestRemoveCrostini(const base::ListValue* args);
-  // Callback for the "getSharedPathsDisplayText" message.  Converts actual
-  // paths in chromeos to values suitable to display to users.
-  // E.g. /home/chronos/u-<hash>/Downloads/foo => "Downloads > foo".
-  void HandleGetCrostiniSharedPathsDisplayText(const base::ListValue* args);
-  // Remove a specified path from being shared.
-  void HandleRemoveCrostiniSharedPath(const base::ListValue* args);
-  void OnCrostiniSharedPathRemoved(const std::string& callback_id,
-                                   const std::string& path,
-                                   bool result,
-                                   const std::string& failure_reason);
-  // Returns a list of available USB devices.
-  void HandleGetCrostiniSharedUsbDevices(const base::ListValue* args);
-  // Set the share state of a USB device.
-  void HandleSetCrostiniUsbDeviceShared(const base::ListValue* args);
-  // chromeos::SharedUsbDeviceObserver.
-  void OnUsbDevicesChanged() override;
   // Export the crostini container.
   void HandleExportCrostiniContainer(const base::ListValue* args);
   // Import the crostini container.
@@ -80,8 +67,14 @@ class CrostiniHandler : public ::settings::SettingsPageUIHandler,
   void HandleQueryArcAdbRequest(const base::ListValue* args);
   // Handle a request for enabling adb sideloading in ARC.
   void HandleEnableArcAdbRequest(const base::ListValue* args);
+  // Called after establishing whether enabling adb sideloading is allowed for
+  // the user and device
+  void OnCanEnableArcAdbSideloading(bool can_change_adb_sideloading);
   // Handle a request for disabling adb sideloading in ARC.
   void HandleDisableArcAdbRequest(const base::ListValue* args);
+  // Called after establishing whether disabling adb sideloading is allowed for
+  // the user and device
+  void OnCanDisableArcAdbSideloading(bool can_change_adb_sideloading);
   // Launch the Crostini terminal.
   void LaunchTerminal();
   // Handle a request for showing the container upgrade view.
@@ -90,9 +83,6 @@ class CrostiniHandler : public ::settings::SettingsPageUIHandler,
   void OnQueryAdbSideload(
       SessionManagerClient::AdbSideloadResponseCode response_code,
       bool enabled);
-  // Returns whether the current user can change adb sideloading configuration
-  // on current device.
-  bool CheckEligibilityToChangeArcAdbSideloading() const;
   // Handle a request for the CrostiniUpgraderDialog status.
   void HandleCrostiniUpgraderDialogStatusRequest(const base::ListValue* args);
   // Handle a request for the availability of a container upgrade.
@@ -127,8 +117,28 @@ class CrostiniHandler : public ::settings::SettingsPageUIHandler,
   void HandleGetCrostiniActivePorts(const base::ListValue* args);
   // Checks if Crostini is running.
   void HandleCheckCrostiniIsRunning(const base::ListValue* args);
+  // crostini::ContainerStartedObserver
+  void OnContainerStarted(const crostini::ContainerId& container_id) override;
+  // crostini::ContainerShutdownObserver
+  void OnContainerShutdown(const crostini::ContainerId& container_id) override;
+  // Handles a request to shut down Crostini.
+  void HandleShutdownCrostini(const base::ListValue* args);
+  // crostini::CrostiniMicSharingEnabledObserver
+  void OnCrostiniMicSharingEnabledChanged(bool enabled) override;
+  // Handles a request for setting the permissions for Crostini Mic access.
+  void HandleSetCrostiniMicSharingEnabled(const base::ListValue* args);
+  // Handles a request for getting the permissions for Crostini Mic access.
+  void HandleGetCrostiniMicSharingEnabled(const base::ListValue* args);
+  // Handle a request for checking permission for changing ARC adb sideloading.
+  void HandleCanChangeArcAdbSideloadingRequest(const base::ListValue* args);
+  // Get permission of changing ARC adb sideloading
+  void FetchCanChangeAdbSideloading();
+  // Callback of FetchCanChangeAdbSideloading.
+  void OnCanChangeArcAdbSideloading(bool can_change_arc_adb_sideloading);
 
   Profile* profile_;
+  base::CallbackListSubscription adb_sideloading_device_policy_subscription_;
+  PrefChangeRegistrar pref_change_registrar_;
   // weak_ptr_factory_ should always be last member.
   base::WeakPtrFactory<CrostiniHandler> weak_ptr_factory_{this};
 

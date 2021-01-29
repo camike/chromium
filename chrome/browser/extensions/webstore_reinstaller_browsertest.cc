@@ -10,6 +10,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/webstore_install_result.h"
+#include "content/public/test/browser_test.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
@@ -39,7 +40,7 @@ class WebstoreReinstallerBrowserTest : public WebstoreInstallerTest {
             kNonAppDomain) {}
   ~WebstoreReinstallerBrowserTest() override {}
 
-  void OnInstallCompletion(const base::Closure& quit_closure,
+  void OnInstallCompletion(base::OnceClosure quit_closure,
                            bool success,
                            const std::string& error,
                            webstore_install::Result result);
@@ -51,12 +52,12 @@ class WebstoreReinstallerBrowserTest : public WebstoreInstallerTest {
 };
 
 void WebstoreReinstallerBrowserTest::OnInstallCompletion(
-    const base::Closure& quit_closure,
+    base::OnceClosure quit_closure,
     bool success,
     const std::string& error,
     webstore_install::Result result) {
   last_install_result_ = success;
-  quit_closure.Run();
+  std::move(quit_closure).Run();
 }
 
 IN_PROC_BROWSER_TEST_F(WebstoreReinstallerBrowserTest, TestWebstoreReinstall) {

@@ -4,10 +4,22 @@
 
 #include "chrome/browser/safe_browsing/cloud_content_scanning/deep_scanning_test_utils.h"
 
+#include "base/json/json_reader.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/enterprise/connectors/common.h"
+#include "chrome/browser/enterprise/connectors/connectors_prefs.h"
 #include "chrome/browser/extensions/api/safe_browsing_private/safe_browsing_private_event_router.h"
+#include "chrome/browser/profiles/profile.h"
+#include "components/policy/core/common/cloud/cloud_policy_client_registration_helper.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
 #include "components/policy/core/common/cloud/realtime_reporting_job_configuration.h"
+#include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
+#include "components/policy/core/common/policy_types.h"
+#include "components/prefs/scoped_user_pref_update.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
+#include "content/public/browser/browser_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -31,17 +43,22 @@ void EventReportValidator::ExpectUnscannedFileEvent(
     const std::string& expected_trigger,
     const std::string& expected_reason,
     const std::set<std::string>* expected_mimetypes,
-    int expected_content_size) {
+    int expected_content_size,
+    const std::string& expected_result,
+    const std::string& expected_username) {
   event_key_ = SafeBrowsingPrivateEventRouter::kKeyUnscannedFileEvent;
   url_ = expected_url;
   filename_ = expected_filename;
   sha256_ = expected_sha256;
   mimetypes_ = expected_mimetypes;
   trigger_ = expected_trigger;
-  reason_ = expected_reason;
+  unscanned_reason_ = expected_reason;
   content_size_ = expected_content_size;
-  EXPECT_CALL(*client_, UploadRealtimeReport_(_, _))
-      .WillOnce([this](base::Value& report,
+  result_ = expected_result;
+  username_ = expected_username;
+  EXPECT_CALL(*client_, UploadSecurityEventReport_(_, _, _, _))
+      .WillOnce([this](content::BrowserContext* context,
+                       bool include_device_info, base::Value& report,
                        base::OnceCallback<void(bool)>& callback) {
         ValidateReport(&report);
         if (!done_closure_.is_null())
@@ -56,7 +73,9 @@ void EventReportValidator::ExpectDangerousDeepScanningResult(
     const std::string& expected_threat_type,
     const std::string& expected_trigger,
     const std::set<std::string>* expected_mimetypes,
-    int expected_content_size) {
+    int expected_content_size,
+    const std::string& expected_result,
+    const std::string& expected_username) {
   event_key_ = SafeBrowsingPrivateEventRouter::kKeyDangerousDownloadEvent;
   url_ = expected_url;
   filename_ = expected_filename;
@@ -65,8 +84,11 @@ void EventReportValidator::ExpectDangerousDeepScanningResult(
   mimetypes_ = expected_mimetypes;
   trigger_ = expected_trigger;
   content_size_ = expected_content_size;
-  EXPECT_CALL(*client_, UploadRealtimeReport_(_, _))
-      .WillOnce([this](base::Value& report,
+  result_ = expected_result;
+  username_ = expected_username;
+  EXPECT_CALL(*client_, UploadSecurityEventReport_(_, _, _, _))
+      .WillOnce([this](content::BrowserContext* context,
+                       bool include_device_info, base::Value& report,
                        base::OnceCallback<void(bool)>& callback) {
         ValidateReport(&report);
         if (!done_closure_.is_null())
@@ -79,9 +101,12 @@ void EventReportValidator::ExpectSensitiveDataEvent(
     const std::string& expected_filename,
     const std::string& expected_sha256,
     const std::string& expected_trigger,
-    const DlpDeepScanningVerdict& expected_dlp_verdict,
+    const enterprise_connectors::ContentAnalysisResponse::Result&
+        expected_dlp_verdict,
     const std::set<std::string>* expected_mimetypes,
-    int expected_content_size) {
+    int expected_content_size,
+    const std::string& expected_result,
+    const std::string& expected_username) {
   event_key_ = SafeBrowsingPrivateEventRouter::kKeySensitiveDataEvent;
   url_ = expected_url;
   dlp_verdict_ = expected_dlp_verdict;
@@ -89,10 +114,12 @@ void EventReportValidator::ExpectSensitiveDataEvent(
   sha256_ = expected_sha256;
   mimetypes_ = expected_mimetypes;
   trigger_ = expected_trigger;
-  clicked_through_ = false;
   content_size_ = expected_content_size;
-  EXPECT_CALL(*client_, UploadRealtimeReport_(_, _))
-      .WillOnce([this](base::Value& report,
+  result_ = expected_result;
+  username_ = expected_username;
+  EXPECT_CALL(*client_, UploadSecurityEventReport_(_, _, _, _))
+      .WillOnce([this](content::BrowserContext* context,
+                       bool include_device_info, base::Value& report,
                        base::OnceCallback<void(bool)>& callback) {
         ValidateReport(&report);
         if (!done_closure_.is_null())
@@ -107,9 +134,12 @@ void EventReportValidator::
         const std::string& expected_sha256,
         const std::string& expected_threat_type,
         const std::string& expected_trigger,
-        const DlpDeepScanningVerdict& expected_dlp_verdict,
+        const enterprise_connectors::ContentAnalysisResponse::Result&
+            expected_dlp_verdict,
         const std::set<std::string>* expected_mimetypes,
-        int expected_content_size) {
+        int expected_content_size,
+        const std::string& expected_result,
+        const std::string& expected_username) {
   event_key_ = SafeBrowsingPrivateEventRouter::kKeyDangerousDownloadEvent;
   url_ = expected_url;
   filename_ = expected_filename;
@@ -118,22 +148,97 @@ void EventReportValidator::
   trigger_ = expected_trigger;
   mimetypes_ = expected_mimetypes;
   content_size_ = expected_content_size;
-  EXPECT_CALL(*client_, UploadRealtimeReport_(_, _))
-      .WillOnce([this](base::Value& report,
+  result_ = expected_result;
+  username_ = expected_username;
+  EXPECT_CALL(*client_, UploadSecurityEventReport_(_, _, _, _))
+      .WillOnce([this](content::BrowserContext* context,
+                       bool include_device_info, base::Value& report,
                        base::OnceCallback<void(bool)>& callback) {
         ValidateReport(&report);
       })
-      .WillOnce(
-          [this, expected_dlp_verdict](
-              base::Value& report, base::OnceCallback<void(bool)>& callback) {
-            event_key_ = SafeBrowsingPrivateEventRouter::kKeySensitiveDataEvent;
-            threat_type_ = base::nullopt;
-            clicked_through_ = false;
-            dlp_verdict_ = expected_dlp_verdict;
-            ValidateReport(&report);
-            if (!done_closure_.is_null())
-              done_closure_.Run();
-          });
+      .WillOnce([this, expected_dlp_verdict](
+                    content::BrowserContext* context, bool include_device_info,
+                    base::Value& report,
+                    base::OnceCallback<void(bool)>& callback) {
+        event_key_ = SafeBrowsingPrivateEventRouter::kKeySensitiveDataEvent;
+        threat_type_ = base::nullopt;
+        dlp_verdict_ = expected_dlp_verdict;
+        ValidateReport(&report);
+        if (!done_closure_.is_null())
+          done_closure_.Run();
+      });
+}
+
+void EventReportValidator::
+    ExpectSensitiveDataEventAndDangerousDeepScanningResult(
+        const std::string& expected_url,
+        const std::string& expected_filename,
+        const std::string& expected_sha256,
+        const std::string& expected_threat_type,
+        const std::string& expected_trigger,
+        const enterprise_connectors::ContentAnalysisResponse::Result&
+            expected_dlp_verdict,
+        const std::set<std::string>* expected_mimetypes,
+        int expected_content_size,
+        const std::string& expected_result,
+        const std::string& expected_username) {
+  event_key_ = SafeBrowsingPrivateEventRouter::kKeySensitiveDataEvent;
+  url_ = expected_url;
+  filename_ = expected_filename;
+  sha256_ = expected_sha256;
+  trigger_ = expected_trigger;
+  mimetypes_ = expected_mimetypes;
+  content_size_ = expected_content_size;
+  result_ = expected_result;
+  dlp_verdict_ = expected_dlp_verdict;
+  username_ = expected_username;
+  EXPECT_CALL(*client_, UploadSecurityEventReport_(_, _, _, _))
+      .WillOnce([this](content::BrowserContext* context,
+                       bool include_device_info, base::Value& report,
+                       base::OnceCallback<void(bool)>& callback) {
+        ValidateReport(&report);
+      })
+      .WillOnce([this, expected_threat_type](
+                    content::BrowserContext* context, bool include_device_info,
+                    base::Value& report,
+                    base::OnceCallback<void(bool)>& callback) {
+        event_key_ = SafeBrowsingPrivateEventRouter::kKeyDangerousDownloadEvent;
+        threat_type_ = expected_threat_type;
+        dlp_verdict_ = base::nullopt;
+        ValidateReport(&report);
+        if (!done_closure_.is_null())
+          done_closure_.Run();
+      });
+}
+
+void EventReportValidator::ExpectDangerousDownloadEvent(
+    const std::string& expected_url,
+    const std::string& expected_filename,
+    const std::string& expected_sha256,
+    const std::string& expected_threat_type,
+    const std::string& expected_trigger,
+    const std::set<std::string>* expected_mimetypes,
+    int expected_content_size,
+    const std::string& expected_result,
+    const std::string& expected_username) {
+  event_key_ = SafeBrowsingPrivateEventRouter::kKeyDangerousDownloadEvent;
+  url_ = expected_url;
+  filename_ = expected_filename;
+  sha256_ = expected_sha256;
+  threat_type_ = expected_threat_type;
+  mimetypes_ = expected_mimetypes;
+  trigger_ = expected_trigger;
+  content_size_ = expected_content_size;
+  result_ = expected_result;
+  username_ = expected_username;
+  EXPECT_CALL(*client_, UploadSecurityEventReport_(_, _, _, _))
+      .WillOnce([this](content::BrowserContext* context,
+                       bool include_device_info, base::Value& report,
+                       base::OnceCallback<void(bool)>& callback) {
+        ValidateReport(&report);
+        if (!done_closure_.is_null())
+          done_closure_.Run();
+      });
 }
 
 void EventReportValidator::ValidateReport(base::Value* report) {
@@ -162,9 +267,14 @@ void EventReportValidator::ValidateReport(base::Value* report) {
   ValidateField(event, SafeBrowsingPrivateEventRouter::kKeyTrigger, trigger_);
   ValidateField(event, SafeBrowsingPrivateEventRouter::kKeyContentSize,
                 content_size_);
+  ValidateField(event, SafeBrowsingPrivateEventRouter::kKeyEventResult,
+                result_);
   ValidateField(event, SafeBrowsingPrivateEventRouter::kKeyThreatType,
                 threat_type_);
-  ValidateField(event, SafeBrowsingPrivateEventRouter::kKeyReason, reason_);
+  ValidateField(event, SafeBrowsingPrivateEventRouter::kKeyUnscannedReason,
+                unscanned_reason_);
+  ValidateField(event, SafeBrowsingPrivateEventRouter::kKeyProfileUserName,
+                username_);
   ValidateMimeType(event);
   ValidateDlpVerdict(event);
 }
@@ -182,8 +292,6 @@ void EventReportValidator::ValidateDlpVerdict(base::Value* value) {
   if (!dlp_verdict_.has_value())
     return;
 
-  ValidateField(value, SafeBrowsingPrivateEventRouter::kKeyClickedThrough,
-                clicked_through_);
   base::Value* triggered_rules =
       value->FindListKey(SafeBrowsingPrivateEventRouter::kKeyTriggeredRuleInfo);
   ASSERT_NE(nullptr, triggered_rules);
@@ -200,71 +308,115 @@ void EventReportValidator::ValidateDlpVerdict(base::Value* value) {
 
 void EventReportValidator::ValidateDlpRule(
     base::Value* value,
-    const DlpDeepScanningVerdict::TriggeredRule& expected_rule) {
-  ValidateField(value, SafeBrowsingPrivateEventRouter::kKeyTriggeredRuleAction,
-                base::Optional<int>(expected_rule.action()));
+    const enterprise_connectors::ContentAnalysisResponse::Result::TriggeredRule&
+        expected_rule) {
   ValidateField(value, SafeBrowsingPrivateEventRouter::kKeyTriggeredRuleName,
                 expected_rule.rule_name());
   ValidateField(value, SafeBrowsingPrivateEventRouter::kKeyTriggeredRuleId,
-                base::Optional<int>(expected_rule.rule_id()));
-  ValidateField(value,
-                SafeBrowsingPrivateEventRouter::kKeyTriggeredRuleSeverity,
-                expected_rule.rule_severity());
-  ValidateField(value,
-                SafeBrowsingPrivateEventRouter::kKeyTriggeredRuleResourceName,
-                expected_rule.rule_resource_name());
-
-  base::Value* matched_detectors =
-      value->FindListKey(SafeBrowsingPrivateEventRouter::kKeyMatchedDetectors);
-  ASSERT_NE(nullptr, matched_detectors);
-  ASSERT_EQ(base::Value::Type::LIST, matched_detectors->type());
-  base::Value::ListView detectors_list = matched_detectors->GetList();
-  int detectors_size = detectors_list.size();
-  ASSERT_EQ(detectors_size, expected_rule.matched_detectors_size());
-
-  for (int j = 0; j < detectors_size; ++j) {
-    base::Value* detector = &detectors_list[j];
-    ASSERT_EQ(base::Value::Type::DICTIONARY, detector->type());
-    const DlpDeepScanningVerdict::MatchedDetector& expected_detector =
-        expected_rule.matched_detectors(j);
-    ValidateField(detector,
-                  SafeBrowsingPrivateEventRouter::kKeyMatchedDetectorId,
-                  expected_detector.detector_id());
-    ValidateField(detector,
-                  SafeBrowsingPrivateEventRouter::kKeyMatchedDetectorName,
-                  expected_detector.display_name());
-    ValidateField(detector,
-                  SafeBrowsingPrivateEventRouter::kKeyMatchedDetectorType,
-                  expected_detector.detector_type());
-  }
+                expected_rule.rule_id());
 }
 
 void EventReportValidator::ValidateField(
     base::Value* value,
     const std::string& field_key,
     const base::Optional<std::string>& expected_value) {
-  if (expected_value.has_value())
-    ASSERT_EQ(*value->FindStringKey(field_key), expected_value.value());
-  else
-    ASSERT_EQ(nullptr, value->FindStringKey(field_key));
+  if (expected_value.has_value()) {
+    ASSERT_EQ(*value->FindStringKey(field_key), expected_value.value())
+        << "Mismatch in field " << field_key;
+  } else {
+    ASSERT_EQ(nullptr, value->FindStringKey(field_key))
+        << "Field " << field_key << "should not be populated";
+  }
 }
 
 void EventReportValidator::ValidateField(
     base::Value* value,
     const std::string& field_key,
     const base::Optional<int>& expected_value) {
-  ASSERT_EQ(value->FindIntKey(field_key), expected_value);
+  ASSERT_EQ(value->FindIntKey(field_key), expected_value)
+      << "Mismatch in field " << field_key;
 }
 
 void EventReportValidator::ValidateField(
     base::Value* value,
     const std::string& field_key,
     const base::Optional<bool>& expected_value) {
-  ASSERT_EQ(value->FindBoolKey(field_key), expected_value);
+  ASSERT_EQ(value->FindBoolKey(field_key), expected_value)
+      << "Mismatch in field " << field_key;
+}
+
+void EventReportValidator::ExpectNoReport() {
+  EXPECT_CALL(*client_, UploadSecurityEventReport_(_, _, _, _)).Times(0);
 }
 
 void EventReportValidator::SetDoneClosure(base::RepeatingClosure closure) {
   done_closure_ = std::move(closure);
 }
+
+void SetAnalysisConnector(PrefService* prefs,
+                          enterprise_connectors::AnalysisConnector connector,
+                          const std::string& pref_value,
+                          bool machine_scope) {
+  ListPrefUpdate settings_list(prefs, ConnectorPref(connector));
+  DCHECK(settings_list.Get());
+  if (!settings_list->empty())
+    settings_list->Clear();
+
+  settings_list->Append(*base::JSONReader::Read(pref_value));
+  prefs->SetInteger(
+      ConnectorScopePref(connector),
+      machine_scope ? policy::POLICY_SCOPE_MACHINE : policy::POLICY_SCOPE_USER);
+}
+
+void SetOnSecurityEventReporting(
+    PrefService* prefs,
+    bool enabled,
+    const std::set<std::string>& enabled_event_names,
+    bool machine_scope) {
+  ListPrefUpdate settings_list(prefs,
+                               enterprise_connectors::kOnSecurityEventPref);
+  DCHECK(settings_list.Get());
+  if (enabled) {
+    if (settings_list->empty()) {
+      base::Value settings(base::Value::Type::DICTIONARY);
+
+      settings.SetKey(enterprise_connectors::kKeyServiceProvider,
+                      base::Value("google"));
+      if (!enabled_event_names.empty()) {
+        base::Value enabled_event_name_list(base::Value::Type::LIST);
+        for (const auto& enabled_event_name : enabled_event_names) {
+          enabled_event_name_list.Append(enabled_event_name);
+        }
+        settings.SetKey(enterprise_connectors::kKeyEnabledEventNames,
+                        std::move(enabled_event_name_list));
+      }
+      settings_list->Append(std::move(settings));
+    }
+    prefs->SetInteger(enterprise_connectors::kOnSecurityEventScopePref,
+                      machine_scope ? policy::POLICY_SCOPE_MACHINE
+                                    : policy::POLICY_SCOPE_USER);
+  } else {
+    settings_list->ClearList();
+    prefs->ClearPref(enterprise_connectors::kOnSecurityEventScopePref);
+  }
+}
+
+void ClearAnalysisConnector(
+    PrefService* prefs,
+    enterprise_connectors::AnalysisConnector connector) {
+  ListPrefUpdate settings_list(prefs, ConnectorPref(connector));
+  DCHECK(settings_list.Get());
+  settings_list->Clear();
+  prefs->ClearPref(ConnectorScopePref(connector));
+}
+
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
+void SetProfileDMToken(Profile* profile, const std::string& dm_token) {
+  auto client = std::make_unique<policy::MockCloudPolicyClient>();
+  client->SetDMToken(dm_token);
+  profile->GetUserCloudPolicyManager()->Connect(
+      g_browser_process->local_state(), std::move(client));
+}
+#endif
 
 }  // namespace safe_browsing

@@ -22,6 +22,7 @@
 #include "components/safe_browsing/core/db/database_manager.h"
 #include "components/safe_browsing/core/proto/csd.pb.h"
 #include "content/public/browser/download_item_utils.h"
+#include "content/public/test/browser_test.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -155,11 +156,10 @@ class DownloadDangerPromptTest : public InProcessBrowserTest {
 
   void CreatePrompt(bool from_download_api) {
     prompt_ = DownloadDangerPrompt::Create(
-        &download_,
-        browser()->tab_strip_model()->GetActiveWebContents(),
+        &download_, browser()->tab_strip_model()->GetActiveWebContents(),
         from_download_api,
-        base::Bind(&DownloadDangerPromptTest::PromptCallback,
-                   base::Unretained(this)));
+        base::BindOnce(&DownloadDangerPromptTest::PromptCallback,
+                       base::Unretained(this)));
     content::RunAllPendingInMessageLoop();
   }
 

@@ -6,6 +6,7 @@
 #define COMPONENTS_SYNC_BASE_PREF_NAMES_H_
 
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 
 namespace syncer {
 
@@ -17,13 +18,13 @@ extern const char kSyncPollIntervalSeconds[];
 extern const char kSyncFirstSetupComplete[];
 extern const char kSyncKeepEverythingSynced[];
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 extern const char kOsSyncPrefsMigrated[];
 extern const char kOsSyncFeatureEnabled[];
 extern const char kSyncAllOsTypes[];
 extern const char kSyncOsApps[];
 extern const char kSyncOsPreferences[];
-#endif
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 extern const char kSyncApps[];
 extern const char kSyncAutofill[];
@@ -57,12 +58,9 @@ extern const char kSyncLastRunVersion[];
 extern const char kEnableLocalSyncBackend[];
 extern const char kLocalSyncBackendDir[];
 
-extern const char kSyncDemographics[];
-extern const char kSyncDemographicsBirthYearOffset[];
-
-// These are not prefs, they are paths inside of kSyncDemographics.
-extern const char kSyncDemographics_BirthYearPath[];
-extern const char kSyncDemographics_GenderPath[];
+#if defined(OS_ANDROID)
+extern const char kSyncDecoupledFromAndroidMasterSync[];
+#endif  // defined(OS_ANDROID)
 
 }  // namespace prefs
 

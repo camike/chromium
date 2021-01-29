@@ -6,12 +6,32 @@
 
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "ui/views/metadata/type_conversion.h"
 
 namespace views {
 namespace metadata {
+
+PropertyFlags operator|(PropertyFlags op1, PropertyFlags op2) {
+  return static_cast<PropertyFlags>(static_cast<uint32_t>(op1) |
+                                    static_cast<uint32_t>(op2));
+}
+
+PropertyFlags operator&(PropertyFlags op1, PropertyFlags op2) {
+  return static_cast<PropertyFlags>(static_cast<uint32_t>(op1) &
+                                    static_cast<uint32_t>(op2));
+}
+
+PropertyFlags operator^(PropertyFlags op1, PropertyFlags op2) {
+  return static_cast<PropertyFlags>(static_cast<uint32_t>(op1) ^
+                                    static_cast<uint32_t>(op2));
+}
+
+bool operator!(PropertyFlags op) {
+  return !static_cast<bool>(op);
+}
 
 ClassMetaData::ClassMetaData() = default;
 
@@ -117,9 +137,13 @@ void ClassMetaData::SetTypeName(const std::string& type_name) {
   type_name_ = type_name;
 }
 
-void MemberMetaDataBase::SetValueAsString(void* obj,
+void MemberMetaDataBase::SetValueAsString(View* obj,
                                           const base::string16& new_value) {
   NOTREACHED();
+}
+
+MemberMetaDataBase::ValueStrings MemberMetaDataBase::GetValidValues() const {
+  return ValueStrings();
 }
 
 }  // namespace metadata

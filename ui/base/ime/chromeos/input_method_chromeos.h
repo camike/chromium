@@ -17,8 +17,8 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "ui/base/ime/character_composer.h"
+#include "ui/base/ime/chromeos/ime_input_context_handler_interface.h"
 #include "ui/base/ime/composition_text.h"
-#include "ui/base/ime/ime_input_context_handler_interface.h"
 #include "ui/base/ime/input_method_base.h"
 #include "ui/base/ime/text_input_client.h"
 
@@ -28,7 +28,8 @@ class TestableInputMethodChromeOS;
 
 // A ui::InputMethod implementation for ChromeOS.
 class COMPONENT_EXPORT(UI_BASE_IME_CHROMEOS) InputMethodChromeOS
-    : public InputMethodBase {
+    : public InputMethodBase,
+      public IMEInputContextHandlerInterface {
  public:
   explicit InputMethodChromeOS(internal::InputMethodDelegate* delegate);
   ~InputMethodChromeOS() override;
@@ -41,26 +42,46 @@ class COMPONENT_EXPORT(UI_BASE_IME_CHROMEOS) InputMethodChromeOS
   void OnCaretBoundsChanged(const TextInputClient* client) override;
   void CancelComposition(const TextInputClient* client) override;
   bool IsCandidatePopupOpen() const override;
-  InputMethodKeyboardController* GetInputMethodKeyboardController() override;
+  VirtualKeyboardController* GetVirtualKeyboardController() override;
 
   // Overridden from InputMethodBase:
+  void OnFocus() override;
+  void OnBlur() override;
   void OnWillChangeFocusedClient(TextInputClient* focused_before,
                                  TextInputClient* focused) override;
   void OnDidChangeFocusedClient(TextInputClient* focused_before,
                                 TextInputClient* focused) override;
+
+  // ui::IMEInputContextHandlerInterface overrides:
+  void CommitText(
+      const std::string& text,
+      TextInputClient::InsertTextCursorBehavior cursor_behavior) override;
   bool SetCompositionRange(
       uint32_t before,
       uint32_t after,
       const std::vector<ui::ImeTextSpan>& text_spans) override;
-
+  bool SetComposingRange(
+      uint32_t start,
+      uint32_t end,
+      const std::vector<ui::ImeTextSpan>& text_spans) override;
+  gfx::Range GetAutocorrectRange() override;
+  gfx::Rect GetAutocorrectCharacterBounds() override;
+  bool SetAutocorrectRange(const gfx::Range& range) override;
   bool SetSelectionRange(uint32_t start, uint32_t end) override;
+  void UpdateCompositionText(const CompositionText& text,
+                             uint32_t cursor_pos,
+                             bool visible) override;
+  void DeleteSurroundingText(int32_t offset, uint32_t length) override;
+  SurroundingTextInfo GetSurroundingTextInfo() override;
+  void SendKeyEvent(KeyEvent* event) override;
+  InputMethod* GetInputMethod() override;
   void ConfirmCompositionText(bool reset_engine, bool keep_selection) override;
+  bool HasCompositionText() override;
 
  protected:
   // Converts |text| into CompositionText.
-  void ExtractCompositionText(const CompositionText& text,
-                              uint32_t cursor_position,
-                              CompositionText* out_composition) const;
+  CompositionText ExtractCompositionText(const CompositionText& text,
+                                         uint32_t cursor_position) const;
 
   // Process a key returned from the input method.
   virtual ui::EventDispatchDetails ProcessKeyEventPostIME(
@@ -103,9 +124,9 @@ class COMPONENT_EXPORT(UI_BASE_IME_CHROMEOS) InputMethodChromeOS
   ui::EventDispatchDetails ProcessUnfilteredKeyPressEvent(ui::KeyEvent* event)
       WARN_UNUSED_RESULT;
 
-  // Sends input method result caused by the given key event to the focused text
-  // input client.
-  void ProcessInputMethodResult(ui::KeyEvent* event, bool filtered);
+  // Processes any pending input method operations that issued while handling
+  // the key event. Does not do anything if there were no pending operations.
+  void MaybeProcessPendingInputMethodResult(ui::KeyEvent* event, bool filtered);
 
   // Checks if the pending input method result needs inserting into the focused
   // text input client as a single character.
@@ -118,24 +139,13 @@ class COMPONENT_EXPORT(UI_BASE_IME_CHROMEOS) InputMethodChromeOS
   // true if character composer comsumes key event.
   bool ExecuteCharacterComposer(const ui::KeyEvent& event);
 
-  // ui::IMEInputContextHandlerInterface overrides:
-  void CommitText(const std::string& text) override;
-  void UpdateCompositionText(const CompositionText& text,
-                             uint32_t cursor_pos,
-                             bool visible) override;
-  void DeleteSurroundingText(int32_t offset, uint32_t length) override;
-
   // Hides the composition text.
   void HidePreeditText();
 
   // Called from the engine when it completes processing.
   void ProcessKeyEventDone(ui::KeyEvent* event, bool is_handled);
 
-  // Returns whether an non-password input field is focused.
-  bool IsNonPasswordInputFieldFocused();
-
-  // Returns true if an text input field is focused.
-  bool IsInputFieldFocused();
+  bool IsPasswordOrNoneInputFieldFocused();
 
   // Gets the reason how the focused text input client was focused.
   TextInputClient::FocusReason GetClientFocusReason() const;
@@ -143,12 +153,16 @@ class COMPONENT_EXPORT(UI_BASE_IME_CHROMEOS) InputMethodChromeOS
   // Pending composition text generated by the current pending key event.
   // It'll be sent to the focused text input client as soon as we receive the
   // processing result of the pending key event.
-  CompositionText pending_composition_;
+  base::Optional<CompositionText> pending_composition_;
 
   // Pending result text generated by the current pending key event.
   // It'll be sent to the focused text input client as soon as we receive the
   // processing result of the pending key event.
   base::string16 result_text_;
+
+  // Where the cursor should be place after inserting |result_text_|.
+  // 0 <= |result_text_cursor_| <= |result_text_.length()|.
+  size_t result_text_cursor_ = 0;
 
   base::string16 previous_surrounding_text_;
   gfx::Range previous_selection_range_;
@@ -161,6 +175,8 @@ class COMPONENT_EXPORT(UI_BASE_IME_CHROMEOS) InputMethodChromeOS
 
   // Indicates whether there is a pending SetCompositionRange operation.
   base::Optional<PendingSetCompositionRange> pending_composition_range_;
+
+  base::Optional<gfx::Range> pending_autocorrect_range_;
 
   // An object to compose a character from a sequence of key presses
   // including dead key etc.

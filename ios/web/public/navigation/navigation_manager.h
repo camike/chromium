@@ -31,20 +31,6 @@ class WebState;
 // exactly one NavigationManager.
 class NavigationManager {
  public:
-  // User agent override option used in LoadURLParams.
-  enum class UserAgentOverrideOption : short {
-    // Inherit the user agent type from the last committed non-native item if
-    // there is one, otherwise keep the default type, which is NONE for native
-    // item and MOBILE for non-native item.
-    INHERIT = 0,
-
-    // Use the mobile user agent.
-    MOBILE,
-
-    // Use the desktop user agent.
-    DESKTOP,
-  };
-
   // Parameters for URL loading. Most parameters are optional, and can be left
   // at the default values set by the constructor.
   struct WebLoadParams {
@@ -60,9 +46,6 @@ class NavigationManager {
 
     // The transition type for the load. Defaults to PAGE_TRANSITION_LINK.
     ui::PageTransition transition_type;
-
-    // The user agent override option for the load. Defualts to INHERIT.
-    UserAgentOverrideOption user_agent_override_option;
 
     // True for renderer-initiated navigations. This is
     // important for tracking whether to display pending URLs.
@@ -110,6 +93,8 @@ class NavigationManager {
   // Returns the transient item if any. This is an item which is removed and
   // discarded if any navigation occurs. Note that the returned item is owned
   // by the navigation manager and may be deleted at any time.
+  // TODO(crbug.com/1028755): Remove the transient item once SafeBrowsing is
+  // launched.
   virtual NavigationItem* GetTransientItem() const = 0;
 
   // Removes the transient and pending NavigationItems.
@@ -154,12 +139,6 @@ class NavigationManager {
   // corresponds to a new navigation.
   // TODO(crbug.com/533848): Update to return size_t.
   virtual int GetPendingItemIndex() const = 0;
-
-  // Removes the item at the specified |index|.  If the index is the last
-  // committed index or the pending item, this does nothing and returns false.
-  // Otherwise this call discards any transient or pending entries.
-  // TODO(crbug.com/533848): Update to use size_t.
-  virtual bool RemoveItemAtIndex(int index) = 0;
 
   // Navigation relative to the current item.
   virtual bool CanGoBack() const = 0;
@@ -206,26 +185,6 @@ class NavigationManager {
   // TODO(crbug.com/904502): This API is only needed for clearing cookies.
   // Remove after //ios/web exposes a proper cookie clearing API.
   virtual void AddRestoreCompletionCallback(base::OnceClosure callback) = 0;
-
-  // Removes all items from this except the last committed item, and inserts
-  // copies of all items from |source| at the beginning of the session history.
-  //
-  // For example:
-  // source: A B *C* D
-  // this:   E F *G*
-  // result: A B C *G*
-  //
-  // If there is a pending item after *G* in |this|, it is also preserved.
-  // This ignores any pending or transient entries in |source|.  This will be a
-  // no-op if called while CanPruneAllButLastCommittedItem() is false.
-  virtual void CopyStateFromAndPrune(const NavigationManager* source) = 0;
-
-  // Whether the NavigationManager can prune all but the last committed item.
-  // This is true when all the following conditions are met:
-  // - There is a last committed NavigationItem.
-  // - There is no pending history navigation.
-  // - There is no transient NavigationItem.
-  virtual bool CanPruneAllButLastCommittedItem() const = 0;
 };
 
 }  // namespace web

@@ -33,6 +33,16 @@ struct ASH_PUBLIC_EXPORT ShelfItem {
   // The title to display for tooltips, etc.
   base::string16 title;
 
+  SkColor notification_badge_color = SK_ColorWHITE;
+
+  // App status.
+  AppStatus app_status = AppStatus::kReady;
+
+  // Whether the item is associated with a window in the currently active desk.
+  // This value is valid only when |features::kPerDeskShelf| is enabled.
+  // Otherwise it won't be updated and will always be true.
+  bool is_on_active_desk = true;
+
   // Whether the tooltip should be shown on hover; generally true.
   bool shows_tooltip = true;
 

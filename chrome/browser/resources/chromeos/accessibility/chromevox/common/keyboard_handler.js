@@ -8,6 +8,7 @@ goog.require('ChromeVox');
 goog.require('KeyMap');
 goog.require('KeySequence');
 goog.require('KeyUtil');
+goog.require('ChromeVoxState');
 
 /**
  * @fileoverview Handles user keyboard input events.
@@ -28,19 +29,6 @@ ChromeVoxKbHandler.handlerKeyMap;
  * @type {function(string): (boolean|undefined)}
  */
 ChromeVoxKbHandler.commandHandler;
-
-/**
- * Loads the key bindings into the keyToFunctionsTable.
- *
- * @param {string} keyToFunctionsTable The key bindings table in JSON form.
- */
-ChromeVoxKbHandler.loadKeyToFunctionsTable = function(keyToFunctionsTable) {
-  if (!window.JSON) {
-    return;
-  }
-
-  ChromeVoxKbHandler.handlerKeyMap = KeyMap.fromJSON(keyToFunctionsTable);
-};
 
 /**
  * Converts the key bindings table into an array that is sorted by the lengths
@@ -85,8 +73,16 @@ ChromeVoxKbHandler.sortKeyToFunctionsTable_ = function(keyToFunctionsTable) {
  */
 ChromeVoxKbHandler.basicKeyDownActionsListener = function(evt) {
   const keySequence = KeyUtil.keyEventToKeySequence(evt);
+  const chromeVoxState = ChromeVoxState.instance;
+  const monitor = chromeVoxState ? chromeVoxState.getUserActionMonitor() : null;
+  if (monitor && !monitor.onKeySequence(keySequence)) {
+    // UserActionMonitor returns true if this key sequence should propagate.
+    // Prevent the default action if it returns false.
+    return false;
+  }
+
   let functionName;
-  if (ChromeVoxKbHandler.handlerKeyMap != undefined) {
+  if (ChromeVoxKbHandler.handlerKeyMap !== undefined) {
     functionName = ChromeVoxKbHandler.handlerKeyMap.commandForKey(keySequence);
   } else {
     functionName = null;

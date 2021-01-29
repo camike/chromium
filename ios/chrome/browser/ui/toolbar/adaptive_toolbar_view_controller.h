@@ -27,9 +27,7 @@
 // dismissed on such events. For example, the tools menu is closed upon
 // rotation.
 @interface AdaptiveToolbarViewController
-    : UIViewController<PopupMenuUIUpdating,
-                       ToolbarConsumer,
-                       NewTabPageControllerDelegate>
+    : UIViewController <PopupMenuUIUpdating, ToolbarConsumer>
 
 // Button factory.
 @property(nonatomic, strong) ToolbarButtonFactory* buttonFactory;
@@ -41,13 +39,13 @@
 // Returns the tools menu button.
 - (ToolbarToolsMenuButton*)toolsMenuButton;
 
-// Returns YES if animations are globally enabled in chrome.
-- (BOOL)areAnimationsEnabled;
 // Updates the view so a snapshot can be taken. It needs to be adapted,
 // depending on if it is a snapshot displayed |onNTP| or not.
 - (void)updateForSideSwipeSnapshotOnNTP:(BOOL)onNTP;
 // Resets the view after taking a snapshot for a side swipe.
 - (void)resetAfterSideSwipeSnapshot;
+// Sets the toolbar location bar alpha and vertical offset based on |progress|.
+- (void)setScrollProgressForTabletOmnibox:(CGFloat)progress;
 
 @end
 

@@ -31,6 +31,8 @@ CertVerifier::Config::~Config() = default;
 CertVerifier::Config& CertVerifier::Config::operator=(const Config&) = default;
 CertVerifier::Config& CertVerifier::Config::operator=(Config&&) = default;
 
+CertVerifier::RequestParams::RequestParams() = default;
+
 CertVerifier::RequestParams::RequestParams(
     scoped_refptr<X509Certificate> certificate,
     const std::string& hostname,
@@ -85,7 +87,7 @@ std::unique_ptr<CertVerifier> CertVerifier::CreateDefaultWithoutCaching(
   return std::unique_ptr<CertVerifier>();
 #else
   scoped_refptr<CertVerifyProc> verify_proc;
-#if defined(OS_FUCHSIA)
+#if defined(OS_FUCHSIA) || defined(OS_LINUX) || defined(OS_CHROMEOS)
   verify_proc =
       CertVerifyProc::CreateBuiltinVerifyProc(std::move(cert_net_fetcher));
 #elif BUILDFLAG(BUILTIN_CERT_VERIFIER_FEATURE_SUPPORTED)
@@ -118,11 +120,13 @@ bool operator==(const CertVerifier::Config& lhs,
   return std::tie(
              lhs.enable_rev_checking, lhs.require_rev_checking_local_anchors,
              lhs.enable_sha1_local_anchors, lhs.disable_symantec_enforcement,
-             lhs.crl_set, lhs.additional_trust_anchors) ==
+             lhs.crl_set, lhs.additional_trust_anchors,
+             lhs.additional_untrusted_authorities) ==
          std::tie(
              rhs.enable_rev_checking, rhs.require_rev_checking_local_anchors,
              rhs.enable_sha1_local_anchors, rhs.disable_symantec_enforcement,
-             rhs.crl_set, rhs.additional_trust_anchors);
+             rhs.crl_set, rhs.additional_trust_anchors,
+             rhs.additional_untrusted_authorities);
 }
 
 bool operator!=(const CertVerifier::Config& lhs,

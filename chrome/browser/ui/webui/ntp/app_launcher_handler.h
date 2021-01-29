@@ -11,12 +11,13 @@
 
 #include "base/macros.h"
 #include "base/optional.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/ui/extensions/extension_enable_flow_delegate.h"
 #include "chrome/browser/web_applications/components/app_registrar.h"
 #include "chrome/browser/web_applications/components/app_registrar_observer.h"
+#include "chrome/browser/web_applications/components/os_integration_manager.h"
 #include "chrome/browser/web_applications/components/web_app_id.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "components/favicon/core/favicon_service.h"
@@ -24,6 +25,7 @@
 #include "components/sync/model/string_ordinal.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/extension.h"
@@ -68,8 +70,8 @@ class AppLauncherHandler
                            base::DictionaryValue* value);
 
   // Registers values (strings etc.) for the page.
-  static void GetLocalizedValues(Profile* profile,
-                                 base::DictionaryValue* values);
+  static void RegisterLoadTimeData(Profile* profile,
+                                   content::WebUIDataSource* source);
 
   // Register per-profile preferences.
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
@@ -95,6 +97,7 @@ class AppLauncherHandler
   // web_app::AppRegistrarObserver:
   void OnWebAppInstalled(const web_app::AppId& app_id) override;
   void OnWebAppWillBeUninstalled(const web_app::AppId& app_id) override;
+  void OnWebAppUninstalled(const web_app::AppId& app_id) override;
   void OnAppRegistrarDestroyed() override;
 
   // Populate the given dictionary with all installed app info.
@@ -158,6 +161,9 @@ class AppLauncherHandler
   // Handles "pageSelected" message with |args| containing [page_index].
   void HandlePageSelected(const base::ListValue* args);
 
+  // Handles "runOnOsLogin" message with |args| containing [app_id, mode]
+  void HandleRunOnOsLogin(const base::ListValue* args);
+
  private:
   struct AppInstallInfo {
     AppInstallInfo();
@@ -174,11 +180,9 @@ class AppLauncherHandler
   // Prompts the user to re-enable the app for |extension_id|.
   void PromptToEnableApp(const std::string& extension_id);
 
-  // Registers file handlers for |extension_id|, after shortcuts have been
-  // created.
-  void OnExtensionShortcutsCreatedRegisterFileHandlers(
-      const extensions::ExtensionId& extension_id,
-      bool shortcuts_created);
+  // Records result to UMA after OS Hooks are installed.
+  void OnOsHooksInstalled(const web_app::AppId& app_id,
+                          const web_app::OsHooksResults os_hooks_results);
 
   // ExtensionUninstallDialog::Delegate:
   void OnExtensionUninstallDialogClosed(bool did_start_uninstall,
@@ -193,8 +197,9 @@ class AppLauncherHandler
   extensions::ExtensionUninstallDialog* CreateExtensionUninstallDialog();
 
   // Continuation for installing a bookmark app after favicon lookup.
-  void OnFaviconForApp(std::unique_ptr<AppInstallInfo> install_info,
-                       const favicon_base::FaviconImageResult& image_result);
+  void OnFaviconForAppInstallFromLink(
+      std::unique_ptr<AppInstallInfo> install_info,
+      const favicon_base::FaviconImageResult& image_result);
 
   // Sends |highlight_app_id_| to the js.
   void SetAppToBeHighlighted();
@@ -209,6 +214,9 @@ class AppLauncherHandler
   // True if the extension should be displayed.
   bool ShouldShow(const extensions::Extension* extension) const;
 
+  // Handle installing OS hooks for Web App installs from chrome://apps page.
+  void InstallOsHooks(const web_app::AppId& app_id);
+
   // The apps are represented in the extensions model, which
   // outlives us since it's owned by our containing profile.
   extensions::ExtensionService* const extension_service_;
@@ -218,8 +226,8 @@ class AppLauncherHandler
   // features::kDesktopPWAsWithoutExtensions is enabled.
   web_app::WebAppProvider* const web_app_provider_;
 
-  ScopedObserver<web_app::AppRegistrar, web_app::AppRegistrarObserver>
-      web_apps_observer_{this};
+  base::ScopedObservation<web_app::AppRegistrar, web_app::AppRegistrarObserver>
+      web_apps_observation_{this};
 
   // We monitor changes to the extension system so that we can reload the apps
   // when necessary.
@@ -265,7 +273,7 @@ class AppLauncherHandler
   // Used for favicon loading tasks.
   base::CancelableTaskTracker cancelable_task_tracker_;
 
-  // Used to register file handlers after shortcuts have been created.
+  // Used for passing callbacks.
   base::WeakPtrFactory<AppLauncherHandler> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AppLauncherHandler);

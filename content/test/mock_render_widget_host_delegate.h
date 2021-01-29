@@ -33,6 +33,9 @@ class MockRenderWidgetHostDelegate : public RenderWidgetHostDelegate {
       KeyboardEventProcessingResult result) {
     pre_handle_keyboard_event_result_ = result;
   }
+  void set_should_ignore_input_events(bool ignore) {
+    should_ignore_input_events_ = ignore;
+  }
   void CreateInputEventRouter();
 
   // RenderWidgetHostDelegate:
@@ -54,8 +57,9 @@ class MockRenderWidgetHostDelegate : public RenderWidgetHostDelegate {
       RenderWidgetHostImpl* widget_host) override;
   void SendScreenRects() override;
   TextInputManager* GetTextInputManager() override;
-  bool IsFullscreenForCurrentTab() override;
+  bool IsFullscreen() override;
   RenderViewHostDelegateView* GetDelegateView() override;
+  bool ShouldIgnoreInputEvents() override;
 
  private:
   std::unique_ptr<NativeWebKeyboardEvent> last_event_;
@@ -67,6 +71,7 @@ class MockRenderWidgetHostDelegate : public RenderWidgetHostDelegate {
   KeyboardEventProcessingResult pre_handle_keyboard_event_result_ =
       KeyboardEventProcessingResult::NOT_HANDLED;
   StubRenderViewHostDelegateView rvh_delegate_view_;
+  bool should_ignore_input_events_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(MockRenderWidgetHostDelegate);
 };

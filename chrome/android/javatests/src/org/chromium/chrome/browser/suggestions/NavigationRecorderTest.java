@@ -9,7 +9,8 @@ import static junit.framework.Assert.assertNull;
 import static org.junit.Assert.assertEquals;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Before;
@@ -112,7 +113,7 @@ public class NavigationRecorderTest {
             }
         });
 
-        mTestSetupRule.loadUrl(null);
+        mTestSetupRule.loadUrl((String) null);
         callback.waitForCallback(0);
     }
 

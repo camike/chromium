@@ -11,10 +11,9 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/clock.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/profiles/profile_attributes_entry.h"
-#include "chrome/browser/profiles/profile_attributes_storage.h"
-#include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/updates/announcement_notification/announcement_notification_metrics.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"    // nogncheck
+#include "chrome/browser/profiles/profile_attributes_storage.h"  // nogncheck
+#include "chrome/browser/profiles/profile_manager.h"             // nogncheck
 #include "chrome/grit/generated_resources.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
@@ -89,8 +88,6 @@ class AnnouncementNotificationServiceImpl
 
     if (!IsFeatureEnabled())
       return;
-
-    RecordAnnouncementHistogram(AnnouncementNotificationEvent::kStart);
 
     // No valid version Finch parameter.
     if (!IsVersionValid(remote_version_))
@@ -266,7 +263,8 @@ bool AnnouncementNotificationService::CanOpenAnnouncement(Profile* profile) {
   if (!profile)
     return false;
 
-  return !(profile->IsGuestSession() || profile->IsSystemProfile());
+  return !(profile->IsGuestSession() || profile->IsEphemeralGuestProfile() ||
+           profile->IsSystemProfile());
 }
 
 AnnouncementNotificationService::AnnouncementNotificationService() = default;

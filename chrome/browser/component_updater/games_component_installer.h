@@ -24,12 +24,12 @@ namespace component_updater {
 
 // Success callback to be run after the component is downloaded.
 using OnGamesComponentReadyCallback =
-    base::Callback<void(const base::FilePath&)>;
+    base::RepeatingCallback<void(const base::FilePath&)>;
 
 class GamesComponentInstallerPolicy : public ComponentInstallerPolicy {
  public:
   explicit GamesComponentInstallerPolicy(
-      const OnGamesComponentReadyCallback& callback);
+      OnGamesComponentReadyCallback callback);
   ~GamesComponentInstallerPolicy() override;
 
  private:
@@ -52,7 +52,6 @@ class GamesComponentInstallerPolicy : public ComponentInstallerPolicy {
   void GetHash(std::vector<uint8_t>* hash) const override;
   std::string GetName() const override;
   update_client::InstallerAttributes GetInstallerAttributes() const override;
-  std::vector<std::string> GetMimeTypes() const override;
 
   OnGamesComponentReadyCallback on_component_ready_callback_;
 

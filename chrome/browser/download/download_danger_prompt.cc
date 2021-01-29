@@ -13,6 +13,7 @@
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_item.h"
 #include "components/safe_browsing/core/file_type_policies.h"
+#include "content/public/browser/download_item_utils.h"
 
 using safe_browsing::ClientDownloadResponse;
 using safe_browsing::ClientSafeBrowsingReportRequest;
@@ -58,7 +59,7 @@ const char* GetDangerTypeString(
     case download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS:
     case download::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT:
     case download::DOWNLOAD_DANGER_TYPE_USER_VALIDATED:
-    case download::DOWNLOAD_DANGER_TYPE_WHITELISTED_BY_POLICY:
+    case download::DOWNLOAD_DANGER_TYPE_ALLOWLISTED_BY_POLICY:
     case download::DOWNLOAD_DANGER_TYPE_MAX:
       break;
   }
@@ -74,6 +75,8 @@ void DownloadDangerPrompt::SendSafeBrowsingDownloadReport(
     const download::DownloadItem& download) {
   safe_browsing::SafeBrowsingService* sb_service =
       g_browser_process->safe_browsing_service();
+  Profile* profile = Profile::FromBrowserContext(
+      content::DownloadItemUtils::GetBrowserContext(&download));
   ClientSafeBrowsingReportRequest report;
   report.set_type(report_type);
   switch (download.GetDangerType()) {
@@ -102,7 +105,7 @@ void DownloadDangerPrompt::SendSafeBrowsingDownloadReport(
     report.set_token(token);
   std::string serialized_report;
   if (report.SerializeToString(&serialized_report))
-    sb_service->SendSerializedDownloadReport(serialized_report);
+    sb_service->SendSerializedDownloadReport(profile, serialized_report);
   else
     DLOG(ERROR) << "Unable to serialize the threat report.";
 }

@@ -16,14 +16,16 @@
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/geometry/rect.h"
 
+class Profile;
 class ScopedKeepAlive;
+class ScopedProfileKeepAlive;
 
 class ChromeAppDelegate : public extensions::AppDelegate,
                           public content::NotificationObserver {
  public:
   // Params:
   //   keep_alive: Whether this object should keep the browser alive.
-  explicit ChromeAppDelegate(bool keep_alive);
+  explicit ChromeAppDelegate(Profile* profile, bool keep_alive);
   ~ChromeAppDelegate() override;
 
   static void DisableExternalOpenForTesting();
@@ -49,13 +51,14 @@ class ChromeAppDelegate : public extensions::AppDelegate,
       const content::OpenURLParams& params) override;
   void AddNewContents(content::BrowserContext* context,
                       std::unique_ptr<content::WebContents> new_contents,
+                      const GURL& target_url,
                       WindowOpenDisposition disposition,
                       const gfx::Rect& initial_rect,
                       bool user_gesture) override;
   content::ColorChooser* ShowColorChooser(content::WebContents* web_contents,
                                           SkColor initial_color) override;
   void RunFileChooser(content::RenderFrameHost* render_frame_host,
-                      std::unique_ptr<content::FileSelectListener> listener,
+                      scoped_refptr<content::FileSelectListener> listener,
                       const blink::mojom::FileChooserParams& params) override;
   void RequestMediaAccessPermission(
       content::WebContents* web_contents,
@@ -89,7 +92,9 @@ class ChromeAppDelegate : public extensions::AppDelegate,
   bool has_been_shown_;
   bool is_hidden_;
   bool for_lock_screen_app_;
+  Profile* const profile_;
   std::unique_ptr<ScopedKeepAlive> keep_alive_;
+  std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive_;
   std::unique_ptr<NewWindowContentsDelegate> new_window_contents_delegate_;
   base::OnceClosure terminating_callback_;
   content::NotificationRegistrar registrar_;

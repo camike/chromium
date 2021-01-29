@@ -29,10 +29,9 @@ testcase.toolbarDeleteWithMenuItemNoEntrySelected = async () => {
  * dialog.
  */
 testcase.toolbarDeleteButtonKeepFocus = async () => {
-  const entries = [ENTRIES.desktop];
-
   // Open Files app.
-  const appId = await setupAndWaitUntilReady(RootPath.DOWNLOADS, entries, []);
+  const appId =
+      await setupAndWaitUntilReady(RootPath.DRIVE, [], [ENTRIES.desktop]);
 
   // Select My Desktop Background.png
   chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
@@ -86,16 +85,6 @@ testcase.toolbarDeleteEntry = async () => {
   // Click delete button in the toolbar.
   chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
       'fakeMouseClick', appId, ['#delete-button']));
-
-
-  // Confirm that the confirmation dialog is shown.
-  await remoteCall.waitForElement(appId, '.cr-dialog-container.shown');
-
-  // Press delete button.
-  chrome.test.assertTrue(
-      !!await remoteCall.callRemoteTestUtil(
-          'fakeMouseClick', appId, ['button.cr-dialog-ok']),
-      'fakeMouseClick failed');
 
   // Confirm the file is removed.
   await remoteCall.waitForFiles(
@@ -217,4 +206,129 @@ testcase.toolbarMultiMenuFollowsButton = async () => {
               `${openButton.renderedLeft} != ${menu.renderedLeft}`);
     }
   });
+};
+
+/**
+ * Tests that the sharesheet button is enabled and executable.
+ */
+testcase.toolbarSharesheetButtonWithSelection = async () => {
+  const appId = await setupAndWaitUntilReady(RootPath.DOWNLOADS);
+
+  // Fake chrome.fileManagerPrivate.sharesheetHasTargets to return true.
+  let fakeData = {
+    'chrome.fileManagerPrivate.sharesheetHasTargets': ['static_fake', [true]],
+  };
+  await remoteCall.callRemoteTestUtil('foregroundFake', appId, [fakeData]);
+
+  // Fake chrome.fileManagerPrivate.invokeSharesheet.
+  fakeData = {
+    'chrome.fileManagerPrivate.invokeSharesheet': ['static_fake', []],
+  };
+  await remoteCall.callRemoteTestUtil('foregroundFake', appId, [fakeData]);
+
+  const entry = ENTRIES.hello;
+
+  // Select an entry in the file list.
+  chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
+      'selectFile', appId, [entry.nameText]));
+
+  await remoteCall.waitAndClickElement(
+      appId, '#sharesheet-button:not([hidden])');
+
+  // Check invoke sharesheet is called.
+  chrome.test.assertEq(
+      1, await remoteCall.callRemoteTestUtil('staticFakeCounter', appId, [
+        'chrome.fileManagerPrivate.invokeSharesheet'
+      ]));
+
+  // Remove fakes.
+  const removedCount = await remoteCall.callRemoteTestUtil(
+      'removeAllForegroundFakes', appId, []);
+  chrome.test.assertEq(2, removedCount);
+};
+
+/**
+ * Tests that the sharesheet command in context menu is enabled and executable.
+ */
+testcase.toolbarSharesheetContextMenuWithSelection = async () => {
+  const contextMenu = '#file-context-menu:not([hidden])';
+
+  const appId = await setupAndWaitUntilReady(RootPath.DOWNLOADS);
+
+  // Fake chrome.fileManagerPrivate.sharesheetHasTargets to return true.
+  let fakeData = {
+    'chrome.fileManagerPrivate.sharesheetHasTargets': ['static_fake', [true]],
+  };
+  await remoteCall.callRemoteTestUtil('foregroundFake', appId, [fakeData]);
+
+  // Fake chrome.fileManagerPrivate.invokeSharesheet.
+  fakeData = {
+    'chrome.fileManagerPrivate.invokeSharesheet': ['static_fake', []],
+  };
+  await remoteCall.callRemoteTestUtil('foregroundFake', appId, [fakeData]);
+
+  const entry = ENTRIES.hello;
+
+  // Select an entry in the file list.
+  chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
+      'selectFile', appId, [entry.nameText]));
+
+  chrome.test.assertTrue(!!await remoteCall.waitAndRightClick(
+      appId, '#file-list .table-row[selected]'));
+
+  // Wait until the context menu is shown.
+  await remoteCall.waitForElement(appId, contextMenu);
+
+  // Assert the menu sharesheet command is not hidden.
+  const sharesheetEnabled =
+      '[command="#invoke-sharesheet"]:not([hidden]):not([disabled])';
+
+  await remoteCall.waitAndClickElement(
+      appId, contextMenu + ' ' + sharesheetEnabled);
+
+  // Check invoke sharesheet is called.
+  chrome.test.assertEq(
+      1, await remoteCall.callRemoteTestUtil('staticFakeCounter', appId, [
+        'chrome.fileManagerPrivate.invokeSharesheet'
+      ]));
+
+  // Remove fakes.
+  const removedCount = await remoteCall.callRemoteTestUtil(
+      'removeAllForegroundFakes', appId, []);
+  chrome.test.assertEq(2, removedCount);
+};
+
+/**
+ * Tests that the sharesheet item is hidden if no entry is selected.
+ */
+testcase.toolbarSharesheetNoEntrySelected = async () => {
+  const contextMenu = '#file-context-menu:not([hidden])';
+
+  const appId = await setupAndWaitUntilReady(RootPath.DOWNLOADS);
+
+  // Fake chrome.fileManagerPrivate.sharesheetHasTargets to return true.
+  const fakeData = {
+    'chrome.fileManagerPrivate.sharesheetHasTargets': ['static_fake', [true]],
+  };
+  await remoteCall.callRemoteTestUtil('foregroundFake', appId, [fakeData]);
+
+  // Right click the list without selecting an entry.
+  chrome.test.assertTrue(
+      !!await remoteCall.waitAndRightClick(appId, 'list.list'));
+
+  // Wait until the context menu is shown.
+  await remoteCall.waitForElement(appId, contextMenu);
+
+  // Assert the menu sharesheet command is disabled.
+  const sharesheetDisabled =
+      '[command="#invoke-sharesheet"][hidden][disabled="disabled"]';
+  await remoteCall.waitForElement(
+      appId, contextMenu + ' ' + sharesheetDisabled);
+
+  await remoteCall.waitForElement(appId, '#sharesheet-button[hidden]');
+
+  // Remove fakes.
+  const removedCount = await remoteCall.callRemoteTestUtil(
+      'removeAllForegroundFakes', appId, []);
+  chrome.test.assertEq(1, removedCount);
 };

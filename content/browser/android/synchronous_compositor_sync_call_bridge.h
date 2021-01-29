@@ -10,8 +10,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/thread_annotations.h"
 #include "components/viz/common/quads/compositor_frame.h"
-#include "content/common/input/sync_compositor_messages.h"
 #include "content/public/browser/android/synchronous_compositor.h"
+#include "third_party/blink/public/mojom/input/synchronous_compositor.mojom.h"
 
 namespace content {
 
@@ -82,13 +82,14 @@ class SynchronousCompositorSyncCallBridge
   bool ReceiveFrameOnIOThread(
       int frame_sink_id,
       uint32_t metadata_version,
+      base::Optional<viz::LocalSurfaceId> local_surface_id,
       base::Optional<viz::CompositorFrame>,
       base::Optional<viz::HitTestRegionList> hit_test_region_list);
 
   // Receive a BeginFrameResponse. Returns true if handling the response was
   // successful or not.
   bool BeginFrameResponseOnIOThread(
-      const SyncCompositorCommonRendererParams& render_params);
+      blink::mojom::SyncCompositorCommonRendererParamsPtr render_params);
 
   // Schedule a callback for when vsync finishes and wait for the
   // BeginFrameResponse callback.
@@ -133,7 +134,8 @@ class SynchronousCompositorSyncCallBridge
   base::Lock lock_;
   FrameFutureQueue frame_futures_ GUARDED_BY(lock_);
   bool begin_frame_response_valid_ GUARDED_BY(lock_) = false;
-  SyncCompositorCommonRendererParams last_render_params_ GUARDED_BY(lock_);
+  blink::mojom::SyncCompositorCommonRendererParams last_render_params_
+      GUARDED_BY(lock_);
   base::ConditionVariable begin_frame_condition_ GUARDED_BY(lock_);
   RemoteState remote_state_ GUARDED_BY(lock_) = RemoteState::INIT;
 

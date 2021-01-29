@@ -20,6 +20,8 @@ namespace chromeos {
 class COMPONENT_EXPORT(PERMISSION_BROKER) FakePermissionBrokerClient
     : public PermissionBrokerClient {
  public:
+  using ClaimDevicePathCall = std::pair<std::string, uint32_t>;
+
   FakePermissionBrokerClient();
   ~FakePermissionBrokerClient() override;
 
@@ -31,6 +33,11 @@ class COMPONENT_EXPORT(PERMISSION_BROKER) FakePermissionBrokerClient
   void OpenPath(const std::string& path,
                 OpenPathCallback callback,
                 ErrorCallback error_callback) override;
+  void ClaimDevicePath(const std::string& path,
+                       uint32_t allowed_interfaces_mask,
+                       int lifeline_fd,
+                       OpenPathCallback callback,
+                       ErrorCallback error_callback) override;
   void RequestTcpPortAccess(uint16_t port,
                             const std::string& interface,
                             int lifeline_fd,
@@ -82,6 +89,8 @@ class COMPONENT_EXPORT(PERMISSION_BROKER) FakePermissionBrokerClient
   // Returns true if UDP port is being forwarded.
   bool HasUdpPortForward(uint16_t port, const std::string& interface);
 
+  std::vector<ClaimDevicePathCall> GetAndResetClaimDevicePathLog();
+
  private:
   using RuleSet =
       std::set<std::pair<uint16_t /* port */, std::string /* interface */>>;
@@ -99,6 +108,8 @@ class COMPONENT_EXPORT(PERMISSION_BROKER) FakePermissionBrokerClient
 
   RuleSet tcp_deny_rule_set_;
   RuleSet udp_deny_rule_set_;
+
+  std::vector<ClaimDevicePathCall> claim_device_path_log_;
 
   DISALLOW_COPY_AND_ASSIGN(FakePermissionBrokerClient);
 };

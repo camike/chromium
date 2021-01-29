@@ -5,7 +5,8 @@
 package org.chromium.chrome.browser.crypto;
 
 import android.os.Bundle;
-import android.support.test.filters.MediumTest;
+
+import androidx.test.filters.MediumTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -13,6 +14,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.BaseJUnit4ClassRunner;
+import org.chromium.base.test.util.Batch;
 import org.chromium.chrome.browser.crypto.CipherFactory.CipherDataObserver;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
@@ -28,6 +30,7 @@ import javax.crypto.Cipher;
  * throughout the class to simulate artificial blockages.
  */
 @RunWith(BaseJUnit4ClassRunner.class)
+@Batch(Batch.UNIT_TESTS)
 public class CipherFactoryTest {
     private static final byte[] INPUT_DATA = {1, 16, 84};
 
@@ -83,6 +86,7 @@ public class CipherFactoryTest {
      */
     @Before
     public void setUp() {
+        CipherFactory.resetInstanceForTesting();
         mNumberProvider = new DeterministicParameterGenerator();
         CipherFactory.getInstance().setRandomNumberProviderForTests(mNumberProvider);
     }

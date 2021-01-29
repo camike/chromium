@@ -2,11 +2,29 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// clang-format off
+// #import {LaunchParam} from './launch_param.m.js';
+// #import {NamingController} from './naming_controller.m.js';
+// #import {FileFilter} from './directory_contents.m.js';
+// #import {VolumeManager} from '../../../externs/volume_manager.m.js';
+// #import {MetadataModel} from './metadata/metadata_model.m.js';
+// #import {DirectoryModel} from './directory_model.m.js';
+// #import {DialogFooter} from './ui/dialog_footer.m.js';
+// #import {util, str} from '../../common/js/util.m.js';
+// #import {VolumeManagerCommon, AllowedPaths} from '../../../base/js/volume_manager_types.m.js';
+// #import {DialogType} from './dialog_type.m.js';
+// #import {FileSelectionHandler} from './file_selection.m.js';
+// #import {assert, assertNotReached} from 'chrome://resources/js/assert.m.js';
+// #import {metrics} from '../../common/js/metrics.m.js';
+// #import {$} from 'chrome://resources/js/util.m.js';
+// #import {Command} from 'chrome://resources/js/cr/ui/command.m.js';
+// clang-format on
+
 /**
  * Controler for handling behaviors of the Files app opened as a file/folder
  * selection dialog.
  */
-class DialogActionController {
+/* #export */ class DialogActionController {
   /**
    * @param {!DialogType} dialogType Dialog type.
    * @param {!DialogFooter} dialogFooter Dialog footer.
@@ -101,6 +119,7 @@ class DialogActionController {
 
     // Save-as doesn't require a valid selection from the list, since
     // we're going to take the filename from the text input.
+    this.updateExtensionForSelectedFileType_(true);
     const filename = this.dialogFooter_.filenameInput.value;
     if (!filename) {
       throw new Error('Missing filename!');
@@ -272,35 +291,78 @@ class DialogActionController {
   }
 
   /**
+   * Returns the regex to match against files for the current filter.
+   * @return {?RegExp}
+   */
+  regexpForCurrentFilter_() {
+    // Note selectedFilterIndex indexing is 1-based. (0 is "all files").
+    const selectedIndex = this.dialogFooter_.selectedFilterIndex;
+    if (selectedIndex < 1) {
+      return null;  // No specific filter selected.
+    }
+    return new RegExp(
+        '\\.(' + this.fileTypes_[selectedIndex - 1].extensions.join('|') + ')$',
+        'i');
+  }
+
+  /**
+   * Updates the file input field to agree with the current filter.
+   * @param {boolean} forConfirm The update is for the final confirm step.
+   * @private
+   */
+  updateExtensionForSelectedFileType_(forConfirm) {
+    const regexp = this.regexpForCurrentFilter_();
+    if (!regexp) {
+      return;  // No filter selected.
+    }
+
+    let filename = this.dialogFooter_.filenameInput.value;
+    if (!filename || regexp.test(filename)) {
+      return;  // Filename empty or already satisfies filter.
+    }
+
+    const selectedIndex = this.dialogFooter_.selectedFilterIndex;
+    assert(selectedIndex > 0);  // Otherwise there would be no regex.
+    const newExtension = this.fileTypes_[selectedIndex - 1].extensions[0];
+    if (!newExtension) {
+      return;  // No default extension.
+    }
+
+    const extensionIndex = filename.lastIndexOf('.');
+    if (extensionIndex < 0) {
+      // No current extension.
+      if (!forConfirm) {
+        return;  // Add one later.
+      }
+      filename = `${filename}.${newExtension}`;
+    } else {
+      if (forConfirm) {
+        return;  // Keep the current user choice.
+      }
+      filename = `${filename.substr(0, extensionIndex)}.${newExtension}`;
+    }
+
+    this.dialogFooter_.filenameInput.value = filename;
+    this.dialogFooter_.selectTargetNameInFilenameInput();
+  }
+
+  /**
    * Filters file according to the selected file type.
    * @private
    */
   onFileTypeFilterChanged_() {
     this.fileFilter_.removeFilter('fileType');
-    const selectedIndex = this.dialogFooter_.selectedFilterIndex;
-    if (selectedIndex > 0) {  // Specific filter selected.
-      const regexp = new RegExp(
-          '\\.(' + this.fileTypes_[selectedIndex - 1].extensions.join('|') +
-              ')$',
-          'i');
-      const filter = entry => {
-        return entry.isDirectory || regexp.test(entry.name);
-      };
-      this.fileFilter_.addFilter('fileType', filter);
+    const regexp = this.regexpForCurrentFilter_();
+    if (!regexp) {
+      return;
+    }
 
-      // In save dialog, update the destination name extension.
-      if (this.dialogType_ === DialogType.SELECT_SAVEAS_FILE) {
-        const current = this.dialogFooter_.filenameInput.value;
-        const newExt = this.fileTypes_[selectedIndex - 1].extensions[0];
-        if (newExt && !regexp.test(current)) {
-          const i = current.lastIndexOf('.');
-          if (i >= 0) {
-            this.dialogFooter_.filenameInput.value =
-                current.substr(0, i) + '.' + newExt;
-            this.dialogFooter_.selectTargetNameInFilenameInput();
-          }
-        }
-      }
+    const filter = entry => entry.isDirectory || regexp.test(entry.name);
+    this.fileFilter_.addFilter('fileType', filter);
+
+    // In save dialog, update the destination name extension.
+    if (this.dialogType_ === DialogType.SELECT_SAVEAS_FILE) {
+      this.updateExtensionForSelectedFileType_(false);
     }
   }
 

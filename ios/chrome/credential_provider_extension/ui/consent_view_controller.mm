@@ -8,13 +8,22 @@
 #error "This file requires ARC support."
 #endif
 
+namespace {
+constexpr CGFloat kStackViewSpacingAfterIllustration = 37;
+}  // namespace
+
 @implementation ConsentViewController
 
 #pragma mark - Public
 
 - (void)loadView {
   self.image = [UIImage imageNamed:@"consent_illustration"];
+  self.customSpacingAfterImage = kStackViewSpacingAfterIllustration;
+
   self.helpButtonAvailable = YES;
+  self.helpButtonAccessibilityLabel = NSLocalizedString(
+      @"IDS_IOS_CREDENTIAL_PROVIDER_HELP_ACCESSIBILITY_LABEL", @"Help.");
+
   self.primaryActionAvailable = YES;
   NSString* titleString =
       NSLocalizedString(@"IDS_IOS_CREDENTIAL_PROVIDER_CONSENT_TITLE",
@@ -29,6 +38,10 @@
   self.titleString = titleString;
   self.subtitleString = subtitleString;
   self.primaryActionString = primaryActionString;
+  self.dismissBarButtonSystemItem = UIBarButtonSystemItemCancel;
+  if (@available(iOS 13.4, *)) {
+    self.pointerInteractionEnabled = YES;
+  }
   [super loadView];
 }
 

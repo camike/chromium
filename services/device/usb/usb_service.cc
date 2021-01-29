@@ -4,6 +4,8 @@
 
 #include "services/device/usb/usb_service.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/feature_list.h"
 #include "base/location.h"
@@ -21,7 +23,9 @@
 #elif defined(USE_UDEV)
 #include "services/device/usb/usb_service_linux.h"
 #else
-#if defined(OS_WIN)
+#if defined(OS_MAC)
+#include "services/device/usb/usb_service_mac.h"
+#elif defined(OS_WIN)
 #include "services/device/usb/usb_service_win.h"
 #endif
 #include "services/device/usb/usb_service_impl.h"
@@ -31,12 +35,15 @@ namespace device {
 
 UsbService::Observer::~Observer() = default;
 
-void UsbService::Observer::OnDeviceAdded(scoped_refptr<UsbDevice> device) {}
+void UsbService::Observer::OnDeviceAdded(scoped_refptr<UsbDevice> device,
+                                         bool is_restricted_device) {}
 
-void UsbService::Observer::OnDeviceRemoved(scoped_refptr<UsbDevice> device) {}
+void UsbService::Observer::OnDeviceRemoved(scoped_refptr<UsbDevice> device,
+                                           bool is_restricted_device) {}
 
 void UsbService::Observer::OnDeviceRemovedCleanup(
-    scoped_refptr<UsbDevice> device) {}
+    scoped_refptr<UsbDevice> device,
+    bool is_restricted_device) {}
 
 void UsbService::Observer::WillDestroyUsbService() {}
 
@@ -54,8 +61,11 @@ std::unique_ptr<UsbService> UsbService::Create() {
     return base::WrapUnique(new UsbServiceWin());
   else
     return base::WrapUnique(new UsbServiceImpl());
-#elif defined(OS_MACOSX)
-  return base::WrapUnique(new UsbServiceImpl());
+#elif defined(OS_MAC)
+  if (base::FeatureList::IsEnabled(kNewUsbBackend))
+    return base::WrapUnique(new UsbServiceMac());
+  else
+    return base::WrapUnique(new UsbServiceImpl());
 #else
   return nullptr;
 #endif
@@ -81,7 +91,8 @@ scoped_refptr<UsbDevice> UsbService::GetDevice(const std::string& guid) {
   return it->second;
 }
 
-void UsbService::GetDevices(GetDevicesCallback callback) {
+void UsbService::GetDevices(bool allow_restricted_devices,
+                            GetDevicesCallback callback) {
   std::vector<scoped_refptr<UsbDevice>> devices;
   devices.reserve(devices_.size());
   for (const auto& map_entry : devices_)
@@ -105,7 +116,7 @@ void UsbService::AddDeviceForTesting(scoped_refptr<UsbDevice> device) {
   DCHECK(!base::Contains(devices_, device->guid()));
   devices_[device->guid()] = device;
   testing_devices_.insert(device->guid());
-  NotifyDeviceAdded(device);
+  NotifyDeviceAdded(device, /*is_restricted_device=*/false);
 }
 
 void UsbService::RemoveDeviceForTesting(const std::string& device_guid) {
@@ -119,7 +130,7 @@ void UsbService::RemoveDeviceForTesting(const std::string& device_guid) {
     scoped_refptr<UsbDevice> device = devices_it->second;
     devices_.erase(devices_it);
     testing_devices_.erase(testing_devices_it);
-    NotifyDeviceRemoved(device);
+    NotifyDeviceRemoved(device, /*is_restricted_device=*/false);
   }
 }
 
@@ -134,21 +145,23 @@ void UsbService::GetTestDevices(
   }
 }
 
-void UsbService::NotifyDeviceAdded(scoped_refptr<UsbDevice> device) {
+void UsbService::NotifyDeviceAdded(scoped_refptr<UsbDevice> device,
+                                   bool is_restricted_device) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   for (auto& observer : observer_list_)
-    observer.OnDeviceAdded(device);
+    observer.OnDeviceAdded(device, is_restricted_device);
 }
 
-void UsbService::NotifyDeviceRemoved(scoped_refptr<UsbDevice> device) {
+void UsbService::NotifyDeviceRemoved(scoped_refptr<UsbDevice> device,
+                                     bool is_restricted_device) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   for (auto& observer : observer_list_)
-    observer.OnDeviceRemoved(device);
+    observer.OnDeviceRemoved(device, is_restricted_device);
   device->NotifyDeviceRemoved();
   for (auto& observer : observer_list_)
-    observer.OnDeviceRemovedCleanup(device);
+    observer.OnDeviceRemovedCleanup(device, is_restricted_device);
 }
 
 void UsbService::NotifyWillDestroyUsbService() {

@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/location.h"
@@ -27,10 +26,14 @@
 #include "chrome/browser/policy/enrollment_status.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/tpm_manager/tpm_manager.pb.h"
+#include "chromeos/dbus/tpm_manager/tpm_manager_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/dm_auth.h"
+#include "components/policy/proto/device_management_backend.pb.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
+#include "google_apis/gaia/gaia_constants.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace {
@@ -77,7 +80,8 @@ namespace chromeos {
 EnterpriseEnrollmentHelperImpl::EnterpriseEnrollmentHelperImpl() {
   // Init the TPM if it has not been done until now (in debug build we might
   // have not done that yet).
-  CryptohomeClient::Get()->TpmCanAttemptOwnership(base::DoNothing());
+  TpmManagerClient::Get()->TakeOwnership(::tpm_manager::TakeOwnershipRequest(),
+                                         base::DoNothing());
 }
 
 EnterpriseEnrollmentHelperImpl::~EnterpriseEnrollmentHelperImpl() {
@@ -105,8 +109,8 @@ void EnterpriseEnrollmentHelperImpl::EnrollUsingAuthCode(
       auth_code,
       g_browser_process->system_network_context_manager()
           ->GetSharedURLLoaderFactory(),
-      base::Bind(&EnterpriseEnrollmentHelperImpl::OnTokenFetched,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&EnterpriseEnrollmentHelperImpl::OnTokenFetched,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void EnterpriseEnrollmentHelperImpl::EnrollUsingToken(
@@ -205,6 +209,21 @@ void EnterpriseEnrollmentHelperImpl::OnDeviceAccountClientError(
       FROM_HERE, device_account_initializer_.release());
 }
 
+enterprise_management::DeviceServiceApiAccessRequest::DeviceType
+EnterpriseEnrollmentHelperImpl::GetRobotAuthCodeDeviceType() {
+  return enterprise_management::DeviceServiceApiAccessRequest::CHROME_OS;
+}
+
+std::set<std::string> EnterpriseEnrollmentHelperImpl::GetRobotOAuthScopes() {
+  return {GaiaConstants::kAnyApiOAuth2Scope};
+}
+
+scoped_refptr<network::SharedURLLoaderFactory>
+EnterpriseEnrollmentHelperImpl::GetURLLoaderFactory() {
+  return g_browser_process->system_network_context_manager()
+      ->GetSharedURLLoaderFactory();
+}
+
 void EnterpriseEnrollmentHelperImpl::ClearAuth(base::OnceClosure callback) {
   if (oauth_status_ != OAUTH_NOT_STARTED) {
     if (oauth_fetcher_) {
@@ -215,34 +234,38 @@ void EnterpriseEnrollmentHelperImpl::ClearAuth(base::OnceClosure callback) {
         (new TokenRevoker())->Start(oauth_fetcher_->OAuth2RefreshToken());
 
       oauth_fetcher_.reset();
-    } else if (auth_data_ && auth_data_->has_oauth_token()) {
+    } else if (auth_data_.has_oauth_token()) {
       // EnrollUsingToken was called.
-      (new TokenRevoker())->Start(auth_data_->oauth_token());
+      (new TokenRevoker())->Start(auth_data_.oauth_token());
     }
   }
-  auth_data_.reset();
+  auth_data_ = policy::DMAuth::NoAuth();
   chromeos::ProfileHelper::Get()->ClearSigninProfile(
       base::AdaptCallbackForRepeating(base::BindOnce(
           &EnterpriseEnrollmentHelperImpl::OnSigninProfileCleared,
           weak_ptr_factory_.GetWeakPtr(), std::move(callback))));
 }
 
-void EnterpriseEnrollmentHelperImpl::DoEnroll(
-    std::unique_ptr<policy::DMAuth> auth_data) {
-  CHECK(auth_data);
-  DCHECK(!auth_data_ || auth_data_->Equals(*auth_data));
+void EnterpriseEnrollmentHelperImpl::DoEnroll(policy::DMAuth auth_data) {
+  DCHECK(auth_data_.empty() || auth_data_ == auth_data);
   DCHECK(enrollment_config_.is_mode_attestation() ||
          enrollment_config_.mode ==
              policy::EnrollmentConfig::MODE_OFFLINE_DEMO ||
          oauth_status_ == OAUTH_STARTED_WITH_AUTH_CODE ||
          oauth_status_ == OAUTH_STARTED_WITH_TOKEN);
   VLOG(1) << "Enroll with token type: "
-          << static_cast<int>(auth_data->token_type());
+          << static_cast<int>(auth_data.token_type());
   auth_data_ = std::move(auth_data);
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
   // Re-enrollment is not implemented for Active Directory.
-  if (connector->IsCloudManaged() &&
+  // If an enrollment domain is already fixed in install attributes and
+  // re-enrollment happens via login, domains need to be equal.
+  // If there is a mismatch between domain set in install attributes and
+  // auto re-enrollment domain provided by the server, policy validation will
+  // fail later in the process.
+  if (connector->IsCloudManaged() && !enrolling_user_domain_.empty() &&
+      !enrollment_config_.is_mode_attestation() &&
       connector->GetEnterpriseEnrollmentDomain() != enrolling_user_domain_) {
     LOG(ERROR) << "Trying to re-enroll to a different domain than "
                << connector->GetEnterpriseEnrollmentDomain();
@@ -259,14 +282,26 @@ void EnterpriseEnrollmentHelperImpl::DoEnroll(
   CHECK(dcp_initializer);
   dcp_initializer->PrepareEnrollment(
       connector->device_management_service(), ad_join_delegate_,
-      enrollment_config_, auth_data_->Clone(),
-      base::Bind(&EnterpriseEnrollmentHelperImpl::OnEnrollmentFinished,
-                 weak_ptr_factory_.GetWeakPtr()));
+      enrollment_config_, auth_data_.Clone(),
+      base::BindOnce(&EnterpriseEnrollmentHelperImpl::OnEnrollmentFinished,
+                     weak_ptr_factory_.GetWeakPtr()));
   dcp_initializer->StartEnrollment();
 }
 
 void EnterpriseEnrollmentHelperImpl::GetDeviceAttributeUpdatePermission() {
-  DCHECK(auth_data_);
+  if (!auth_data_.has_oauth_token()) {
+    // Checking whether the device attributes can be updated requires knowning
+    // which user is performing enterprise enrollment, because the permission is
+    // tied to a user.
+    // For enterprise enrollment authorized by attestation or an enrollment
+    // token, the current user is unknown.
+    // A possible follow-up (tracked in https://crbug.com/942013) will be to
+    // allow the first affiliated user that signs in and has the permission to
+    // edit device attributes.
+    OnDeviceAttributeUpdatePermission(/*granted=*/false);
+    return;
+  }
+
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
   // Don't update device attributes for Active Directory management.
@@ -279,7 +314,7 @@ void EnterpriseEnrollmentHelperImpl::GetDeviceAttributeUpdatePermission() {
   policy::CloudPolicyClient* client = policy_manager->core()->client();
 
   client->GetDeviceAttributeUpdatePermission(
-      auth_data_->Clone(),
+      auth_data_.Clone(),
       base::BindOnce(
           &EnterpriseEnrollmentHelperImpl::OnDeviceAttributeUpdatePermission,
           weak_ptr_factory_.GetWeakPtr()));
@@ -288,7 +323,7 @@ void EnterpriseEnrollmentHelperImpl::GetDeviceAttributeUpdatePermission() {
 void EnterpriseEnrollmentHelperImpl::UpdateDeviceAttributes(
     const std::string& asset_id,
     const std::string& location) {
-  DCHECK(auth_data_);
+  DCHECK(!auth_data_.empty());
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
   policy::DeviceCloudPolicyManagerChromeOS* policy_manager =
@@ -296,7 +331,7 @@ void EnterpriseEnrollmentHelperImpl::UpdateDeviceAttributes(
   policy::CloudPolicyClient* client = policy_manager->core()->client();
 
   client->UpdateDeviceAttributes(
-      auth_data_->Clone(), asset_id, location,
+      auth_data_.Clone(), asset_id, location,
       base::BindOnce(
           &EnterpriseEnrollmentHelperImpl::OnDeviceAttributeUploadCompleted,
           weak_ptr_factory_.GetWeakPtr()));
@@ -393,6 +428,9 @@ void EnterpriseEnrollmentHelperImpl::ReportEnrollmentStatus(
         case policy::DM_STATUS_SERVICE_DEVICE_ID_CONFLICT:
           UMA(policy::kMetricEnrollmentRegisterPolicyDeviceIdConflict);
           break;
+        case policy::DM_STATUS_SERVICE_TOO_MANY_REQUESTS:
+          UMA(policy::kMetricEnrollmentTooManyRequests);
+          break;
         case policy::DM_STATUS_SERVICE_POLICY_NOT_FOUND:
           UMA(policy::kMetricEnrollmentRegisterPolicyNotFound);
           break;
@@ -433,6 +471,17 @@ void EnterpriseEnrollmentHelperImpl::ReportEnrollmentStatus(
         case policy::DM_STATUS_SERVICE_CONSUMER_ACCOUNT_WITH_PACKAGED_LICENSE:
           UMA(policy::
                   kMetricEnrollmentRegisterConsumerAccountWithPackagedLicense);
+          break;
+        case policy::
+            DM_STATUS_SERVICE_ENTERPRISE_ACCOUNT_IS_NOT_ELIGIBLE_TO_ENROLL:
+          UMA(policy::
+                  kMetricEnrollmentRegisterEnterpriseAccountIsNotEligibleToEnroll);
+          break;
+        case policy::DM_STATUS_SERVICE_ENTERPRISE_TOS_HAS_NOT_BEEN_ACCEPTED:
+          UMA(policy::kMetricEnrollmentRegisterEnterpriseTosHasNotBeenAccepted);
+          break;
+        case policy::DM_STATUS_SERVICE_ILLEGAL_ACCOUNT_FOR_PACKAGED_EDU_LICENSE:
+          UMA(policy::kMetricEnrollmentIllegalAccountForPackagedEDULicense);
           break;
       }
       break;

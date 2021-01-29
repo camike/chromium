@@ -16,12 +16,17 @@ import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chrome.browser.metrics.UmaSessionStats;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
+import org.chromium.chrome.browser.util.ChromeAccessibilityUtil;
 import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.AccountManagerFacadeProvider;
 
 /** Provides first run related utility functions. */
 public class FirstRunUtils {
     private static Boolean sHasGoogleAccountAuthenticator;
+    private static final int DEFAULT_SKIP_TOS_EXIT_DELAY_MS = 1000;
+    private static final int A11Y_DELAY_FACTOR = 2;
+
+    private static boolean sDisableDelayOnExitFreForTest;
 
     /**
      * Synchronizes first run native and Java preferences.
@@ -37,10 +42,8 @@ public class FirstRunUtils {
         boolean javaPrefValue =
                 javaPrefs.readBoolean(ChromePreferenceKeys.FIRST_RUN_CACHED_TOS_ACCEPTED, false);
         boolean nativePrefValue = isFirstRunEulaAccepted();
-        boolean userHasSeenTos =
-                ToSAckedReceiver.checkAnyUserHasSeenToS();
         boolean isFirstRunComplete = FirstRunStatus.getFirstRunFlowComplete();
-        if (javaPrefValue || nativePrefValue || userHasSeenTos || isFirstRunComplete) {
+        if (javaPrefValue || nativePrefValue || isFirstRunComplete) {
             if (!javaPrefValue) {
                 javaPrefs.writeBoolean(ChromePreferenceKeys.FIRST_RUN_CACHED_TOS_ACCEPTED, true);
             }
@@ -57,8 +60,7 @@ public class FirstRunUtils {
         // Note: Does not check FirstRunUtils.isFirstRunEulaAccepted() because this may be called
         // before native is initialized.
         return SharedPreferencesManager.getInstance().readBoolean(
-                       ChromePreferenceKeys.FIRST_RUN_CACHED_TOS_ACCEPTED, false)
-                || ToSAckedReceiver.checkAnyUserHasSeenToS();
+                ChromePreferenceKeys.FIRST_RUN_CACHED_TOS_ACCEPTED, false);
     }
 
     /**
@@ -116,9 +118,40 @@ public class FirstRunUtils {
         FirstRunUtilsJni.get().setEulaAccepted();
     }
 
+    /**
+     * @return Whether the ToS should be shown during the first-run for CCTs/PWAs.
+     */
+    public static boolean isCctTosDialogEnabled() {
+        return FirstRunUtilsJni.get().getCctTosDialogEnabled();
+    }
+
+    /**
+     * The the number of ms delay before exiting FRE with policy. By default the delay would be
+     * {@link #DEFAULT_SKIP_TOS_EXIT_DELAY_MS}, while in a11y mode it will be extended by a factor
+     * of {@link #A11Y_DELAY_FACTOR}. This is intended to avoid screen reader being interrupted, but
+     * it is likely not going to work perfectly for all languages.
+     *
+     * @return The number of ms delay before exiting FRE with policy.
+     */
+    public static int getSkipTosExitDelayMs() {
+        if (sDisableDelayOnExitFreForTest) return 0;
+
+        int durationMs = DEFAULT_SKIP_TOS_EXIT_DELAY_MS;
+        if (ChromeAccessibilityUtil.get().isTouchExplorationEnabled()) {
+            durationMs *= A11Y_DELAY_FACTOR;
+        }
+        return durationMs;
+    }
+
+    @VisibleForTesting
+    public static void setDisableDelayOnExitFreForTest(boolean isDisable) {
+        sDisableDelayOnExitFreForTest = isDisable;
+    }
+
     @NativeMethods
     public interface Natives {
         boolean getFirstRunEulaAccepted();
         void setEulaAccepted();
+        boolean getCctTosDialogEnabled();
     }
 }

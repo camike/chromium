@@ -25,14 +25,14 @@ class TimeViewTest : public AshTestBase {
   TimeView* time_view() { return time_view_.get(); }
 
   // Access to private fields of |time_view_|.
-  views::Label* horizontal_label() {
-    return time_view_->horizontal_label_.get();
-  }
+  views::View* horizontal_view() { return time_view_->horizontal_view_.get(); }
+  views::View* vertical_view() { return time_view_->vertical_view_.get(); }
+  views::Label* horizontal_label() { return time_view_->horizontal_label_; }
   views::Label* vertical_label_hours() {
-    return time_view_->vertical_label_hours_.get();
+    return time_view_->vertical_label_hours_;
   }
   views::Label* vertical_label_minutes() {
-    return time_view_->vertical_label_minutes_.get();
+    return time_view_->vertical_label_minutes_;
   }
 
   // Creates a time view with horizontal or vertical |clock_layout|.
@@ -51,21 +51,53 @@ class TimeViewTest : public AshTestBase {
 TEST_F(TimeViewTest, Basics) {
   // A newly created horizontal clock only has the horizontal label.
   CreateTimeView(TimeView::ClockLayout::HORIZONTAL_CLOCK);
-  EXPECT_EQ(time_view(), horizontal_label()->parent());
-  EXPECT_FALSE(vertical_label_hours()->parent());
-  EXPECT_FALSE(vertical_label_minutes()->parent());
+  ASSERT_TRUE(horizontal_label()->parent());
+  EXPECT_EQ(time_view(), horizontal_label()->parent()->parent());
+  EXPECT_FALSE(horizontal_view());
+  ASSERT_TRUE(vertical_view());
+  EXPECT_FALSE(vertical_view()->parent());
 
   // Switching the clock to vertical updates the labels.
   time_view()->UpdateClockLayout(TimeView::ClockLayout::VERTICAL_CLOCK);
-  EXPECT_FALSE(horizontal_label()->parent());
-  EXPECT_EQ(time_view(), vertical_label_hours()->parent());
-  EXPECT_EQ(time_view(), vertical_label_minutes()->parent());
+  ASSERT_TRUE(horizontal_view());
+  EXPECT_FALSE(horizontal_view()->parent());
+  EXPECT_FALSE(vertical_view());
+  ASSERT_TRUE(vertical_label_hours()->parent());
+  ASSERT_TRUE(vertical_label_minutes()->parent());
+  EXPECT_EQ(time_view(), vertical_label_hours()->parent()->parent());
+  EXPECT_EQ(time_view(), vertical_label_minutes()->parent()->parent());
 
   // Switching back to horizontal updates the labels again.
   time_view()->UpdateClockLayout(TimeView::ClockLayout::HORIZONTAL_CLOCK);
-  EXPECT_EQ(time_view(), horizontal_label()->parent());
-  EXPECT_FALSE(vertical_label_hours()->parent());
-  EXPECT_FALSE(vertical_label_minutes()->parent());
+  ASSERT_TRUE(horizontal_label()->parent());
+  EXPECT_EQ(time_view(), horizontal_label()->parent()->parent());
+  EXPECT_FALSE(horizontal_view());
+  ASSERT_TRUE(vertical_view());
+  EXPECT_FALSE(vertical_view()->parent());
+}
+
+// Test the show date mode in the time view.
+TEST_F(TimeViewTest, ShowDateMode) {
+  CreateTimeView(TimeView::ClockLayout::HORIZONTAL_CLOCK);
+  base::string16 time_text = horizontal_label()->GetText();
+
+  // When showing date, the text is expected to be longer since it's showing
+  // more content.
+  time_view()->SetShowDateWhenHorizontal(true /* show_date_when_horizontal */);
+  EXPECT_GT(horizontal_label()->GetText(), time_text);
+
+  // Resetting show date mode should show only the time.
+  time_view()->SetShowDateWhenHorizontal(false /* show_date_when_horizontal */);
+  EXPECT_EQ(time_text, horizontal_label()->GetText());
+
+  time_view()->UpdateClockLayout(TimeView::ClockLayout::VERTICAL_CLOCK);
+  base::string16 hours_text = vertical_label_hours()->GetText();
+  base::string16 minutes_text = vertical_label_minutes()->GetText();
+
+  // Show date mode should not affect vertical view.
+  time_view()->SetShowDateWhenHorizontal(true /* show_date_when_horizontal */);
+  EXPECT_EQ(hours_text, vertical_label_hours()->GetText());
+  EXPECT_EQ(minutes_text, vertical_label_minutes()->GetText());
 }
 
 }  // namespace tray

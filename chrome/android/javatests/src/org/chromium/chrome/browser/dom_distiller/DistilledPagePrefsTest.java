@@ -5,18 +5,19 @@
 package org.chromium.chrome.browser.dom_distiller;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.annotation.UiThreadTest;
-import android.support.test.filters.SmallTest;
-import android.support.test.rule.UiThreadTestRule;
 
+import androidx.test.filters.SmallTest;
+
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
-import org.junit.Rule;
+import org.junit.ClassRule;
 import org.junit.Test;
-import org.junit.rules.RuleChain;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.BaseJUnit4ClassRunner;
+import org.chromium.base.test.UiThreadTest;
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.test.ChromeBrowserTestRule;
@@ -31,10 +32,10 @@ import org.chromium.dom_distiller.mojom.Theme;
  * Test class for {@link DistilledPagePrefs}.
  */
 @RunWith(BaseJUnit4ClassRunner.class)
+@Batch(Batch.PER_CLASS)
 public class DistilledPagePrefsTest {
-    @Rule
-    public final RuleChain mChain =
-            RuleChain.outerRule(new ChromeBrowserTestRule()).around(new UiThreadTestRule());
+    @ClassRule
+    public static final ChromeBrowserTestRule sChromeBrowserTestRule = new ChromeBrowserTestRule();
 
     private DistilledPagePrefs mDistilledPagePrefs;
 
@@ -43,6 +44,12 @@ public class DistilledPagePrefsTest {
     @Before
     public void setUp() {
         getDistilledPagePrefs();
+    }
+
+    @After
+    public void tearDown() {
+        // Set back to default theme
+        setTheme(Theme.LIGHT);
     }
 
     private void getDistilledPagePrefs() {

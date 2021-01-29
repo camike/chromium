@@ -17,6 +17,10 @@ namespace aura {
 class Window;
 }
 
+namespace display {
+class DisplayManager;
+}
+
 namespace ash {
 enum class AppListViewState;
 class DragDropController;
@@ -26,7 +30,6 @@ class PaginationModel;
 class PowerPrefs;
 class ScreenPositionController;
 class Shell;
-class SystemGestureEventFilter;
 class WorkspaceController;
 
 // Accesses private data from a Shell for testing.
@@ -41,12 +44,12 @@ class ASH_EXPORT ShellTestApi {
   static void SetTabletControllerUseScreenshotForTest(bool use_screenshot);
 
   MessageCenterController* message_center_controller();
-  SystemGestureEventFilter* system_gesture_event_filter();
   WorkspaceController* workspace_controller();
   ScreenPositionController* screen_position_controller();
   NativeCursorManagerAsh* native_cursor_manager_ash();
   DragDropController* drag_drop_controller();
   PowerPrefs* power_prefs();
+  display::DisplayManager* display_manager();
 
   // Resets |shell_->power_button_controller_| to hold a new object to simulate
   // Chrome starting.
@@ -61,10 +64,8 @@ class ASH_EXPORT ShellTestApi {
 
   // Enables or disables the tablet mode. TabletMode switch can be
   // asynchronous, and this will wait until the transition is complete
-  // by default. Set |wait_for_completion| to false if you do not want
-  // to wait.
-  void SetTabletModeEnabledForTest(bool enable,
-                                   bool wait_for_completion = true);
+  // by default.
+  void SetTabletModeEnabledForTest(bool enable);
 
   // Enables the keyboard and associates it with the primary root window
   // controller. In tablet mode, enables the virtual keyboard.
@@ -73,9 +74,6 @@ class ASH_EXPORT ShellTestApi {
   // Fullscreens the active window, as if the user had pressed the hardware
   // fullscreen button.
   void ToggleFullscreen();
-
-  // Returns true if it is in overview selecting mode.
-  bool IsOverviewSelecting();
 
   // Used to emulate display change when run in a desktop environment instead
   // of on a device.
@@ -116,9 +114,9 @@ class ASH_EXPORT ShellTestApi {
   // It returns nullptr when app-list is not shown.
   PaginationModel* GetAppListPaginationModel();
 
-  // Returns the list of windows used in overview item. Returns empty
-  // if not in the overview mode.
-  std::vector<aura::Window*> GetItemWindowListInOverviewGrids();
+  // Returns true if the context menu associated with the primary root window is
+  // shown.
+  bool IsContextMenuShown() const;
 
  private:
   Shell* shell_;  // not owned

@@ -13,6 +13,7 @@
 #include "ash/app_list/app_list_metrics.h"
 #include "ash/app_list/app_list_view_delegate.h"
 #include "ash/public/cpp/app_list/app_list_types.h"
+#include "ash/public/cpp/metrics_util.h"
 #include "ash/public/cpp/presentation_time_recorder.h"
 #include "base/callback.h"
 #include "base/macros.h"
@@ -32,7 +33,6 @@ class Display;
 }
 
 namespace ui {
-class AnimationMetricsReporter;
 class ImplicitAnimationObserver;
 }  // namespace ui
 
@@ -44,7 +44,7 @@ class AppListConfig;
 class AppListMainView;
 class AppListModel;
 class AppsGridView;
-class BoundsAnimationObserver;
+class StateTransitionNotifier;
 class PaginationModel;
 class SearchBoxView;
 class SearchModel;
@@ -87,13 +87,10 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView,
   static constexpr float kAppListOpacity = 0.95;
 
   // The opacity of the app list background with blur.
-  static constexpr float kAppListOpacityWithBlur = 0.74;
+  static constexpr float kAppListOpacityWithBlur = 0.8;
 
   // The preferred blend alpha with wallpaper color for background.
   static constexpr int kAppListColorDarkenAlpha = 178;
-
-  // The defualt color of the app list background.
-  static constexpr SkColor kDefaultBackgroundColor = gfx::kGoogleGrey900;
 
   // The duration the AppListView ignores scroll events which could transition
   // its state.
@@ -141,10 +138,10 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView,
   static float GetTransitionProgressForState(AppListViewState state);
 
   // Initializes the view, only done once per session.
-  void InitView(bool is_tablet_mode, gfx::NativeView parent);
+  void InitView(gfx::NativeView parent);
 
   // Initializes the contents of the view.
-  void InitContents(bool is_tablet_mode);
+  void InitContents();
 
   // Initializes this view's widget.
   void InitWidget(gfx::NativeView parent);
@@ -153,7 +150,10 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView,
   void InitChildWidget();
 
   // Sets the state of all child views to be re-shown, then shows the view.
-  void Show(bool is_side_shelf, bool is_tablet_mode);
+  // |preferred_state| - The initial app list view state. It may be overridden
+  // depending on device state. For example, peeking state is not supported in
+  // tablet mode, or for side shelf.
+  void Show(AppListViewState preferred_state, bool is_side_shelf);
 
   // If |drag_and_drop_host| is not nullptr it will be called upon drag and drop
   // operations outside the application list. This has to be called after
@@ -186,6 +186,7 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView,
   const char* GetClassName() const override;
   bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
   void Layout() override;
+  void OnThemeChanged() override;
 
   // WidgetDelegate:
   ax::mojom::Role GetAccessibleWindowRole() override;
@@ -203,7 +204,9 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView,
   void OnWallpaperColorsChanged();
 
   // Handles scroll events from various sources.
-  bool HandleScroll(const gfx::Vector2d& offset, ui::EventType type);
+  bool HandleScroll(const gfx::Point& location,
+                    const gfx::Vector2d& offset,
+                    ui::EventType type);
 
   // Changes the app list state.
   void SetState(AppListViewState new_state);
@@ -298,8 +301,8 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView,
       const ui::LocatedEvent& event_in_screen,
       float launcher_above_shelf_bottom_amount) const;
 
-  // Returns a animation metrics reportre for state transition.
-  ui::AnimationMetricsReporter* GetStateTransitionMetricsReporter();
+  // Returns a animation metrics reporting callback  for state transition.
+  metrics_util::SmoothnessCallback GetStateTransitionMetricsReportCallback();
 
   // Called when drag in tablet mode starts/proceeds/ends.
   void OnHomeLauncherDragStart();
@@ -316,9 +319,6 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView,
                              const gfx::Rect& new_bounds,
                              ui::PropertyChangeReason reason) override;
 
-  // Called when state transition animation is completed.
-  void OnStateTransitionAnimationCompleted();
-
   void OnTabletModeAnimationTransitionNotified(
       TabletModeAnimationTransition animation_transition);
 
@@ -326,7 +326,7 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView,
   void EndDragFromShelf(AppListViewState app_list_state);
 
   // Moves the AppListView off screen and calls a layout if needed.
-  void OnBoundsAnimationCompleted();
+  void OnBoundsAnimationCompleted(AppListViewState target_state);
 
   // Returns the expected tile bounds in screen coordinates the provided app
   // grid item ID , if the item is in the first apps grid page. Otherwise, it
@@ -348,7 +348,7 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView,
            app_list_state_ == AppListViewState::kFullscreenSearch;
   }
 
-  bool is_tablet_mode() const { return is_tablet_mode_; }
+  bool is_tablet_mode() const { return delegate_->IsInTabletMode(); }
 
   bool is_side_shelf() const { return is_side_shelf_; }
 
@@ -373,9 +373,15 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView,
   // Returns true if the Embedded Assistant UI is currently being shown.
   bool IsShowingEmbeddedAssistantUI() const;
 
+  // Returns true if a folder is being renamed.
+  bool IsFolderBeingRenamed();
+
   // Starts or stops a timer which will reset the app list to the initial apps
   // page. Called when the app list's visibility changes.
   void UpdatePageResetTimer(bool app_list_visibility);
+
+  // Updates the title of the window that contains the launcher.
+  void UpdateWindowTitle();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(AppListControllerImplTest,
@@ -428,8 +434,7 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView,
   // in progress it will be interrupted.
   void StartAnimationForState(AppListViewState new_state);
 
-  void MaybeIncreaseAssistantPrivacyInfoRowShownCount(
-      AppListViewState new_state);
+  void MaybeIncreasePrivacyInfoRowShownCounts(AppListViewState new_state);
 
   // Applies a bounds animation on this views layer.
   void ApplyBoundsAnimation(AppListViewState target_state,
@@ -559,7 +564,7 @@ class APP_LIST_EXPORT AppListView : public views::WidgetDelegateView,
   base::TimeTicks animation_end_timestamp_;
 
   // An observer to notify AppListView of bounds animation completion.
-  std::unique_ptr<BoundsAnimationObserver> bounds_animation_observer_;
+  std::unique_ptr<StateTransitionNotifier> state_transition_notifier_;
 
   // Metric reporter for state change animations.
   const std::unique_ptr<StateAnimationMetricsReporter>

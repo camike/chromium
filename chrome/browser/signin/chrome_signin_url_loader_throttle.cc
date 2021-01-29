@@ -18,10 +18,11 @@ class URLLoaderThrottle::ThrottleRequestAdapter : public ChromeRequestAdapter {
                          const net::HttpRequestHeaders& original_headers,
                          net::HttpRequestHeaders* modified_headers,
                          std::vector<std::string>* headers_to_remove)
-      : throttle_(throttle),
-        original_headers_(original_headers),
-        modified_headers_(modified_headers),
-        headers_to_remove_(headers_to_remove) {}
+      : ChromeRequestAdapter(throttle->request_url_,
+                             original_headers,
+                             modified_headers,
+                             headers_to_remove),
+        throttle_(throttle) {}
 
   ~ThrottleRequestAdapter() override = default;
 
@@ -30,8 +31,12 @@ class URLLoaderThrottle::ThrottleRequestAdapter : public ChromeRequestAdapter {
     return throttle_->web_contents_getter_;
   }
 
-  blink::mojom::ResourceType GetResourceType() const override {
-    return throttle_->request_resource_type_;
+  network::mojom::RequestDestination GetRequestDestination() const override {
+    return throttle_->request_destination_;
+  }
+
+  bool IsFetchLikeAPI() const override {
+    return throttle_->request_is_fetch_like_api_;
   }
 
   GURL GetReferrerOrigin() const override {
@@ -43,35 +48,8 @@ class URLLoaderThrottle::ThrottleRequestAdapter : public ChromeRequestAdapter {
       throttle_->destruction_callback_ = std::move(closure);
   }
 
-  // RequestAdapter
-  const GURL& GetUrl() override { return throttle_->request_url_; }
-
-  bool HasHeader(const std::string& name) override {
-    return (original_headers_.HasHeader(name) ||
-            modified_headers_->HasHeader(name)) &&
-           !base::Contains(*headers_to_remove_, name);
-  }
-
-  void RemoveRequestHeaderByName(const std::string& name) override {
-    if (!base::Contains(*headers_to_remove_, name))
-      headers_to_remove_->push_back(name);
-  }
-
-  void SetExtraHeaderByName(const std::string& name,
-                            const std::string& value) override {
-    modified_headers_->SetHeader(name, value);
-
-    auto it =
-        std::find(headers_to_remove_->begin(), headers_to_remove_->end(), name);
-    if (it != headers_to_remove_->end())
-      headers_to_remove_->erase(it);
-  }
-
  private:
   URLLoaderThrottle* const throttle_;
-  const net::HttpRequestHeaders& original_headers_;
-  net::HttpRequestHeaders* const modified_headers_;
-  std::vector<std::string>* const headers_to_remove_;
 
   DISALLOW_COPY_AND_ASSIGN(ThrottleRequestAdapter);
 };
@@ -90,8 +68,8 @@ class URLLoaderThrottle::ThrottleResponseAdapter : public ResponseAdapter {
   }
 
   bool IsMainFrame() const override {
-    return throttle_->request_resource_type_ ==
-           blink::mojom::ResourceType::kMainFrame;
+    return throttle_->request_destination_ ==
+           network::mojom::RequestDestination::kDocument;
   }
 
   GURL GetOrigin() const override {
@@ -143,8 +121,8 @@ void URLLoaderThrottle::WillStartRequest(network::ResourceRequest* request,
                                          bool* defer) {
   request_url_ = request->url;
   request_referrer_ = request->referrer;
-  request_resource_type_ =
-      static_cast<blink::mojom::ResourceType>(request->resource_type);
+  request_destination_ = request->destination;
+  request_is_fetch_like_api_ = request->is_fetch_like_api;
 
   net::HttpRequestHeaders modified_request_headers;
   std::vector<std::string> to_be_removed_request_headers;

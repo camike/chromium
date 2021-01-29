@@ -15,15 +15,22 @@
 #include "base/optional.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
+#include "build/build_config.h"
 #include "components/viz/common/resources/resource_format.h"
 #include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/gpu_gles2_export.h"
+#include "third_party/skia/include/core/SkImageInfo.h"
+#include "third_party/skia/include/gpu/GrTypes.h"
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_pixmap.h"
 
 namespace base {
+namespace android {
+class ScopedHardwareBufferFenceSync;
+}  // namespace android
+
 namespace trace_event {
 class ProcessMemoryDump;
 class MemoryAllocatorDump;
@@ -44,6 +51,7 @@ class SharedImageRepresentationGLTexturePassthrough;
 class SharedImageRepresentationSkia;
 class SharedImageRepresentationDawn;
 class SharedImageRepresentationOverlay;
+class SharedImageRepresentationMemory;
 class SharedImageRepresentationVaapi;
 class MemoryTypeTracker;
 class SharedImageFactory;
@@ -58,6 +66,8 @@ class GPU_GLES2_EXPORT SharedImageBacking {
                      viz::ResourceFormat format,
                      const gfx::Size& size,
                      const gfx::ColorSpace& color_space,
+                     GrSurfaceOrigin surface_origin,
+                     SkAlphaType alpha_type,
                      uint32_t usage,
                      size_t estimated_size,
                      bool is_thread_safe);
@@ -67,6 +77,8 @@ class GPU_GLES2_EXPORT SharedImageBacking {
   viz::ResourceFormat format() const { return format_; }
   const gfx::Size& size() const { return size_; }
   const gfx::ColorSpace& color_space() const { return color_space_; }
+  GrSurfaceOrigin surface_origin() const { return surface_origin_; }
+  SkAlphaType alpha_type() const { return alpha_type_; }
   uint32_t usage() const { return usage_; }
   const Mailbox& mailbox() const { return mailbox_; }
   size_t estimated_size() const { return estimated_size_; }
@@ -123,6 +135,12 @@ class GPU_GLES2_EXPORT SharedImageBacking {
   // the SharedImage is not backed by a NativePixmap.
   virtual scoped_refptr<gfx::NativePixmap> GetNativePixmap();
 
+#if defined(OS_ANDROID)
+  // Returns the AHardwareBuffer from backing if supported and available.
+  virtual std::unique_ptr<base::android::ScopedHardwareBufferFenceSync>
+  GetAHardwareBuffer();
+#endif
+
   // Helper to determine if the entire SharedImage is cleared.
   bool IsCleared() const { return ClearedRect() == gfx::Rect(size()); }
 
@@ -156,6 +174,9 @@ class GPU_GLES2_EXPORT SharedImageBacking {
       SharedImageManager* manager,
       MemoryTypeTracker* tracker,
       VaapiDependenciesFactory* dep_factory);
+  virtual std::unique_ptr<SharedImageRepresentationMemory> ProduceMemory(
+      SharedImageManager* manager,
+      MemoryTypeTracker* tracker);
 
   // Used by subclasses during destruction.
   bool have_context() const EXCLUSIVE_LOCKS_REQUIRED(lock_);
@@ -209,6 +230,8 @@ class GPU_GLES2_EXPORT SharedImageBacking {
   const viz::ResourceFormat format_;
   const gfx::Size size_;
   const gfx::ColorSpace color_space_;
+  const GrSurfaceOrigin surface_origin_;
+  const SkAlphaType alpha_type_;
   const uint32_t usage_;
   const size_t estimated_size_;
 
@@ -239,6 +262,8 @@ class GPU_GLES2_EXPORT ClearTrackingSharedImageBacking
                                   viz::ResourceFormat format,
                                   const gfx::Size& size,
                                   const gfx::ColorSpace& color_space,
+                                  GrSurfaceOrigin surface_origin,
+                                  SkAlphaType alpha_type,
                                   uint32_t usage,
                                   size_t estimated_size,
                                   bool is_thread_safe);

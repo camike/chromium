@@ -24,62 +24,56 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_EXTERNAL_DOCUMENT_CACHE_H_
 
 #include "services/network/public/mojom/content_security_policy.mojom-blink.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
-#include "third_party/blink/renderer/platform/loader/fetch/resource_client.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
 namespace blink {
-class Document;
 
-class SVGExternalDocumentCache
+class Document;
+class ExecutionContext;
+class ResourceClient;
+class TextResource;
+
+class CORE_EXPORT SVGExternalDocumentCache final
     : public GarbageCollected<SVGExternalDocumentCache>,
       public Supplement<Document> {
-  USING_GARBAGE_COLLECTED_MIXIN(SVGExternalDocumentCache);
-
  public:
   static const char kSupplementName[];
   static SVGExternalDocumentCache* From(Document&);
   explicit SVGExternalDocumentCache(Document&);
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
-  class Client : public GarbageCollectedMixin {
+  class CORE_EXPORT Entry final : public GarbageCollected<Entry> {
    public:
-    virtual void NotifyFinished(Document*) = 0;
-  };
+    Entry(TextResource* resource, ExecutionContext* context)
+        : resource_(resource), context_(context) {
+      DCHECK(resource_);
+      DCHECK(context_);
+    }
+    void SetWasRevalidating() { was_revalidating_ = true; }
 
-  class Entry final : public GarbageCollected<Entry>, public ResourceClient {
-    USING_GARBAGE_COLLECTED_MIXIN(Entry);
-
-   public:
-    explicit Entry(Document* context_document)
-        : context_document_(context_document) {}
-    ~Entry() override = default;
-    void Trace(Visitor*) override;
     Document* GetDocument();
-    const KURL& Url() const { return GetResource()->Url(); }
+    const KURL& Url() const;
+
+    void Trace(Visitor*) const;
 
    private:
-    friend class SVGExternalDocumentCache;
-    void AddClient(Client*);
-
-    // ResourceClient overrides;
-    void NotifyFinished(Resource*) override;
-    String DebugName() const override { return "SVGExternalDocumentCache"; }
-
+    Member<TextResource> resource_;
     Member<Document> document_;
-    Member<Document> context_document_;
-    HeapHashSet<WeakMember<Client>> clients_;
+    Member<ExecutionContext> context_;
+    bool was_revalidating_ = false;
   };
 
-  Entry* Get(Client*,
+  Entry* Get(ResourceClient*,
              const KURL&,
              const AtomicString& initiator_name,
              network::mojom::blink::CSPDisposition =
                  network::mojom::blink::CSPDisposition::CHECK);
 
  private:
-  HeapHashMap<WeakMember<Resource>, WeakMember<Entry>> entries_;
+  HeapHashMap<WeakMember<Resource>, Member<Entry>> entries_;
 };
 
 }  // namespace blink

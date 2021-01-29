@@ -40,6 +40,7 @@ class IdleSpellCheckController;
 class LocalDOMWindow;
 class LocalFrame;
 class HTMLElement;
+class Node;
 class SpellCheckMarker;
 class SpellCheckRequest;
 class SpellCheckRequester;
@@ -51,7 +52,7 @@ class CORE_EXPORT SpellChecker final : public GarbageCollected<SpellChecker> {
  public:
   explicit SpellChecker(LocalDOMWindow&);
 
-  void Trace(Visitor*);
+  void Trace(Visitor*) const;
 
   WebSpellCheckPanelHostClient& SpellCheckPanelHostClient() const;
   WebTextCheckClient* GetTextCheckerClient() const;

@@ -5,19 +5,19 @@
 #include "chrome/browser/signin/signin_promo.h"
 
 #include "base/strings/string_number_conversions.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/account_consistency_mode_manager.h"
 #include "chrome/browser/signin/signin_promo_util.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/google/core/common/google_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/storage_partition_config.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/url_util.h"
@@ -34,7 +34,7 @@ const char kSignInPromoQueryKeyAutoClose[] = "auto_close";
 const char kSignInPromoQueryKeyForceKeepData[] = "force_keep_data";
 const char kSignInPromoQueryKeyReason[] = "reason";
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 GURL GetEmbeddedPromoURL(signin_metrics::AccessPoint access_point,
                          signin_metrics::Reason reason,
                          bool auto_close) {
@@ -69,7 +69,7 @@ GURL GetEmbeddedReauthURLWithEmail(signin_metrics::AccessPoint access_point,
   url = net::AppendQueryParameter(url, "validateEmail", "1");
   return net::AppendQueryParameter(url, "readOnlyEmail", "1");
 }
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 GURL GetChromeSyncURLForDice(const std::string& email,
                              const std::string& continue_url) {
@@ -93,11 +93,10 @@ GURL GetAddAccountURLForDice(const std::string& email,
 
 content::StoragePartition* GetSigninPartition(
     content::BrowserContext* browser_context) {
-  const GURL signin_site_url =
-      extensions::WebViewGuest::GetSiteForGuestPartitionConfig(
-          "chrome-signin", /* partition_name= */ "", /* in_memory= */ true);
-  return content::BrowserContext::GetStoragePartitionForSite(browser_context,
-                                                             signin_site_url);
+  const auto signin_partition_config = content::StoragePartitionConfig::Create(
+      "chrome-signin", /* partition_name= */ "", /* in_memory= */ true);
+  return content::BrowserContext::GetStoragePartition(browser_context,
+                                                      signin_partition_config);
 }
 
 signin_metrics::AccessPoint GetAccessPointForEmbeddedPromoURL(const GURL& url) {

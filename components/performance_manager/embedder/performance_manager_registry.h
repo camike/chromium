@@ -6,14 +6,17 @@
 #define COMPONENTS_PERFORMANCE_MANAGER_EMBEDDER_PERFORMANCE_MANAGER_REGISTRY_H_
 
 #include <memory>
+#include <vector>
 
-#include "services/service_manager/public/cpp/binder_map.h"
+#include "mojo/public/cpp/bindings/binder_map.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 
 namespace content {
 class BrowserContext;
 class RenderFrameHost;
 class RenderProcessHost;
+class NavigationHandle;
+class NavigationThrottle;
 class WebContents;
 }  // namespace content
 
@@ -34,6 +37,8 @@ namespace performance_manager {
 // This class can only be accessed on the main thread.
 class PerformanceManagerRegistry {
  public:
+  using Throttles = std::vector<std::unique_ptr<content::NavigationThrottle>>;
+
   virtual ~PerformanceManagerRegistry() = default;
 
   PerformanceManagerRegistry(const PerformanceManagerRegistry&) = delete;
@@ -46,16 +51,21 @@ class PerformanceManagerRegistry {
   // process, or nullptr if there is none.
   static PerformanceManagerRegistry* GetInstance();
 
+  // Helper function that invokes CreatePageNodeForWebContents only if it hasn't
+  // already been called for the provided WebContents.
+  void MaybeCreatePageNodeForWebContents(content::WebContents* web_contents);
+
   // Must be invoked when a WebContents is created. Creates an associated
-  // PageNode in the PerformanceManager, if it doesn't already exist.
-  //
-  // Note: As of December 2019, this is called by the constructor of
-  // DevtoolsWindow on its main WebContents. It may be called again for the same
-  // WebContents by TabHelpers::AttachTabHelpers() when Devtools is docked.
-  // Hence the support for calling CreatePageNodeForWebContents() for a
-  // WebContents that already has a PageNode.
+  // PageNode in the PerformanceManager, if it doesn't already exist. This
+  // should only be called once for a given |web_contents|.
   virtual void CreatePageNodeForWebContents(
       content::WebContents* web_contents) = 0;
+
+  // Must be invoked for a NavigationHandle when it is committed, allowing the
+  // PM the opportunity to apply NavigationThrottles. Typically wired up to
+  // ContentBrowserClient::CreateThrottlesForNavigation.
+  virtual Throttles CreateThrottlesForNavigation(
+      content::NavigationHandle* handle) = 0;
 
   // Must be invoked when a BrowserContext is added/removed.
   // Registers/unregisters an observer that creates WorkerNodes when
@@ -82,8 +92,7 @@ class PerformanceManagerRegistry {
   // FrameNode in the graph. Typically wired up via
   // ContentBrowserClient::RegisterBrowserInterfaceBindersForFrame.
   virtual void ExposeInterfacesToRenderFrame(
-      service_manager::BinderMapWithContext<content::RenderFrameHost*>*
-          map) = 0;
+      mojo::BinderMapWithContext<content::RenderFrameHost*>* map) = 0;
 
   // Must be invoked prior to destroying the object. Schedules deletion of
   // PageNodes and ProcessNodes retained by this registry, even if the

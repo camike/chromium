@@ -32,15 +32,15 @@
 
 #include "build/build_config.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
+#include "third_party/blink/public/common/input/web_coalesced_input_event.h"
 #include "third_party/blink/public/common/input/web_mouse_event.h"
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/public/platform/web_coalesced_input_event.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/events/current_input_event.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
-#include "third_party/blink/renderer/core/frame/web_frame_widget_base.h"
+#include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/html/forms/html_option_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
@@ -65,9 +65,10 @@ ExternalPopupMenu::ExternalPopupMenu(LocalFrame& frame,
 
 ExternalPopupMenu::~ExternalPopupMenu() = default;
 
-void ExternalPopupMenu::Trace(Visitor* visitor) {
+void ExternalPopupMenu::Trace(Visitor* visitor) const {
   visitor->Trace(owner_element_);
   visitor->Trace(local_frame_);
+  visitor->Trace(dispatch_event_timer_);
   visitor->Trace(receiver_);
   PopupMenu::Trace(visitor);
 }
@@ -97,14 +98,12 @@ bool ExternalPopupMenu::ShowInternal() {
     LayoutObject* layout_object = owner_element_->GetLayoutObject();
     if (!layout_object || !layout_object->IsBox())
       return false;
+    auto* box = To<LayoutBox>(layout_object);
     IntRect rect = EnclosingIntRect(
-        ToLayoutBox(layout_object)
-            ->LocalToAbsoluteRect(
-                ToLayoutBox(layout_object)->PhysicalBorderBoxRect()));
+        box->LocalToAbsoluteRect(box->PhysicalBorderBoxRect()));
     IntRect rect_in_viewport = local_frame_->View()->FrameToViewport(rect);
     float scale_for_emulation = WebLocalFrameImpl::FromFrame(local_frame_)
                                     ->LocalRootFrameWidget()
-                                    ->Client()
                                     ->GetEmulatorScale();
 
     gfx::Rect bounds =
@@ -128,7 +127,7 @@ bool ExternalPopupMenu::ShowInternal() {
 void ExternalPopupMenu::Show() {
   if (!ShowInternal())
     return;
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   const WebInputEvent* current_event = CurrentInputEvent::Get();
   if (current_event &&
       current_event->GetType() == WebInputEvent::Type::kMouseDown) {
@@ -145,9 +144,11 @@ void ExternalPopupMenu::Show() {
 }
 
 void ExternalPopupMenu::DispatchEvent(TimerBase*) {
-  WebLocalFrameImpl::FromFrame(local_frame_->LocalFrameRoot())
-      ->FrameWidgetImpl()
-      ->HandleInputEvent(blink::WebCoalescedInputEvent(*synthetic_event_));
+  static_cast<WebWidget*>(
+      WebLocalFrameImpl::FromFrame(local_frame_->LocalFrameRoot())
+          ->FrameWidgetImpl())
+      ->HandleInputEvent(
+          blink::WebCoalescedInputEvent(*synthetic_event_, ui::LatencyInfo()));
   synthetic_event_.reset();
 }
 
@@ -200,7 +201,8 @@ void ExternalPopupMenu::DisconnectClient() {
 }
 
 void ExternalPopupMenu::DidAcceptIndices(const Vector<int32_t>& indices) {
-  local_frame_->NotifyUserActivation();
+  local_frame_->NotifyUserActivation(
+      mojom::blink::UserActivationNotificationType::kInteraction);
 
   // Calling methods on the HTMLSelectElement might lead to this object being
   // derefed. This ensures it does not get deleted while we are running this
@@ -230,8 +232,6 @@ void ExternalPopupMenu::DidAcceptIndices(const Vector<int32_t>& indices) {
 }
 
 void ExternalPopupMenu::DidCancel() {
-  local_frame_->NotifyUserActivation();
-
   if (owner_element_)
     owner_element_->PopupDidHide();
   Reset();
@@ -267,10 +267,7 @@ void ExternalPopupMenu::GetPopupMenuInfo(
     }
     popup_item->enabled = !item_element.IsDisabledFormControl();
     const ComputedStyle& style = *owner_element.ItemComputedStyle(item_element);
-    popup_item->text_direction =
-        style.Direction() == TextDirection::kLtr
-            ? mojo_base::mojom::blink::TextDirection::LEFT_TO_RIGHT
-            : mojo_base::mojom::blink::TextDirection::RIGHT_TO_LEFT;
+    popup_item->text_direction = ToBaseTextDirection(style.Direction());
     popup_item->has_text_direction_override =
         IsOverride(style.GetUnicodeBidi());
     menu_items->push_back(std::move(popup_item));

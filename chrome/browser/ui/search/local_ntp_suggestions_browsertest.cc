@@ -16,6 +16,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -73,10 +74,9 @@ class LocalNTPSearchSuggestTest : public InProcessBrowserTest {
   void SetUpInProcessBrowserTestFixture() override {
     subscription_ =
         BrowserContextDependencyManager::GetInstance()
-            ->RegisterWillCreateBrowserContextServicesCallbackForTesting(
-                base::BindRepeating(&LocalNTPSearchSuggestTest::
-                                        OnWillCreateBrowserContextServices,
-                                    base::Unretained(this)));
+            ->RegisterCreateServicesCallbackForTesting(base::BindRepeating(
+                &LocalNTPSearchSuggestTest::OnWillCreateBrowserContextServices,
+                base::Unretained(this)));
   }
 
   static std::unique_ptr<KeyedService> CreateSearchSuggestService(
@@ -91,9 +91,7 @@ class LocalNTPSearchSuggestTest : public InProcessBrowserTest {
                      &LocalNTPSearchSuggestTest::CreateSearchSuggestService));
   }
 
-  std::unique_ptr<
-      base::CallbackList<void(content::BrowserContext*)>::Subscription>
-      subscription_;
+  base::CallbackListSubscription subscription_;
 };
 
 IN_PROC_BROWSER_TEST_F(LocalNTPSearchSuggestTest,

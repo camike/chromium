@@ -15,9 +15,10 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/sequence_checker.h"
-#include "chrome/browser/media/router/media_sinks_observer.h"
-#include "chrome/common/media_router/discovery/media_sink_internal.h"
-#include "chrome/common/media_router/media_source.h"
+#include "components/media_router/browser/logger_impl.h"
+#include "components/media_router/browser/media_sinks_observer.h"
+#include "components/media_router/common/discovery/media_sink_internal.h"
+#include "components/media_router/common/media_source.h"
 #include "url/origin.h"
 
 namespace media_router {
@@ -42,8 +43,6 @@ class DualMediaSinkService {
   using OnSinksDiscoveredProviderCallbackList =
       base::CallbackList<void(const std::string&,
                               const std::vector<MediaSinkInternal>&)>;
-  using Subscription =
-      std::unique_ptr<OnSinksDiscoveredProviderCallbackList::Subscription>;
 
   // Returns the lazily-created leaky singleton instance.
   static DualMediaSinkService* GetInstance();
@@ -66,10 +65,18 @@ class DualMediaSinkService {
   }
 
   // Adds |callback| to be notified when the list of discovered sinks changes.
-  // The caller is responsible for destroying the returned Subscription when it
+  // The caller is responsible for destroying the returned subscription when it
   // no longer wishes to receive updates.
-  Subscription AddSinksDiscoveredCallback(
+  base::CallbackListSubscription AddSinksDiscoveredCallback(
       const OnSinksDiscoveredProviderCallback& callback);
+
+  // Instantiate two PendingRemote objects. The objects will be bound with
+  // |logger_impl| and passed to |cast_media_sink_service_| and
+  // |dial_media_sink_service_|.
+  // The binding should be done once and the method is a no-op after the first
+  // call.
+  // Marked virtual for testing.
+  virtual void BindLogger(LoggerImpl* logger_impl);
 
   virtual void OnUserGesture();
 
@@ -77,11 +84,14 @@ class DualMediaSinkService {
   // started.
   virtual void StartMdnsDiscovery();
 
+  bool MdnsDiscoveryStarted();
+
  protected:
   // Used by tests.
   DualMediaSinkService(
       std::unique_ptr<CastMediaSinkService> cast_media_sink_service,
-      std::unique_ptr<DialMediaSinkService> dial_media_sink_service);
+      std::unique_ptr<DialMediaSinkService> dial_media_sink_service,
+      std::unique_ptr<CastAppDiscoveryService> cast_app_discovery_service);
   virtual ~DualMediaSinkService();
 
  private:
@@ -105,6 +115,8 @@ class DualMediaSinkService {
   std::unique_ptr<DialMediaSinkService> dial_media_sink_service_;
   std::unique_ptr<CastMediaSinkService> cast_media_sink_service_;
   std::unique_ptr<CastAppDiscoveryService> cast_app_discovery_service_;
+
+  bool logger_is_bound_ = false;
 
   OnSinksDiscoveredProviderCallbackList sinks_discovered_callbacks_;
   base::flat_map<std::string, std::vector<MediaSinkInternal>> current_sinks_;

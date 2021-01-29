@@ -184,9 +184,15 @@ class SessionRestorePolicy {
     // change as new data becomes available.
     float score = 0.0f;
 
-    // Cancelable closure used to cancel the async initialization of the
-    // |used_in_bg| if it comes too late.
-    base::CancelableOnceClosure used_in_bg_setter_cancel_closure;
+    struct SiteDataReaderData {
+      bool updates_favicon_in_bg = false;
+      bool updates_title_in_bg = false;
+    };
+
+    // Cancelable callback used to cancel the async initialization of the
+    // |used_in_bg| bit.
+    base::CancelableOnceCallback<void(SiteDataReaderData)>
+        used_in_bg_setter_cancel_callback;
   };
 
   // This is safe to call from the constructor if |delegate_| is already
@@ -311,7 +317,8 @@ class SessionRestorePolicy {
 };
 
 // Abstracts away testing seams for the policy engine. In production code the
-// default implementation wraps to base::SysInfo and the SiteEngagementService.
+// default implementation wraps to base::SysInfo and the
+// site_engagement::SiteEngagementService.
 class SessionRestorePolicy::Delegate {
  public:
   Delegate();

@@ -7,6 +7,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "build/chromeos_buildflags.h"
 #include "extensions/browser/api/extensions_api_client.h"
 
 namespace extensions {
@@ -67,8 +68,8 @@ class ChromeExtensionsAPIClient : public ExtensionsAPIClient {
   std::unique_ptr<VirtualKeyboardDelegate> CreateVirtualKeyboardDelegate(
       content::BrowserContext* browser_context) const override;
   ManagementAPIDelegate* CreateManagementAPIDelegate() const override;
-  std::unique_ptr<SupervisedUserServiceDelegate>
-  CreateSupervisedUserServiceDelegate() const override;
+  std::unique_ptr<SupervisedUserExtensionsDelegate>
+  CreateSupervisedUserExtensionsDelegate() const override;
 
   std::unique_ptr<DisplayInfoProvider> CreateDisplayInfoProvider()
       const override;
@@ -78,7 +79,7 @@ class ChromeExtensionsAPIClient : public ExtensionsAPIClient {
   MessagingDelegate* GetMessagingDelegate() override;
   FeedbackPrivateDelegate* GetFeedbackPrivateDelegate() override;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   MediaPerceptionAPIDelegate* GetMediaPerceptionAPIDelegate() override;
   NonNativeFileSystemDelegate* GetNonNativeFileSystemDelegate() override;
 
@@ -86,8 +87,8 @@ class ChromeExtensionsAPIClient : public ExtensionsAPIClient {
       const std::vector<char>& image_data,
       api::clipboard::ImageType type,
       AdditionalDataItemList additional_items,
-      const base::Closure& success_callback,
-      const base::Callback<void(const std::string&)>& error_callback) override;
+      base::OnceClosure success_callback,
+      base::OnceCallback<void(const std::string&)> error_callback) override;
 #endif
 
   AutomationInternalApiDelegate* GetAutomationInternalApiDelegate() override;
@@ -101,7 +102,7 @@ class ChromeExtensionsAPIClient : public ExtensionsAPIClient {
   std::unique_ptr<MessagingDelegate> messaging_delegate_;
   std::unique_ptr<FeedbackPrivateDelegate> feedback_private_delegate_;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   std::unique_ptr<MediaPerceptionAPIDelegate> media_perception_api_delegate_;
   std::unique_ptr<NonNativeFileSystemDelegate> non_native_file_system_delegate_;
   std::unique_ptr<ClipboardExtensionHelper> clipboard_extension_helper_;

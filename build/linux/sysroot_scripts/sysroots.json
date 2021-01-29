@@ -1,36 +1,36 @@
 {
     "sid_amd64": {
-        "Sha1Sum": "52cf2961a3cddc0d46e1a2f7d9bf376fc16a61de",
+        "Sha1Sum": "92dd6b554df680bd27110d06ae3fc21fa5fd6588",
         "SysrootDir": "debian_sid_amd64-sysroot",
         "Tarball": "debian_sid_amd64_sysroot.tar.xz"
     },
     "sid_arm": {
-        "Sha1Sum": "0a1444c9e8e5a9a461a4c2e168cc040e443b201d",
+        "Sha1Sum": "f3258a0cb4974bb3472ae13054c13e2e9fa5f414",
         "SysrootDir": "debian_sid_arm-sysroot",
         "Tarball": "debian_sid_arm_sysroot.tar.xz"
     },
     "sid_arm64": {
-        "Sha1Sum": "39c8af09836079013052d813eb3faa84eacc1023",
+        "Sha1Sum": "d20fa0b1c7afe1e67272c9c67837d080ca30d18f",
         "SysrootDir": "debian_sid_arm64-sysroot",
         "Tarball": "debian_sid_arm64_sysroot.tar.xz"
     },
     "sid_armel": {
-        "Sha1Sum": "d737c7ea6d35a1d059dbb4572367717b6aa01ea4",
+        "Sha1Sum": "ea2835ba68c9a59d8c1f255e4c4731e1dea7296a",
         "SysrootDir": "debian_sid_armel-sysroot",
         "Tarball": "debian_sid_armel_sysroot.tar.xz"
     },
     "sid_i386": {
-        "Sha1Sum": "36ed2ee83109acdd44af2e522a5e9e0082b074a6",
+        "Sha1Sum": "5f4ee36753033a532a5c21bcd9eb1d2f465fcf15",
         "SysrootDir": "debian_sid_i386-sysroot",
         "Tarball": "debian_sid_i386_sysroot.tar.xz"
     },
     "sid_mips": {
-        "Sha1Sum": "5c1c223a5bfc9bfe66b95025abe17153149e5ffb",
+        "Sha1Sum": "0fb943eaa08af8d07b4d2157871fda72dbeba409",
         "SysrootDir": "debian_sid_mips-sysroot",
         "Tarball": "debian_sid_mips_sysroot.tar.xz"
     },
     "sid_mips64el": {
-        "Sha1Sum": "2351c79f5af6eab1f68141049a3929d8f7319e09",
+        "Sha1Sum": "041904e09409badd6a103f01069b8a5ee7172968",
         "SysrootDir": "debian_sid_mips64el-sysroot",
         "Tarball": "debian_sid_mips64el_sysroot.tar.xz"
     }

@@ -11,21 +11,20 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
-#include "chrome/test/pixel/browser_skia_gold_pixel_diff.h"
+#include "build/chromeos_buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_CHROMEOS)
-#include "ash/shell.h"  // mash-ok
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/shell.h"
 #endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
 #include "chrome/browser/ui/test/test_browser_dialog_mac.h"
 #endif
 
 #if defined(TOOLKIT_VIEWS)
 #include "base/callback_helpers.h"
 #include "base/strings/strcat.h"
-#include "ui/compositor/test/draw_waiter_for_test.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/views/test/widget_test.h"
@@ -62,12 +61,7 @@ class WidgetCloser {
 
 }  // namespace
 
-TestBrowserDialog::TestBrowserDialog() : TestBrowserUi() {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          "browser-ui-tests-verify-pixels")) {
-    pixel_diff_ = std::make_unique<BrowserSkiaGoldPixelDiff>();
-  }
-}
+TestBrowserDialog::TestBrowserDialog() = default;
 
 TestBrowserDialog::~TestBrowserDialog() = default;
 
@@ -121,33 +115,28 @@ bool TestBrowserDialog::VerifyUi() {
 
   views::Widget* dialog_widget = *(added.begin());
 // TODO(https://crbug.com/958242) support Mac for pixel tests.
-#if !defined(OS_MACOSX)
-  if (pixel_diff_) {
-    dialog_widget->SetBlockCloseForTesting(true);
-    // Deactivate before taking screenshot. Deactivated dialog pixel outputs
-    // is more predictable than activated dialog.
-    bool is_active = dialog_widget->IsActive();
-    dialog_widget->Deactivate();
-    base::ScopedClosureRunner unblock_close(
-        base::BindOnce(&views::Widget::SetBlockCloseForTesting,
-                       base::Unretained(dialog_widget), false));
-    // Wait for painting complete.
-    auto* compositor = dialog_widget->GetCompositor();
-    ui::DrawWaiterForTest::WaitForCompositingEnded(compositor);
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(OS_WIN) || (defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS))
+  dialog_widget->SetBlockCloseForTesting(true);
+  // Deactivate before taking screenshot. Deactivated dialog pixel outputs
+  // is more predictable than activated dialog.
+  bool is_active = dialog_widget->IsActive();
+  dialog_widget->Deactivate();
+  base::ScopedClosureRunner unblock_close(
+      base::BindOnce(&views::Widget::SetBlockCloseForTesting,
+                     base::Unretained(dialog_widget), false));
 
-    pixel_diff_->Init(dialog_widget, "BrowserUiDialog");
-    auto* test_info = testing::UnitTest::GetInstance()->current_test_info();
-    const std::string test_name = base::StrCat(
-        {test_info->test_case_name(), "_", test_info->name(), "_", baseline_});
-    if (!pixel_diff_->CompareScreenshot(test_name,
-                                        dialog_widget->GetContentsView())) {
-      DLOG(INFO) << "VerifyUi(): Pixel compare failed.";
-      return false;
-    }
-    if (is_active)
-      dialog_widget->Activate();
+  auto* test_info = testing::UnitTest::GetInstance()->current_test_info();
+  const std::string screenshot_name = base::StrCat(
+      {test_info->test_case_name(), "_", test_info->name(), "_", baseline_});
+  if (!VerifyPixelUi(dialog_widget, "BrowserUiDialog", screenshot_name)) {
+    DLOG(INFO) << "VerifyUi(): Pixel compare failed.";
+    return false;
   }
-#endif  // OS_MACOSX
+  if (is_active)
+    dialog_widget->Activate();
+#endif  // OS_MAC
 
   if (!should_verify_dialog_bounds_)
     return true;
@@ -174,7 +163,7 @@ bool TestBrowserDialog::VerifyUi() {
 }
 
 void TestBrowserDialog::WaitForUserDismissal() {
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   internal::TestBrowserDialogInteractiveSetUp();
 #endif
 
@@ -209,7 +198,7 @@ std::string TestBrowserDialog::GetNonDialogName() {
 
 void TestBrowserDialog::UpdateWidgets() {
   widgets_.clear();
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   for (aura::Window* root_window : ash::Shell::GetAllRootWindows())
     views::Widget::GetAllChildWidgets(root_window, &widgets_);
 #elif defined(TOOLKIT_VIEWS)

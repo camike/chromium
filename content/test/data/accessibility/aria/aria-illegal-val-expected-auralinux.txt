@@ -8,14 +8,14 @@
 ++[section] name='Dropeffect illegal' dropeffect:none
 ++[tree item] name='Expanded illegal' expanded
 ++[section] name='Grabbed illegal'
-++[push button] name='Haspopup illegal' haspopup:menu
+++[push button] name='Haspopup illegal'
 ++[section] name='Invalid illegal' invalid-entry
 ++[log] name='Live illegal' atomic:false live:X-ILLEGAL relevant:additions text
 ++[dialog] name='Modal illegal' modal
 ++[entry] name='Multiline illegal' selectable-text
 ++[table] name='Multiselectable illegal' multiselectable cols=0 headers=(NONE); rows=0 headers=(NONE); caption=false; spans=(all: 1x1)
 ++[slider] name='Orientation illegal' horizontal current=50.000000 minimum=0.000000 maximum=100.000000
-++[toggle button] name='Pressed illegal' pressed checkable:true
+++[toggle button] name='Pressed illegal' pressed
 ++[entry] name='Readonly illegal' selectable-text
 ++[log] name='Relevant illegal' atomic:false live:polite relevant:X-ILLEGAL
 ++[entry] name='Required illegal' required selectable-text

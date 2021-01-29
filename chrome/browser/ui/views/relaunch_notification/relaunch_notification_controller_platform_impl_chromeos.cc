@@ -17,6 +17,7 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/chromeos/devicetype_utils.h"
 
 RelaunchNotificationControllerPlatformImpl::
     RelaunchNotificationControllerPlatformImpl() = default;
@@ -33,8 +34,7 @@ void RelaunchNotificationControllerPlatformImpl::NotifyRelaunchRecommended(
 
 void RelaunchNotificationControllerPlatformImpl::RecordRecommendedShowResult() {
   if (!recorded_shown_) {
-    relaunch_notification::RecordRecommendedShowResult(
-        relaunch_notification::ShowResult::kShown);
+    relaunch_notification::RecordRecommendedShowResult();
     recorded_shown_ = true;
   }
 }
@@ -49,8 +49,7 @@ void RelaunchNotificationControllerPlatformImpl::NotifyRelaunchRequired(
                                 RefreshRelaunchRequiredTitle,
                             base::Unretained(this)));
 
-    relaunch_notification::RecordRequiredShowResult(
-        relaunch_notification::ShowResult::kShown);
+    relaunch_notification::RecordRequiredShowResult();
   }
 
   RefreshRelaunchRequiredTitle();
@@ -83,21 +82,21 @@ void RelaunchNotificationControllerPlatformImpl::
   std::string enterprise_display_domain =
       g_browser_process->platform_part()
           ->browser_policy_connector_chromeos()
-          ->GetEnterpriseDisplayDomain();
+          ->GetEnterpriseDomainManager();
   if (past_deadline) {
     SystemTrayClient::Get()->SetUpdateNotificationState(
         ash::NotificationStyle::kAdminRecommended,
         l10n_util::GetStringUTF16(IDS_RELAUNCH_RECOMMENDED_OVERDUE_TITLE),
-        l10n_util::GetStringFUTF16(
-            IDS_RELAUNCH_RECOMMENDED_OVERDUE_BODY,
-            base::UTF8ToUTF16(enterprise_display_domain)));
+        l10n_util::GetStringFUTF16(IDS_RELAUNCH_RECOMMENDED_OVERDUE_BODY,
+                                   base::UTF8ToUTF16(enterprise_display_domain),
+                                   ui::GetChromeOSDeviceName()));
   } else {
     SystemTrayClient::Get()->SetUpdateNotificationState(
         ash::NotificationStyle::kAdminRecommended,
         l10n_util::GetStringUTF16(IDS_RELAUNCH_RECOMMENDED_TITLE),
-        l10n_util::GetStringFUTF16(
-            IDS_RELAUNCH_RECOMMENDED_BODY,
-            base::UTF8ToUTF16(enterprise_display_domain)));
+        l10n_util::GetStringFUTF16(IDS_RELAUNCH_RECOMMENDED_BODY,
+                                   base::UTF8ToUTF16(enterprise_display_domain),
+                                   ui::GetChromeOSDeviceName()));
   }
 }
 
@@ -117,7 +116,8 @@ void RelaunchNotificationControllerPlatformImpl::
         relaunch_required_timer_->GetWindowTitle(),
         l10n_util::GetStringFUTF16(
             IDS_RELAUNCH_REQUIRED_BODY,
-            base::UTF8ToUTF16(connector->GetEnterpriseDisplayDomain())));
+            base::UTF8ToUTF16(connector->GetEnterpriseDomainManager()),
+            ui::GetChromeOSDeviceName()));
   }
 }
 
@@ -145,13 +145,13 @@ bool RelaunchNotificationControllerPlatformImpl::CanScheduleReboot() {
 }
 
 void RelaunchNotificationControllerPlatformImpl::StartObserving() {
-  if (!display_observer_.IsObservingSources())
-    display_observer_.Add(ash::Shell::Get()->display_configurator());
-  if (!session_observer_.IsObservingSources())
-    session_observer_.Add(session_manager::SessionManager::Get());
+  if (!display_observation_.IsObserving())
+    display_observation_.Observe(ash::Shell::Get()->display_configurator());
+  if (!session_observation_.IsObserving())
+    session_observation_.Observe(session_manager::SessionManager::Get());
 }
 
 void RelaunchNotificationControllerPlatformImpl::StopObserving() {
-  display_observer_.RemoveAll();
-  session_observer_.RemoveAll();
+  display_observation_.Reset();
+  session_observation_.Reset();
 }

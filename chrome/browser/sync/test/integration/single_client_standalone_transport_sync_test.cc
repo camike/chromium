@@ -9,6 +9,7 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
@@ -18,10 +19,10 @@
 #include "components/sync/base/model_type.h"
 #include "components/sync/driver/profile_sync_service.h"
 #include "components/sync/driver/sync_driver_switches.h"
+#include "content/public/test/browser_test.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/sync/test/integration/os_sync_test.h"
-#include "chrome/common/chrome_features.h"
 #include "chromeos/constants/chromeos_features.h"
 #include "components/browser_sync/browser_sync_switches.h"
 #endif
@@ -29,29 +30,26 @@
 namespace {
 
 syncer::ModelTypeSet AllowedTypesInStandaloneTransportMode() {
-  static_assert(41 == syncer::ModelType::NUM_ENTRIES,
+  static_assert(39 == syncer::ModelType::NUM_ENTRIES,
                 "Add new types below if they run in transport mode");
   // Only some special whitelisted types (and control types) are allowed in
   // standalone transport mode.
   syncer::ModelTypeSet allowed_types(
-      syncer::USER_CONSENTS, syncer::SECURITY_EVENTS,
+      syncer::DEVICE_INFO, syncer::USER_CONSENTS, syncer::SECURITY_EVENTS,
       syncer::AUTOFILL_WALLET_DATA, syncer::SHARING_MESSAGE);
   allowed_types.PutAll(syncer::ControlTypes());
-  if (base::FeatureList::IsEnabled(switches::kSyncDeviceInfoInTransportMode)) {
-    allowed_types.Put(syncer::DEVICE_INFO);
-  }
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // OS sync types run in transport mode.
   if (chromeos::features::IsSplitSettingsSyncEnabled()) {
     allowed_types.PutAll({syncer::APPS, syncer::APP_SETTINGS, syncer::APP_LIST,
                           syncer::APP_SETTINGS, syncer::ARC_PACKAGE,
                           syncer::PRINTERS, syncer::OS_PREFERENCES,
-                          syncer::OS_PRIORITY_PREFERENCES});
+                          syncer::OS_PRIORITY_PREFERENCES, syncer::WEB_APPS});
   }
   if (base::FeatureList::IsEnabled(switches::kSyncWifiConfigurations)) {
     allowed_types.Put(syncer::WIFI_CONFIGURATIONS);
   }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
   return allowed_types;
 }
 
@@ -75,46 +73,17 @@ class SyncDisabledByUserChecker : public SingleClientStatusChangeChecker {
 
 class SingleClientStandaloneTransportSyncTest : public SyncTest {
  public:
-  SingleClientStandaloneTransportSyncTest() : SyncTest(SINGLE_CLIENT) {
-    DisableVerifier();
-  }
-
-  ~SingleClientStandaloneTransportSyncTest() override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SingleClientStandaloneTransportSyncTest);
+  SingleClientStandaloneTransportSyncTest() : SyncTest(SINGLE_CLIENT) {}
+  ~SingleClientStandaloneTransportSyncTest() override = default;
 };
 
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
-IN_PROC_BROWSER_TEST_F(SingleClientStandaloneTransportSyncTest,
-                       StartsSyncFeatureOnSignin) {
-  // On platforms where Sync starts automatically (in practice, Android and
-  // ChromeOS), IsFirstSetupComplete gets set automatically, and so the full
-  // Sync feature will start upon sign-in to a primary account.
-  ASSERT_TRUE(browser_defaults::kSyncAutoStarts);
-
-  ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
-
-  // Signing in (without explicitly setting up Sync) should trigger starting the
-  // Sync machinery. Because IsFirstSetupComplete gets set automatically, this
-  // will actually start the full Sync feature, not just the transport.
-  ASSERT_TRUE(GetClient(0)->SignInPrimaryAccount());
-  EXPECT_EQ(syncer::SyncService::TransportState::INITIALIZING,
-            GetSyncService(0)->GetTransportState());
-
-  EXPECT_TRUE(GetClient(0)->AwaitSyncTransportActive());
-
-  EXPECT_EQ(syncer::SyncService::TransportState::ACTIVE,
-            GetSyncService(0)->GetTransportState());
-
-  ASSERT_TRUE(GetSyncService(0)->GetUserSettings()->IsFirstSetupComplete());
-
-  EXPECT_TRUE(GetSyncService(0)->IsSyncFeatureEnabled());
-  EXPECT_TRUE(GetSyncService(0)->IsSyncFeatureActive());
-}
-#else
 IN_PROC_BROWSER_TEST_F(SingleClientStandaloneTransportSyncTest,
                        StartsSyncTransportOnSignin) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // On Chrome OS before SplitSettingSync, sync auto-starts on sign-in.
+  if (!chromeos::features::IsSplitSettingsSyncEnabled())
+    return;
+#endif
   ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
 
   // Signing in (without explicitly setting up Sync) should trigger starting the
@@ -148,7 +117,6 @@ IN_PROC_BROWSER_TEST_F(SingleClientStandaloneTransportSyncTest,
                          AllowedTypesInStandaloneTransportMode());
   EXPECT_TRUE(bad_types.Empty()) << syncer::ModelTypeSetToString(bad_types);
 }
-#endif  // defined(OS_CHROMEOS) || defined(OS_ANDROID)
 
 IN_PROC_BROWSER_TEST_F(SingleClientStandaloneTransportSyncTest,
                        SwitchesBetweenTransportAndFeature) {
@@ -223,7 +191,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientStandaloneTransportSyncTest,
   EXPECT_TRUE(GetSyncService(0)->HasDisableReason(
       syncer::SyncService::DISABLE_REASON_USER_CHOICE));
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // On ChromeOS, the primary account should remain, and Sync should start up
   // again in standalone transport mode.
   EXPECT_TRUE(GetSyncService(0)->IsAuthenticatedAccountPrimary());
@@ -245,7 +213,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientStandaloneTransportSyncTest,
   // account, and so Sync would start up again in standalone transport mode.
   // However, since we haven't set up cookies in this test, the account is *not*
   // considered primary anymore (not even "unconsented").
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
 // Regression test for crbug.com/955989 that verifies the cache GUID is not
@@ -262,13 +230,14 @@ IN_PROC_BROWSER_TEST_F(SingleClientStandaloneTransportSyncTest,
   // On platforms where Sync starts automatically (in practice, Android and
   // ChromeOS), IsFirstSetupComplete gets set automatically, and so the full
   // Sync feature will start upon sign-in to a primary account.
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
   ASSERT_FALSE(GetSyncService(0)->GetUserSettings()->IsFirstSetupComplete());
   ASSERT_FALSE(GetSyncService(0)->IsSyncFeatureEnabled());
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
-  syncer::SyncPrefs prefs(GetProfile(0)->GetPrefs());
-  const std::string cache_guid = prefs.GetCacheGuid();
+  syncer::SyncTransportDataPrefs transport_data_prefs(
+      GetProfile(0)->GetPrefs());
+  const std::string cache_guid = transport_data_prefs.GetCacheGuid();
   ASSERT_FALSE(cache_guid.empty());
 
   // Save the cache GUID to file to remember after restart, for test
@@ -291,13 +260,14 @@ IN_PROC_BROWSER_TEST_F(SingleClientStandaloneTransportSyncTest,
   // On platforms where Sync starts automatically (in practice, Android and
   // ChromeOS), IsFirstSetupComplete gets set automatically, and so the full
   // Sync feature will start upon sign-in to a primary account.
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
   ASSERT_FALSE(GetSyncService(0)->GetUserSettings()->IsFirstSetupComplete());
   ASSERT_FALSE(GetSyncService(0)->IsSyncFeatureEnabled());
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
-  syncer::SyncPrefs prefs(GetProfile(0)->GetPrefs());
-  ASSERT_FALSE(prefs.GetCacheGuid().empty());
+  syncer::SyncTransportDataPrefs transport_data_prefs(
+      GetProfile(0)->GetPrefs());
+  ASSERT_FALSE(transport_data_prefs.GetCacheGuid().empty());
 
   std::string old_cache_guid;
   base::ScopedAllowBlockingForTesting allow_blocking;
@@ -305,17 +275,15 @@ IN_PROC_BROWSER_TEST_F(SingleClientStandaloneTransportSyncTest,
       base::ReadFileToString(GetTestFilePathForCacheGuid(), &old_cache_guid));
   ASSERT_FALSE(old_cache_guid.empty());
 
-  EXPECT_EQ(old_cache_guid, prefs.GetCacheGuid());
+  EXPECT_EQ(old_cache_guid, transport_data_prefs.GetCacheGuid());
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 class SingleClientStandaloneTransportOsSyncTest : public OsSyncTest {
  public:
   SingleClientStandaloneTransportOsSyncTest() : OsSyncTest(SINGLE_CLIENT) {
     // Enable in-development types.
-    scoped_features_.InitWithFeatures({features::kDesktopPWAsWithoutExtensions,
-                                       switches::kSyncWifiConfigurations},
-                                      {});
+    scoped_features_.InitAndEnableFeature(switches::kSyncWifiConfigurations);
   }
   ~SingleClientStandaloneTransportOsSyncTest() override = default;
 
@@ -394,6 +362,6 @@ IN_PROC_BROWSER_TEST_F(SingleClientStandaloneTransportOsSyncTest,
   EXPECT_TRUE(active_types.Has(syncer::SESSIONS));
   EXPECT_TRUE(active_types.Has(syncer::TYPED_URLS));
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace

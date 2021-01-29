@@ -6,6 +6,7 @@
 
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
@@ -21,6 +22,30 @@
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 
 namespace blink {
+
+PreloadRequest::ExclusionInfo::ExclusionInfo(const KURL& document_url,
+                                             HashSet<KURL> scopes,
+                                             HashSet<KURL> resources)
+    : document_url_(document_url),
+      scopes_(std::move(scopes)),
+      resources_(std::move(resources)) {}
+
+PreloadRequest::ExclusionInfo::~ExclusionInfo() = default;
+
+bool PreloadRequest::ExclusionInfo::ShouldExclude(
+    const KURL& base_url,
+    const String& resource_url) const {
+  if (resources_.IsEmpty() && scopes_.IsEmpty())
+    return false;
+  KURL url = KURL(base_url.IsEmpty() ? document_url_ : base_url, resource_url);
+  if (resources_.Contains(url))
+    return true;
+  for (const auto& scope : scopes_) {
+    if (url.GetString().StartsWith(scope.GetString()))
+      return true;
+  }
+  return false;
+}
 
 KURL PreloadRequest::CompleteURL(Document* document) {
   if (!base_url_.IsEmpty())
@@ -38,6 +63,7 @@ std::unique_ptr<PreloadRequest> PreloadRequest::CreateIfNeeded(
     const network::mojom::ReferrerPolicy referrer_policy,
     ReferrerSource referrer_source,
     ResourceFetcher::IsImageSet is_image_set,
+    const ExclusionInfo* exclusion_info,
     const FetchParameters::ResourceWidth& resource_width,
     const ClientHintsPreferences& client_hints_preferences,
     RequestType request_type) {
@@ -49,6 +75,10 @@ std::unique_ptr<PreloadRequest> PreloadRequest::CreateIfNeeded(
       ProtocolIs(resource_url, "data")) {
     return nullptr;
   }
+
+  if (exclusion_info && exclusion_info->ShouldExclude(base_url, resource_url))
+    return nullptr;
+
   return base::WrapUnique(new PreloadRequest(
       initiator_name, initiator_position, resource_url, base_url, resource_type,
       resource_width, client_hints_preferences, request_type, referrer_policy,
@@ -56,7 +86,7 @@ std::unique_ptr<PreloadRequest> PreloadRequest::CreateIfNeeded(
 }
 
 Resource* PreloadRequest::Start(Document* document) {
-  DCHECK(IsMainThread());
+  DCHECK(document->domWindow());
 
   FetchInitiatorInfo initiator_info;
   initiator_info.name = AtomicString(initiator_name_);
@@ -83,28 +113,25 @@ Resource* PreloadRequest::Start(Document* document) {
       base::FeatureList::IsEnabled(blink::features::kSubresourceRedirect) &&
       blink::GetNetworkStateNotifier().SaveDataEnabled()) {
     resource_request.SetPreviewsState(resource_request.GetPreviewsState() |
-                                      WebURLRequest::kSubresourceRedirectOn);
+                                      PreviewsTypes::kSubresourceRedirectOn);
   }
 
-  ResourceLoaderOptions options;
+  ResourceLoaderOptions options(document->domWindow()->GetCurrentWorld());
   options.initiator_info = initiator_info;
   FetchParameters params(std::move(resource_request), options);
 
+  auto* origin = document->domWindow()->GetSecurityOrigin();
   if (resource_type_ == ResourceType::kImportResource) {
-    const SecurityOrigin* security_origin =
-        document->ContextDocument()->GetSecurityOrigin();
-    params.SetCrossOriginAccessControl(security_origin,
-                                       kCrossOriginAttributeAnonymous);
+    params.SetCrossOriginAccessControl(origin, kCrossOriginAttributeAnonymous);
   }
 
-  if (script_type_ == mojom::ScriptType::kModule) {
+  if (script_type_ == mojom::blink::ScriptType::kModule) {
     DCHECK_EQ(resource_type_, ResourceType::kScript);
     params.SetCrossOriginAccessControl(
-        document->GetSecurityOrigin(),
-        ScriptLoader::ModuleScriptCredentialsMode(cross_origin_));
+        origin, ScriptLoader::ModuleScriptCredentialsMode(cross_origin_));
+    params.SetModuleScript();
   } else if (cross_origin_ != kCrossOriginAttributeNotSet) {
-    params.SetCrossOriginAccessControl(document->GetSecurityOrigin(),
-                                       cross_origin_);
+    params.SetCrossOriginAccessControl(origin, cross_origin_);
   }
 
   params.SetDefer(defer_);
@@ -117,7 +144,7 @@ Resource* PreloadRequest::Start(Document* document) {
   if (request_type_ == kRequestTypeLinkRelPreload)
     params.SetLinkPreload(true);
 
-  if (script_type_ == mojom::ScriptType::kModule) {
+  if (script_type_ == mojom::blink::ScriptType::kModule) {
     DCHECK_EQ(resource_type_, ResourceType::kScript);
     params.SetDecoderOptions(TextResourceDecoderOptions::CreateUTF8Decode());
   } else if (resource_type_ == ResourceType::kScript ||
@@ -138,6 +165,12 @@ Resource* PreloadRequest::Start(Document* document) {
     MaybeDisallowFetchForDocWrittenScript(params, *document);
     // We intentionally ignore the returned value, because we don't resend
     // the async request to the blocked script here.
+  } else if (resource_type_ == ResourceType::kCSSStyleSheet) {
+    // CSS here is render blocking, as non blocking doesn't get preloaded.
+    RenderBlockingBehavior render_blocking_behavior =
+        is_in_body_style_ ? RenderBlockingBehavior::kInBodyParserBlocking
+                          : RenderBlockingBehavior::kBlocking;
+    params.SetRenderBlockingBehavior(render_blocking_behavior);
   }
 
   return PreloadHelper::StartPreload(resource_type_, params, *document);

@@ -12,8 +12,8 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -27,8 +27,8 @@
 #include "extensions/browser/event_router.h"
 #include "extensions/common/api/virtual_keyboard_private.h"
 #include "extensions/common/extension_messages.h"
+#include "ui/base/ime/chromeos/ime_bridge.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
-#include "ui/base/ime/ime_bridge.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/gfx/geometry/rect.h"
@@ -233,6 +233,10 @@ bool ChromeKeyboardControllerClient::SetWindowBoundsInScreen(
   return keyboard_controller_->SetWindowBoundsInScreen(bounds_in_screen);
 }
 
+void ChromeKeyboardControllerClient::SetKeyboardConfigFromPref(bool enabled) {
+  keyboard_controller_->SetKeyboardConfigFromPref(enabled);
+}
+
 bool ChromeKeyboardControllerClient::IsKeyboardOverscrollEnabled() {
   return keyboard_controller_->ShouldOverscroll();
 }
@@ -268,6 +272,10 @@ void ChromeKeyboardControllerClient::OnKeyboardEnabledChanged(bool enabled) {
 
   bool was_enabled = is_keyboard_enabled_;
   is_keyboard_enabled_ = enabled;
+
+  for (auto& observer : observers_)
+    observer.OnKeyboardEnabledChanged(is_keyboard_enabled_);
+
   if (enabled || !was_enabled)
     return;
 

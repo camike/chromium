@@ -4,16 +4,20 @@
 
 #include "ash/shelf/drag_handle.h"
 
+#include "ash/accessibility/accessibility_controller_impl.h"
 #include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/shelf_config.h"
 #include "ash/session/session_controller_impl.h"
 #include "ash/shelf/contextual_tooltip.h"
+#include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shelf/shelf_observer.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/style/ash_color_provider.h"
 #include "ash/wm/overview/overview_controller.h"
 #include "base/bind.h"
 #include "base/timer/timer.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/wm/core/coordinate_conversion.h"
@@ -81,18 +85,28 @@ class HideNudgeObserver : public ui::ImplicitAnimationObserver {
 }  // namespace
 
 DragHandle::DragHandle(int drag_handle_corner_radius, Shelf* shelf)
-    : shelf_(shelf) {
+    : views::Button(base::BindRepeating(&DragHandle::ButtonPressed,
+                                        base::Unretained(this))),
+      shelf_(shelf) {
   SetPaintToLayer(ui::LAYER_SOLID_COLOR);
   layer()->SetRoundedCornerRadius(
       {drag_handle_corner_radius, drag_handle_corner_radius,
        drag_handle_corner_radius, drag_handle_corner_radius});
   SetSize(ShelfConfig::Get()->DragHandleSize());
   SetEventTargeter(std::make_unique<views::ViewTargeter>(this));
-  shell_observer_.Add(Shell::Get());
+  SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
+  shell_observation_.Observe(Shell::Get());
+
+  Shell::Get()->accessibility_controller()->AddObserver(this);
+  shelf_->AddObserver(this);
+  OnAccessibilityStatusChanged();
 }
 
 DragHandle::~DragHandle() {
   StopObservingImplicitAnimations();
+
+  Shell::Get()->accessibility_controller()->RemoveObserver(this);
+  shelf_->RemoveObserver(this);
 }
 
 bool DragHandle::DoesIntersectRect(const views::View* target,
@@ -108,12 +122,17 @@ bool DragHandle::DoesIntersectRect(const views::View* target,
 bool DragHandle::MaybeShowDragHandleNudge() {
   // Stop observing overview state if nudge show timer has fired.
   if (!show_drag_handle_nudge_timer_.IsRunning())
-    overview_observer_.RemoveAll();
+    overview_observation_.Reset();
+
+  if (!features::AreContextualNudgesEnabled())
+    return false;
 
   // Do not show drag handle nudge if it is already shown or drag handle is not
   // visible.
   if (gesture_nudge_target_visibility() ||
-      window_drag_from_shelf_in_progress_ || !GetVisible()) {
+      window_drag_from_shelf_in_progress_ || !GetVisible() ||
+      SplitViewController::Get(shelf_->shelf_widget()->GetNativeWindow())
+          ->InSplitViewMode()) {
     return false;
   }
   show_nudge_animation_in_progress_ = true;
@@ -125,6 +144,7 @@ bool DragHandle::MaybeShowDragHandleNudge() {
 }
 
 void DragHandle::ShowDragHandleNudge() {
+  DCHECK(!gesture_nudge_target_visibility_);
   PrefService* pref =
       Shell::Get()->session_controller()->GetLastActiveUserPrefService();
   base::TimeDelta nudge_duration = contextual_tooltip::GetNudgeTimeout(
@@ -132,6 +152,8 @@ void DragHandle::ShowDragHandleNudge() {
   AnimateDragHandleShow();
   ShowDragHandleTooltip();
   gesture_nudge_target_visibility_ = true;
+  split_view_observation_.Observe(
+      SplitViewController::Get(shelf_->shelf_widget()->GetNativeWindow()));
 
   if (!nudge_duration.is_zero()) {
     hide_drag_handle_nudge_timer_.Start(
@@ -153,7 +175,7 @@ void DragHandle::ScheduleShowDragHandleNudge() {
 
   // Observe overview controller to detect overview session start - this should
   // cancel the scheduled nudge show.
-  overview_observer_.Add(Shell::Get()->overview_controller());
+  overview_observation_.Observe(Shell::Get()->overview_controller());
 
   show_drag_handle_nudge_timer_.Start(
       FROM_HERE, kShowNudgeDelay,
@@ -161,22 +183,28 @@ void DragHandle::ScheduleShowDragHandleNudge() {
                      base::Unretained(this)));
 }
 
-void DragHandle::SetColorAndOpacity(SkColor color, float opacity) {
-  layer()->SetColor(color);
-  layer()->SetOpacity(opacity);
-}
-
 void DragHandle::HideDragHandleNudge(
-    contextual_tooltip::DismissNudgeReason context) {
+    contextual_tooltip::DismissNudgeReason reason) {
   StopDragHandleNudgeShowTimer();
   if (!gesture_nudge_target_visibility())
     return;
 
+  split_view_observation_.Reset();
   hide_drag_handle_nudge_timer_.Stop();
-  HideDragHandleNudgeHelper(/*hidden_by_tap=*/context ==
+
+  if (reason == contextual_tooltip::DismissNudgeReason::kPerformedGesture) {
+    contextual_tooltip::HandleGesturePerformed(
+        Shell::Get()->session_controller()->GetLastActiveUserPrefService(),
+        contextual_tooltip::TooltipType::kInAppToHome);
+  } else {
+    // HandleGesturePerformed will also call MaybeLogNudgeDismissedMetrics so we
+    // do not need to call it separately for kPerformedGesture.
+    contextual_tooltip::MaybeLogNudgeDismissedMetrics(
+        contextual_tooltip::TooltipType::kInAppToHome, reason);
+  }
+
+  HideDragHandleNudgeHelper(/*hidden_by_tap=*/reason ==
                             contextual_tooltip::DismissNudgeReason::kTap);
-  contextual_tooltip::LogNudgeDismissedMetrics(
-      contextual_tooltip::TooltipType::kInAppToHome, context);
   gesture_nudge_target_visibility_ = false;
 }
 
@@ -198,15 +226,23 @@ void DragHandle::SetWindowDragFromShelfInProgress(bool gesture_in_progress) {
   if (window_drag_from_shelf_in_progress_) {
     hide_drag_handle_nudge_timer_.Stop();
   } else {
-    HideDragHandleNudge(contextual_tooltip::DismissNudgeReason::kOther);
+    HideDragHandleNudge(
+        contextual_tooltip::DismissNudgeReason::kPerformedGesture);
   }
 }
 
-void DragHandle::OnGestureEvent(ui::GestureEvent* event) {
-  if (!features::AreContextualNudgesEnabled())
-    return;
+void DragHandle::UpdateColor() {
+  layer()->SetColor(AshColorProvider::Get()->GetContentLayerColor(
+      AshColorProvider::ContentLayerType::kShelfHandleColor));
+}
 
-  if (event->type() == ui::ET_GESTURE_TAP && gesture_nudge_target_visibility_) {
+void DragHandle::OnGestureEvent(ui::GestureEvent* event) {
+  if (!features::AreContextualNudgesEnabled() ||
+      !gesture_nudge_target_visibility_) {
+    return;
+  }
+
+  if (event->type() == ui::ET_GESTURE_TAP) {
     HandleTapOnNudge();
     event->StopPropagation();
   }
@@ -233,15 +269,80 @@ gfx::Rect DragHandle::GetAnchorBoundsInScreen() const {
   return anchor_bounds;
 }
 
+void DragHandle::GetAccessibleNodeData(ui::AXNodeData* node_data) {
+  Button::GetAccessibleNodeData(node_data);
+
+  base::string16 accessible_name = base::string16();
+  switch (shelf_->shelf_layout_manager()->hotseat_state()) {
+    case HotseatState::kNone:
+    case HotseatState::kShownClamshell:
+    case HotseatState::kShownHomeLauncher:
+      break;
+    case HotseatState::kHidden:
+      accessible_name = l10n_util::GetStringUTF16(
+          IDS_ASH_DRAG_HANDLE_HOTSEAT_SHOW_ACCESSIBLE_NAME);
+      break;
+    case HotseatState::kExtended:
+      // The name should be empty when the hotseat is extended but we cannot
+      // hide it.
+      if (force_show_hotseat_resetter_)
+        accessible_name = l10n_util::GetStringUTF16(
+            IDS_ASH_DRAG_HANDLE_HOTSEAT_HIDE_ACCESSIBLE_NAME);
+      break;
+  }
+  node_data->SetName(accessible_name);
+}
+
+void DragHandle::OnThemeChanged() {
+  views::Button::OnThemeChanged();
+  UpdateColor();
+}
+
 void DragHandle::OnOverviewModeStarting() {
   StopDragHandleNudgeShowTimer();
 }
 
 void DragHandle::OnShellDestroying() {
-  shell_observer_.RemoveAll();
+  shell_observation_.Reset();
   // Removes the overview controller observer.
   StopDragHandleNudgeShowTimer();
   hide_drag_handle_nudge_timer_.Stop();
+}
+
+void DragHandle::OnSplitViewStateChanged(
+    SplitViewController::State previous_state,
+    SplitViewController::State state) {
+  if (SplitViewController::Get(shelf_->shelf_widget()->GetNativeWindow())
+          ->InSplitViewMode()) {
+    HideDragHandleNudge(contextual_tooltip::DismissNudgeReason::kOther);
+  }
+}
+
+void DragHandle::OnHotseatStateChanged(HotseatState old_state,
+                                       HotseatState new_state) {
+  // Reset |force_show_hotseat_resetter_| when it is no longer extended.
+  if (force_show_hotseat_resetter_ && new_state != HotseatState::kExtended) {
+    shelf_->hotseat_widget()->set_manually_extended(false);
+    force_show_hotseat_resetter_.RunAndReset();
+  }
+}
+
+void DragHandle::OnAccessibilityStatusChanged() {
+  // Only enable the button if shelf controls are shown for accessibility.
+  views::View::SetEnabled(
+      ShelfConfig::Get()->ShelfControlsForcedShownForAccessibility());
+}
+
+void DragHandle::ButtonPressed() {
+  if (shelf_->shelf_layout_manager()->hotseat_state() ==
+      HotseatState::kHidden) {
+    force_show_hotseat_resetter_ =
+        shelf_->shelf_widget()->ForceShowHotseatInTabletMode();
+  } else if (force_show_hotseat_resetter_) {
+    // Hide hotseat only if it's been brought up by tapping the drag handle.
+    shelf_->hotseat_widget()->set_manually_extended(false);
+    force_show_hotseat_resetter_.RunAndReset();
+  }
 }
 
 void DragHandle::OnImplicitAnimationsCompleted() {
@@ -255,8 +356,7 @@ void DragHandle::ShowDragHandleTooltip() {
       this, nullptr /*parent_window*/, ContextualNudge::Position::kTop,
       gfx::Insets(), l10n_util::GetStringUTF16(IDS_ASH_DRAG_HANDLE_NUDGE),
       AshColorProvider::Get()->GetContentLayerColor(
-          AshColorProvider::ContentLayerType::kTextPrimary,
-          AshColorProvider::AshColorMode::kDark),
+          AshColorProvider::ContentLayerType::kTextColorPrimary),
       base::BindRepeating(&DragHandle::HandleTapOnNudge,
                           weak_factory_.GetWeakPtr()));
   drag_handle_nudge_->GetWidget()->Show();
@@ -375,7 +475,7 @@ void DragHandle::HandleTapOnNudge() {
 
 void DragHandle::StopDragHandleNudgeShowTimer() {
   show_drag_handle_nudge_timer_.Stop();
-  overview_observer_.RemoveAll();
+  overview_observation_.Reset();
 }
 
 }  // namespace ash

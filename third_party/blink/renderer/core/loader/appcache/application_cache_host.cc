@@ -33,6 +33,7 @@
 #include <utility>
 
 #include "mojo/public/cpp/bindings/pending_remote.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/appcache/appcache.mojom-blink.h"
 #include "third_party/blink/public/mojom/appcache/appcache_info.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
@@ -63,12 +64,8 @@ const char* const kEventNames[] = {"Checking",    "Error",    "NoUpdate",
 
 ApplicationCacheHost::ApplicationCacheHost(
     const BrowserInterfaceBrokerProxy& interface_broker_proxy,
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-    ContextLifecycleNotifier* notifier)
-    : backend_host_(notifier),
-      receiver_(this, notifier),
-      backend_remote_(notifier),
-      task_runner_(std::move(task_runner)),
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+    : task_runner_(std::move(task_runner)),
       interface_broker_proxy_(interface_broker_proxy) {}
 
 ApplicationCacheHost::~ApplicationCacheHost() = default;
@@ -234,7 +231,7 @@ void ApplicationCacheHost::ErrorEventRaised(
   }
 }
 
-void ApplicationCacheHost::Trace(Visitor* visitor) {
+void ApplicationCacheHost::Trace(Visitor* visitor) const {
   visitor->Trace(backend_host_);
   visitor->Trace(receiver_);
   visitor->Trace(backend_remote_);
@@ -256,6 +253,9 @@ void ApplicationCacheHost::GetAssociatedCacheInfo(
 
 bool ApplicationCacheHost::BindBackend() {
   if (!task_runner_)
+    return false;
+
+  if (!base::FeatureList::IsEnabled(blink::features::kAppCache))
     return false;
 
   DCHECK(!host_id_.is_empty());

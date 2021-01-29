@@ -267,8 +267,6 @@ TEST_F(FetchResponseDataTest, DefaultResponseTime) {
 
 TEST_F(FetchResponseDataTest, ContentSecurityPolicy) {
   base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(
-      network::features::kOutOfBlinkFrameAncestors);
   FetchResponseData* internal_response = CreateInternalResponse();
   internal_response->HeaderList()->Append("content-security-policy",
                                           "frame-ancestors 'none'");
@@ -276,7 +274,8 @@ TEST_F(FetchResponseDataTest, ContentSecurityPolicy) {
                                           "frame-ancestors 'none'");
 
   mojom::blink::FetchAPIResponsePtr fetch_api_response =
-      internal_response->PopulateFetchAPIResponse(KURL());
+      internal_response->PopulateFetchAPIResponse(
+          KURL("https://www.example.org"));
   auto& csp = fetch_api_response->parsed_headers->content_security_policy;
 
   EXPECT_EQ(csp.size(), 2U);

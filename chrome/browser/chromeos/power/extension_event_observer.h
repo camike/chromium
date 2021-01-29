@@ -82,7 +82,7 @@ class ExtensionEventObserver : public ProfileManagerObserver,
   void OnProcessManagerShutdown(extensions::ProcessManager* manager) override;
 
   // extensions::ExtensionHostObserver:
-  void OnExtensionHostDestroyed(const extensions::ExtensionHost* host) override;
+  void OnExtensionHostDestroyed(extensions::ExtensionHost* host) override;
   void OnBackgroundEventDispatched(const extensions::ExtensionHost* host,
                                    const std::string& event_name,
                                    int event_id) override;
@@ -96,7 +96,7 @@ class ExtensionEventObserver : public ProfileManagerObserver,
   // PowerManagerClient::Observer:
   void SuspendImminent(power_manager::SuspendImminent::Reason reason) override;
   void DarkSuspendImminent() override;
-  void SuspendDone(const base::TimeDelta& duration) override;
+  void SuspendDone(base::TimeDelta duration) override;
 
  private:
   friend class TestApi;
@@ -124,7 +124,7 @@ class ExtensionEventObserver : public ProfileManagerObserver,
   // empty, |this| isn't blocking suspend.
   base::UnguessableToken block_suspend_token_;
 
-  base::CancelableClosure suspend_readiness_callback_;
+  base::CancelableOnceClosure suspend_readiness_callback_;
 
   base::WeakPtrFactory<ExtensionEventObserver> weak_factory_{this};
 

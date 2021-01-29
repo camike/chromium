@@ -12,18 +12,17 @@ import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Log;
-import org.chromium.base.StrictModeContext;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.task.AsyncTask;
+import org.chromium.components.signin.AccessTokenData;
 import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.AccountTrackerService;
 import org.chromium.components.signin.AccountUtils;
 import org.chromium.components.signin.AuthException;
 import org.chromium.net.NetworkChangeNotifier;
 
-import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -34,8 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * AccountManagerFacade and forwards callbacks to native code.
  * <p/>
  */
-@VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
-public final class ProfileOAuth2TokenServiceDelegate
+final class ProfileOAuth2TokenServiceDelegate
         implements AccountTrackerService.OnSystemAccountsSeededListener {
     private static final String TAG = "OAuth2TokenService";
 
@@ -48,7 +46,7 @@ public final class ProfileOAuth2TokenServiceDelegate
          *
          * @param token Access token, guaranteed not to be null.
          */
-        void onGetTokenSuccess(String token);
+        void onGetTokenSuccess(AccessTokenData token);
 
         /**
          * Invoked on the UI thread if no token is available.
@@ -70,64 +68,42 @@ public final class ProfileOAuth2TokenServiceDelegate
     // CoreAccountId instead of String.
     private String mPendingUpdateAccountId;
 
-    @VisibleForTesting
-    ProfileOAuth2TokenServiceDelegate(long nativeProfileOAuth2TokenServiceDelegateDelegate,
+    private ProfileOAuth2TokenServiceDelegate(long nativeProfileOAuth2TokenServiceDelegate,
             AccountTrackerService accountTrackerService,
             AccountManagerFacade accountManagerFacade) {
-        mNativeProfileOAuth2TokenServiceDelegate = nativeProfileOAuth2TokenServiceDelegateDelegate;
+        assert nativeProfileOAuth2TokenServiceDelegate
+                != 0 : "nativeProfileOAuth2TokenServiceDelegate should not be zero!";
+        assert accountTrackerService != null : "accountTrackerService should not be null!";
+        mNativeProfileOAuth2TokenServiceDelegate = nativeProfileOAuth2TokenServiceDelegate;
         mAccountTrackerService = accountTrackerService;
         mAccountManagerFacade = accountManagerFacade;
-
-        // AccountTrackerService might be null in tests.
-        if (mAccountTrackerService != null) {
-            mAccountTrackerService.addSystemAccountsSeededListener(this);
-        }
+        mAccountTrackerService.addSystemAccountsSeededListener(this);
     }
 
+    @VisibleForTesting
     @CalledByNative
-    private static ProfileOAuth2TokenServiceDelegate create(
-            long nativeProfileOAuth2TokenServiceDelegateDelegate,
+    static ProfileOAuth2TokenServiceDelegate create(long nativeProfileOAuth2TokenServiceDelegate,
             AccountTrackerService accountTrackerService,
             AccountManagerFacade accountManagerFacade) {
-        assert nativeProfileOAuth2TokenServiceDelegateDelegate != 0;
-        return new ProfileOAuth2TokenServiceDelegate(
-                nativeProfileOAuth2TokenServiceDelegateDelegate, accountTrackerService,
-                accountManagerFacade);
-    }
-
-    private Account getAccountOrNullFromUsername(String username) {
-        if (username == null) {
-            Log.e(TAG, "Username is null");
-            return null;
-        }
-
-        Account account = AccountUtils.findAccountByName(
-                mAccountManagerFacade.tryGetGoogleAccounts(), username);
-        if (account == null) {
-            Log.e(TAG, "Account not found for provided username.");
-            return null;
-        }
-        return account;
+        return new ProfileOAuth2TokenServiceDelegate(nativeProfileOAuth2TokenServiceDelegate,
+                accountTrackerService, accountManagerFacade);
     }
 
     /**
-     * Called by native to list the active account names in the OS.
+     * Called by the native method
+     * ProfileOAuth2TokenServiceDelegate::GetSystemAccountNames()
+     * to list the active account names on device.
      */
     @CalledByNative
     @VisibleForTesting
     String[] getSystemAccountNames() {
-        // TODO(https://crbug.com/768366): Remove this after adding cache to account manager
-        // facade. This function is called by native code on UI thread.
-        try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
-            List<String> accountNames =
-                    AccountUtils.toAccountNames(mAccountManagerFacade.tryGetGoogleAccounts());
-            return accountNames.toArray(new String[accountNames.size()]);
-        }
+        return AccountUtils.toAccountNames(mAccountManagerFacade.tryGetGoogleAccounts())
+                .toArray(new String[0]);
     }
 
     /**
-     * Called by native to retrieve OAuth2 tokens.
-     * @param username The native username (email address).
+     * Called by native method AndroidAccessTokenFetcher::Start() to retrieve OAuth2 tokens.
+     * @param accountEmail The account email.
      * @param scope The scope to get an auth token for (without Android-style 'oauth2:' prefix).
      * @param nativeCallback The pointer to the native callback that should be run upon
      *         completion.
@@ -135,27 +111,29 @@ public final class ProfileOAuth2TokenServiceDelegate
     @MainThread
     @CalledByNative
     private void getAccessTokenFromNative(
-            String username, String scope, final long nativeCallback) {
-        Account account = getAccountOrNullFromUsername(username);
+            String accountEmail, String scope, final long nativeCallback) {
+        assert accountEmail != null : "Account email cannot be null!";
+        final Account account = AccountUtils.findAccountByName(
+                mAccountManagerFacade.tryGetGoogleAccounts(), accountEmail);
         if (account == null) {
             ThreadUtils.postOnUiThread(() -> {
                 ProfileOAuth2TokenServiceDelegateJni.get().onOAuth2TokenFetched(
-                        null, false, nativeCallback);
+                        null, AccessTokenData.NO_KNOWN_EXPIRATION_TIME, false, nativeCallback);
             });
             return;
         }
         String oauth2Scope = OAUTH2_SCOPE_PREFIX + scope;
         getAccessToken(account, oauth2Scope, new GetAccessTokenCallback() {
             @Override
-            public void onGetTokenSuccess(String token) {
+            public void onGetTokenSuccess(AccessTokenData token) {
                 ProfileOAuth2TokenServiceDelegateJni.get().onOAuth2TokenFetched(
-                        token, false, nativeCallback);
+                        token.getToken(), token.getExpirationTimeSecs(), false, nativeCallback);
             }
 
             @Override
             public void onGetTokenFailure(boolean isTransientError) {
-                ProfileOAuth2TokenServiceDelegateJni.get().onOAuth2TokenFetched(
-                        null, isTransientError, nativeCallback);
+                ProfileOAuth2TokenServiceDelegateJni.get().onOAuth2TokenFetched(null,
+                        AccessTokenData.NO_KNOWN_EXPIRATION_TIME, isTransientError, nativeCallback);
             }
         });
     }
@@ -169,32 +147,13 @@ public final class ProfileOAuth2TokenServiceDelegate
      */
     @MainThread
     void getAccessToken(Account account, String scope, GetAccessTokenCallback callback) {
-        getAccessTokenWithFacade(mAccountManagerFacade, account, scope, callback);
-    }
-
-    /**
-     * Call this method to retrieve an OAuth2 access token for the given account and scope. Please
-     * note that this method expects a scope with 'oauth2:' prefix.
-     *
-     * @deprecated Use getAccessToken instead. crbug.com/1014098: This method is available as a
-     *         workaround for a callsite where native is not initialized yet.
-     *
-     * @param accountManagerFacade AccountManagerFacade to request the access token from.
-     * @param account the account to get the access token for.
-     * @param scope The scope to get an auth token for (with Android-style 'oauth2:' prefix).
-     * @param callback called on successful and unsuccessful fetching of auth token.
-     */
-    @MainThread
-    @Deprecated
-    static void getAccessTokenWithFacade(AccountManagerFacade accountManagerFacade, Account account,
-            String scope, GetAccessTokenCallback callback) {
-        ConnectionRetry.runAuthTask(new AuthTask<String>() {
+        ConnectionRetry.runAuthTask(new AuthTask<AccessTokenData>() {
             @Override
-            public String run() throws AuthException {
-                return accountManagerFacade.getAccessToken(account, scope);
+            public AccessTokenData run() throws AuthException {
+                return mAccountManagerFacade.getAccessToken(account, scope);
             }
             @Override
-            public void onSuccess(String token) {
+            public void onSuccess(AccessTokenData token) {
                 callback.onGetTokenSuccess(token);
             }
             @Override
@@ -230,57 +189,17 @@ public final class ProfileOAuth2TokenServiceDelegate
     }
 
     /**
-     * Invalidates the old token (if non-null/non-empty) and asynchronously generates a new one.
-     *
-     * @deprecated Use invalidateAccessToken and getAccessToken instead. crbug.com/1002894: This
-     *         method is needed by InvalidationClientService which is not necessary anymore.
-     *
-     * @param account the account to get the access token for.
-     * @param oldToken The old token to be invalidated or null.
-     * @param scope The scope to get an auth token for (with Android-style 'oauth2:' prefix).
-     * @param callback called on successful and unsuccessful fetching of auth token.
+     * Called by the native method
+     * ProfileOAuth2TokenServiceDelegate::RefreshTokenIsAvailable
+     * to check whether the account has an OAuth2 refresh token.
      */
-    @Deprecated
-    static void getNewAccessTokenWithFacade(AccountManagerFacade accountManagerFacade,
-            Account account, @Nullable String oldToken, String scope,
-            GetAccessTokenCallback callback) {
-        ConnectionRetry.runAuthTask(new AuthTask<String>() {
-            @Override
-            public String run() throws AuthException {
-                if (!TextUtils.isEmpty(oldToken)) {
-                    accountManagerFacade.invalidateAccessToken(oldToken);
-                }
-                return accountManagerFacade.getAccessToken(account, scope);
-            }
-            @Override
-            public void onSuccess(String token) {
-                callback.onGetTokenSuccess(token);
-            }
-            @Override
-            public void onFailure(boolean isTransientError) {
-                callback.onGetTokenFailure(isTransientError);
-            }
-        });
-    }
-
-    /**
-     * Called by native to check whether the account has an OAuth2 refresh token.
-     */
+    @VisibleForTesting
     @CalledByNative
-    private boolean hasOAuth2RefreshToken(String accountName) {
-        if (!mAccountManagerFacade.isCachePopulated()) {
-            return false;
-        }
-
-        // Temporarily allowing disk read while fixing. TODO: http://crbug.com/618096.
-        // This function is called in RefreshTokenIsAvailable of
-        // ProfileOAuth2TokenServiceDelegate which is expected to be called in the UI thread
-        // synchronously.
-        try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
-            return AccountUtils.findAccountByName(
+    boolean hasOAuth2RefreshToken(String accountName) {
+        return mAccountManagerFacade.isCachePopulated()
+                && AccountUtils.findAccountByName(
                            mAccountManagerFacade.tryGetGoogleAccounts(), accountName)
-                    != null;
-        }
+                != null;
     }
 
     /**
@@ -296,17 +215,17 @@ public final class ProfileOAuth2TokenServiceDelegate
         }
     }
 
+    @VisibleForTesting
     @CalledByNative
-    private void seedAndReloadAccountsWithPrimaryAccount(@Nullable String accountId) {
+    void seedAndReloadAccountsWithPrimaryAccount(@Nullable String accountId) {
         ThreadUtils.assertOnUiThread();
-        if (!mAccountTrackerService.checkAndSeedSystemAccounts()) {
+        if (mAccountTrackerService.checkAndSeedSystemAccounts()) {
+            reloadAllAccountsWithPrimaryAccountAfterSeeding(accountId);
+        } else {
             assert !mPendingUpdate && mPendingUpdateAccountId == null;
             mPendingUpdate = true;
             mPendingUpdateAccountId = accountId;
-            return;
         }
-
-        reloadAllAccountsWithPrimaryAccountAfterSeeding(accountId);
     }
 
     private void reloadAllAccountsWithPrimaryAccountAfterSeeding(@Nullable String accountId) {
@@ -394,7 +313,18 @@ public final class ProfileOAuth2TokenServiceDelegate
 
     @NativeMethods
     interface Natives {
-        void onOAuth2TokenFetched(String authToken, boolean isTransientError, long nativeCallback);
+        /**
+         * Called to C++ when fetching of an OAuth2 token is finished.
+         * @param authToken The string value of the OAuth2 token.
+         * @param expirationTimeSecs The number of seconds after the Unix epoch when the token is
+         *         scheduled to expire. It is set to 0 if there's no known expiration time.
+         * @param isTransientError Indicates if the error is transient (network timeout or
+         *          * unavailable, etc) or persistent (bad credentials, permission denied, etc).
+         * @param nativeCallback the pointer to the native callback that should be run upon
+         *         completion.
+         */
+        void onOAuth2TokenFetched(String authToken, long expirationTimeSecs,
+                boolean isTransientError, long nativeCallback);
         void reloadAllAccountsWithPrimaryAccountAfterSeeding(
                 long nativeProfileOAuth2TokenServiceDelegateAndroid, @Nullable String accountId);
     }

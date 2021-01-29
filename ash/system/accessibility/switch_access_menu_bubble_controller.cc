@@ -11,6 +11,8 @@
 #include "ash/system/tray/tray_background_view.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/unified/unified_system_tray_view.h"
+#include "ash/wm/collision_detection/collision_detection_utils.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 
 namespace ash {
 
@@ -24,20 +26,21 @@ SwitchAccessMenuBubbleController::~SwitchAccessMenuBubbleController() {
 }
 
 void SwitchAccessMenuBubbleController::ShowBackButton(const gfx::Rect& anchor) {
-  HideMenuBubble();
-  back_button_controller_->ShowBackButton(anchor);
+  back_button_controller_->ShowBackButton(anchor, /*show_focus_ring=*/true,
+                                          menu_open_);
 }
 
 void SwitchAccessMenuBubbleController::ShowMenu(
     const gfx::Rect& anchor,
     const std::vector<std::string>& actions_to_show) {
+  menu_open_ = true;
   if (!widget_) {
     TrayBubbleView::InitParams init_params;
     init_params.delegate = this;
     // Anchor within the overlay container.
     init_params.parent_window =
         Shell::GetContainer(Shell::GetPrimaryRootWindow(),
-                            kShellWindowId_AccessibilityPanelContainer);
+                            kShellWindowId_AccessibilityBubbleContainer);
     init_params.anchor_mode = TrayBubbleView::AnchorMode::kRect;
     init_params.is_anchored_to_status_area = false;
     init_params.insets = gfx::Insets(kUnifiedMenuPadding, kUnifiedMenuPadding);
@@ -45,10 +48,11 @@ void SwitchAccessMenuBubbleController::ShowMenu(
     init_params.has_shadow = false;
     init_params.translucent = true;
     bubble_view_ = new TrayBubbleView(init_params);
+    bubble_view_->SetArrow(views::BubbleBorder::Arrow::TOP_LEFT);
 
     menu_view_ = new SwitchAccessMenuView();
     menu_view_->SetBorder(
-        views::CreateEmptyBorder(kUnifiedTopShortcutSpacing, 0, 0, 0));
+        views::CreateEmptyBorder(gfx::Insets(kUnifiedMenuPadding)));
     bubble_view_->AddChildView(menu_view_);
 
     menu_view_->SetPaintToLayer();
@@ -57,6 +61,10 @@ void SwitchAccessMenuBubbleController::ShowMenu(
     widget_ = views::BubbleDialogDelegateView::CreateBubble(bubble_view_);
     TrayBackgroundView::InitializeBubbleAnimations(widget_);
     bubble_view_->InitializeAndShowBubble();
+
+    CollisionDetectionUtils::MarkWindowPriorityForCollisionDetection(
+        widget_->GetNativeWindow(),
+        CollisionDetectionUtils::RelativePriority::kSwitchAccessMenu);
   }
 
   DCHECK(bubble_view_);
@@ -64,20 +72,49 @@ void SwitchAccessMenuBubbleController::ShowMenu(
   menu_view_->SetActions(actions_to_show);
   bubble_view_->SetPreferredWidth(menu_view_->GetBubbleWidthDip());
   bubble_view_->ChangeAnchorRect(anchor);
-  widget_->Show();
 
-  gfx::Rect widget_bounds = widget_->GetWindowBoundsInScreen();
-  back_button_controller_->ShowBackButton(widget_bounds);
+  gfx::Rect new_bounds = widget_->GetWindowBoundsInScreen();
+
+  // Adjust the bounds to fit entirely within the screen.
+  gfx::Rect display_bounds =
+      display::Screen::GetScreen()->GetDisplayMatching(new_bounds).bounds();
+  new_bounds.AdjustToFit(display_bounds);
+
+  // Update the preferred bounds based on other system windows.
+  gfx::Rect resting_bounds = CollisionDetectionUtils::AvoidObstacles(
+      display::Screen::GetScreen()->GetDisplayNearestWindow(
+          widget_->GetNativeWindow()),
+      new_bounds, CollisionDetectionUtils::RelativePriority::kSwitchAccessMenu);
+
+  widget_->SetBounds(resting_bounds);
+  widget_->Show();
+  bubble_view_->NotifyAccessibilityEvent(ax::mojom::Event::kChildrenChanged,
+                                         true);
+
+  // The resting bounds includes padding on each side of the menu.
+  // Remove that before passing to the back button controller so the back button
+  // appears in the correct position.
+  resting_bounds.Inset(kUnifiedMenuPadding, kUnifiedMenuPadding);
+  back_button_controller_->ShowBackButton(resting_bounds,
+                                          /*show_focus_ring=*/false,
+                                          /*for_menu=*/true);
 }
 
 void SwitchAccessMenuBubbleController::HideBackButton() {
-  back_button_controller_->Hide();
+  if (widget_ && widget_->IsVisible())
+    back_button_controller_->HideFocusRing();
+  else
+    back_button_controller_->Hide();
 }
 
 void SwitchAccessMenuBubbleController::HideMenuBubble() {
+  menu_open_ = false;
   back_button_controller_->Hide();
   if (widget_)
     widget_->Hide();
+  if (bubble_view_)
+    bubble_view_->NotifyAccessibilityEvent(ax::mojom::Event::kChildrenChanged,
+                                           true);
 }
 
 void SwitchAccessMenuBubbleController::BubbleViewDestroyed() {

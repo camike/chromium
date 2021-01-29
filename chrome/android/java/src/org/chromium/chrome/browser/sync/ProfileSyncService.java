@@ -13,6 +13,9 @@ import org.json.JSONException;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.NativeMethods;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.components.signin.base.GoogleServiceAuthError;
+import org.chromium.components.sync.KeyRetrievalTriggerForUMA;
 import org.chromium.components.sync.ModelType;
 import org.chromium.components.sync.PassphraseType;
 
@@ -38,6 +41,12 @@ public class ProfileSyncService {
         public void syncStateChanged();
     }
 
+    /**
+     * ModelTypes that the user can directly select in settings.
+     * Logically, this is a subset of the native UserSelectableTypeSet, but it
+     * uses values from the ModelType enum instead.
+     * TODO(crbug.com/985290): Resolve this inconsistency.
+     */
     private static final int[] ALL_SELECTABLE_TYPES = new int[] {
         ModelType.AUTOFILL,
         ModelType.BOOKMARKS,
@@ -86,6 +95,7 @@ public class ProfileSyncService {
      */
     @VisibleForTesting
     public static void overrideForTests(ProfileSyncService profileSyncService) {
+        ThreadUtils.assertOnUiThread();
         sProfileSyncService = profileSyncService;
         sInitialized = true;
     }
@@ -101,15 +111,6 @@ public class ProfileSyncService {
     }
 
     protected ProfileSyncService() {
-        init();
-    }
-
-    /**
-     * This is called pretty early in our application. Avoid any blocking operations here. init()
-     * is a separate function to enable a test subclass of ProfileSyncService to completely stub out
-     * ProfileSyncService.
-     */
-    protected void init() {
         ThreadUtils.assertOnUiThread();
 
         // This may cause us to create ProfileSyncService even if sync has not
@@ -120,7 +121,11 @@ public class ProfileSyncService {
     }
 
     /**
-     * Checks if the sync engine is initialized.
+     * Checks if the sync engine is initialized. Note that this refers to
+     * Sync-the-transport, i.e. it can be true even if the user has *not*
+     * enabled Sync-the-feature.
+     * This mostly needs to be checked as a precondition for the various
+     * encryption-related methods (see below).
      *
      * @return true if the sync engine is initialized.
      */
@@ -158,8 +163,8 @@ public class ProfileSyncService {
      *
      * @return true if Sync is active, false otherwise.
      */
-    public boolean isSyncActive() {
-        return ProfileSyncServiceJni.get().isSyncActive(
+    public boolean isSyncFeatureActive() {
+        return ProfileSyncServiceJni.get().isSyncFeatureActive(
                 mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
     }
 
@@ -193,11 +198,29 @@ public class ProfileSyncService {
                 mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
     }
 
+    public void setDecoupledFromAndroidMasterSync() {
+        ProfileSyncServiceJni.get().setDecoupledFromAndroidMasterSync(
+                mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
+    }
+
+    public boolean getDecoupledFromAndroidMasterSync() {
+        return ProfileSyncServiceJni.get().getDecoupledFromAndroidMasterSync(
+                mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
+    }
+
+    public boolean isAuthenticatedAccountPrimary() {
+        return ProfileSyncServiceJni.get().isAuthenticatedAccountPrimary(
+                mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
+    }
+
     /**
+     * DEPRECATED: Use getChosenDataTypes() instead.
+     *
      * Gets the set of data types that are "preferred" in sync. Those are the
      * chosen ones (see getChosenDataTypes), plus any that are implied by them.
      *
-     * This is unaffected by whether sync is on.
+     * NOTE: This returns "all types" by default, even if the user has never
+     *       enabled Sync, or if only Sync-the-transport is running.
      *
      * @return Set of preferred data types.
      */
@@ -221,10 +244,15 @@ public class ProfileSyncService {
     }
 
     /**
-     * Gets the set of data types that are enabled in sync. This will always
-     * return a subset of syncer::UserSelectableTypes().
+     * Gets the set of data types that the user has chosen to enable. This
+     * corresponds to the native GetSelectedTypes() / UserSelectableTypeSet, but
+     * every UserSelectableType is mapped to the corresponding canonical
+     * ModelType.
+     * TODO(crbug.com/985290): Expose UserSelectableType to Java and return that
+     * instead.
      *
-     * This is unaffected by whether sync is on.
+     * NOTE: This returns "all types" by default, even if the user has never
+     *       enabled Sync, or if only Sync-the-transport is running.
      *
      * @return Set of chosen types.
      */
@@ -263,14 +291,9 @@ public class ProfileSyncService {
                 mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
     }
 
-    public void requestStart() {
-        ProfileSyncServiceJni.get().requestStart(
-                mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
-    }
-
-    public void requestStop() {
-        ProfileSyncServiceJni.get().requestStop(
-                mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
+    public void setSyncRequested(boolean requested) {
+        ProfileSyncServiceJni.get().setSyncRequested(
+                mNativeProfileSyncServiceAndroid, ProfileSyncService.this, requested);
     }
 
     /**
@@ -351,17 +374,14 @@ public class ProfileSyncService {
         }
     }
 
+    public boolean isSyncAllowedByPlatform() {
+        return ProfileSyncServiceJni.get().isSyncAllowedByPlatform(
+                mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
+    }
+
     public void setSyncAllowedByPlatform(boolean allowed) {
         ProfileSyncServiceJni.get().setSyncAllowedByPlatform(
                 mNativeProfileSyncServiceAndroid, ProfileSyncService.this, allowed);
-    }
-
-    /**
-     * Flushes the sync directory to disk.
-     */
-    public void flushDirectory() {
-        ProfileSyncServiceJni.get().flushDirectory(
-                mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
     }
 
     /**
@@ -493,16 +513,6 @@ public class ProfileSyncService {
                 mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
     }
 
-    /**
-     * Turns on encryption of all data types. This only takes effect after sync configuration is
-     * completed and setChosenDataTypes() is invoked.
-     */
-    public void enableEncryptEverything() {
-        assert isEngineInitialized();
-        ProfileSyncServiceJni.get().enableEncryptEverything(
-                mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
-    }
-
     public void setEncryptionPassphrase(String passphrase) {
         assert isEngineInitialized();
         ProfileSyncServiceJni.get().setEncryptionPassphrase(
@@ -551,13 +561,25 @@ public class ProfileSyncService {
     }
 
     /**
-     * Gets the number of devices known to sync.
-     *
-     * @return number of syncing devices
+     * Records TrustedVaultKeyRetrievalTrigger histogram.
      */
-    public int getNumberOfSyncedDevices() {
-        return ProfileSyncServiceJni.get().getNumberOfSyncedDevices(
-                mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
+    public void recordKeyRetrievalTrigger(@KeyRetrievalTriggerForUMA int keyRetrievalTrigger) {
+        ProfileSyncServiceJni.get().recordKeyRetrievalTrigger(
+                mNativeProfileSyncServiceAndroid, ProfileSyncService.this, keyRetrievalTrigger);
+    }
+
+    /**
+     * @return Whether sync is enabled to sync urls or open tabs with a non custom passphrase.
+     */
+    public boolean isSyncingUrlsWithKeystorePassphrase() {
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.MOBILE_IDENTITY_CONSISTENCY)) {
+            return isEngineInitialized() && getActiveDataTypes().contains(ModelType.TYPED_URLS)
+                    && (getPassphraseType() == PassphraseType.KEYSTORE_PASSPHRASE
+                            || getPassphraseType() == PassphraseType.TRUSTED_VAULT_PASSPHRASE);
+        }
+        return isEngineInitialized() && getPreferredDataTypes().contains(ModelType.TYPED_URLS)
+                && (getPassphraseType() == PassphraseType.KEYSTORE_PASSPHRASE
+                        || getPassphraseType() == PassphraseType.TRUSTED_VAULT_PASSPHRASE);
     }
 
     @VisibleForTesting
@@ -641,15 +663,22 @@ public class ProfileSyncService {
     interface Natives {
         long init(ProfileSyncService caller);
 
-        void requestStart(long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
-        void requestStop(long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
+        void setSyncRequested(
+                long nativeProfileSyncServiceAndroid, ProfileSyncService caller, boolean requested);
+        boolean isSyncAllowedByPlatform(
+                long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         void setSyncAllowedByPlatform(
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller, boolean allowed);
-        void flushDirectory(long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         void setSyncSessionsId(
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller, String tag);
         int getAuthError(long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         boolean requiresClientUpgrade(
+                long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
+        void setDecoupledFromAndroidMasterSync(
+                long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
+        boolean getDecoupledFromAndroidMasterSync(
+                long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
+        boolean isAuthenticatedAccountPrimary(
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         boolean isEngineInitialized(
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
@@ -658,8 +687,6 @@ public class ProfileSyncService {
         boolean isEncryptEverythingEnabled(
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         boolean isTransportStateActive(
-                long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
-        void enableEncryptEverything(
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         boolean isPassphraseRequiredForPreferredDataTypes(
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
@@ -686,8 +713,6 @@ public class ProfileSyncService {
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         String getSyncEnterCustomPassphraseBodyText(
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
-        int getNumberOfSyncedDevices(
-                long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         int[] getActiveDataTypes(long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         int[] getChosenDataTypes(long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         int[] getPreferredDataTypes(
@@ -704,7 +729,8 @@ public class ProfileSyncService {
         boolean isSyncRequested(long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         boolean canSyncFeatureStart(
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
-        boolean isSyncActive(long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
+        boolean isSyncFeatureActive(
+                long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         boolean isSyncDisabledByEnterprisePolicy(
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         boolean hasKeepEverythingSynced(
@@ -721,5 +747,7 @@ public class ProfileSyncService {
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         void getAllNodes(long nativeProfileSyncServiceAndroid, ProfileSyncService caller,
                 GetAllNodesCallback callback);
+        void recordKeyRetrievalTrigger(long nativeProfileSyncServiceAndroid,
+                ProfileSyncService caller, int keyRetrievalTrigger);
     }
 }

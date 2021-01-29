@@ -14,11 +14,16 @@
 
 namespace chrome_test_util {
 
-// Sets up a fake sync server to be used by the ProfileSyncService.
+// Whether or not the fake sync server has already been setup by
+// |SetUpFakeSyncServer()|.
+bool IsFakeSyncServerSetUp();
+
+// Sets up a fake sync server to be used by the ProfileSyncService. Must only be
+// called if |IsFakeSyncServerSetUp()| returns false.
 void SetUpFakeSyncServer();
 
 // Tears down the fake sync server used by the ProfileSyncService and restores
-// the real one.
+// the real one. Must only be called if |IsFakeSyncServerSetUp()| is true.
 void TearDownFakeSyncServer();
 
 // Starts the sync server. The server should not be running when calling this.
@@ -67,7 +72,8 @@ void DeleteAutofillProfileFromFakeSyncServer(std::string guid);
 // Clears the autofill profile for the given |guid|.
 void ClearAutofillProfile(std::string guid);
 
-// Clears fake sync server data.
+// Clears fake sync server data if the server is running, otherwise does
+// nothing.
 void ClearSyncServerData();
 
 // Returns true if the sync backend server is intialized.
@@ -76,6 +82,10 @@ bool IsSyncInitialized();
 // Returns the current sync cache guid. The sync server must be running when
 // calling this.
 std::string GetSyncCacheGuid();
+
+// Returns true if the DeviceInfo specifics on the fake server contains sync
+// invalidation fields.
+bool VerifySyncInvalidationFieldsPopulated();
 
 // Returns true if there is an autofilll profile with the corresponding |guid|
 // and |full_name|.
@@ -105,6 +115,10 @@ void DeleteTypedUrlFromClient(const GURL& url);
 
 // Deletes typed URL on FakeServer by injecting a tombstone.
 void DeleteTypedUrlFromFakeSyncServer(std::string url);
+
+// Adds a bookmark with a sync passphrase. The sync server will need the sync
+// passphrase to start.
+void AddBookmarkWithSyncPassphrase(const std::string& sync_passphrase);
 
 }  // namespace chrome_test_util
 

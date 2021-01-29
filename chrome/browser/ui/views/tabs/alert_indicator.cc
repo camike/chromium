@@ -16,6 +16,7 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/animation/animation_delegate_views.h"
+#include "ui/views/metadata/metadata_impl_macros.h"
 
 namespace {
 
@@ -103,6 +104,9 @@ gfx::Image GetTabAlertIndicatorImage(TabAlertState alert_state,
     case TabAlertState::BLUETOOTH_CONNECTED:
       icon = &kTabBluetoothConnectedIcon;
       break;
+    case TabAlertState::BLUETOOTH_SCAN_ACTIVE:
+      icon = &kTabBluetoothScanActiveIcon;
+      break;
     case TabAlertState::USB_CONNECTED:
       icon = &kTabUsbConnectedIcon;
       break;
@@ -157,7 +161,9 @@ class AlertIndicator::FadeAnimationDelegate
  public:
   explicit FadeAnimationDelegate(AlertIndicator* indicator)
       : AnimationDelegateViews(indicator), indicator_(indicator) {}
-  ~FadeAnimationDelegate() override {}
+  FadeAnimationDelegate(const FadeAnimationDelegate&) = delete;
+  FadeAnimationDelegate& operator=(const FadeAnimationDelegate&) = delete;
+  ~FadeAnimationDelegate() override = default;
 
  private:
   // views::AnimationDelegateViews
@@ -176,8 +182,6 @@ class AlertIndicator::FadeAnimationDelegate
   }
 
   AlertIndicator* const indicator_;
-
-  DISALLOW_COPY_AND_ASSIGN(FadeAnimationDelegate);
 };
 
 AlertIndicator::AlertIndicator(Tab* parent_tab)
@@ -253,3 +257,6 @@ void AlertIndicator::ResetImage(TabAlertState state) {
   gfx::ImageSkia image = GetTabAlertIndicatorImage(state, color).AsImageSkia();
   SetImage(&image);
 }
+
+BEGIN_METADATA(AlertIndicator, views::ImageView)
+END_METADATA

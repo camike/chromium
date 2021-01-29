@@ -7,28 +7,31 @@ package org.chromium.components.browser_ui.widget;
 import android.content.Context;
 import android.graphics.Color;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
-import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.Feature;
 
 /**
  * Unit tests for RoundedIconGenerator.
  */
 @RunWith(BaseJUnit4ClassRunner.class)
+@Batch(Batch.PER_CLASS)
 public class RoundedIconGeneratorTest {
-    private Context mContext;
+    private static Context sContext;
 
-    @Before
-    public void setUp() {
-        mContext = InstrumentationRegistry.getTargetContext();
+    @BeforeClass
+    public static void setUp() {
+        sContext = InstrumentationRegistry.getTargetContext();
         LibraryLoader.getInstance().setLibraryProcessType(LibraryProcessType.PROCESS_BROWSER);
         LibraryLoader.getInstance().ensureInitialized();
     }
@@ -81,7 +84,7 @@ public class RoundedIconGeneratorTest {
         final int iconTextSizeDp = 12;
 
         int iconColor = Color.GRAY;
-        RoundedIconGenerator generator = new RoundedIconGenerator(mContext.getResources(),
+        RoundedIconGenerator generator = new RoundedIconGenerator(sContext.getResources(),
                 iconSizeDp, iconSizeDp, iconCornerRadiusDp, iconColor, iconTextSizeDp);
 
         Assert.assertTrue(generator.generateIconForText("") != null);

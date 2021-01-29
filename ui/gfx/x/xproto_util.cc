@@ -4,56 +4,39 @@
 
 #include "ui/gfx/x/xproto_util.h"
 
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
-#include "ui/gfx/x/xproto.h"
-
 namespace x11 {
 
-void LogErrorEventDescription(const XErrorEvent& error_event) {
-  // This function may make some expensive round trips (XListExtensions,
-  // XQueryExtension), but the only effect this function has is LOG(WARNING),
-  // so early-return if the log would never be sent anyway.
-  if (!LOG_IS_ON(WARNING))
-    return;
+void DeleteProperty(x11::Window window, x11::Atom name) {
+  x11::Connection::Get()->DeleteProperty({
+      .window = static_cast<x11::Window>(window),
+      .property = name,
+  });
+}
 
-  char error_str[256];
-  char request_str[256];
+void SetStringProperty(Window window,
+                       Atom property,
+                       Atom type,
+                       const std::string& value,
+                       Connection* connection) {
+  std::vector<char> str(value.begin(), value.end());
+  SetArrayProperty(window, property, type, str, connection);
+}
 
-  XDisplay* dpy = error_event.display;
-  XProto conn{dpy};
-  XGetErrorText(dpy, error_event.error_code, error_str, sizeof(error_str));
-
-  strncpy(request_str, "Unknown", sizeof(request_str));
-  if (error_event.request_code < 128) {
-    std::string num = base::NumberToString(error_event.request_code);
-    XGetErrorDatabaseText(dpy, "XRequest", num.c_str(), "Unknown", request_str,
-                          sizeof(request_str));
-  } else {
-    if (auto response = conn.ListExtensions({}).Sync()) {
-      for (const auto& str : response->names) {
-        int ext_code, first_event, first_error;
-        const char* name = str.name.c_str();
-        XQueryExtension(dpy, name, &ext_code, &first_event, &first_error);
-        if (error_event.request_code == ext_code) {
-          std::string msg =
-              base::StringPrintf("%s.%d", name, error_event.minor_code);
-          XGetErrorDatabaseText(dpy, "XRequest", msg.c_str(), "Unknown",
-                                request_str, sizeof(request_str));
-          break;
-        }
-      }
-    }
-  }
-
-  LOG(WARNING) << "X error received: "
-               << "serial " << error_event.serial << ", "
-               << "error_code " << static_cast<int>(error_event.error_code)
-               << " (" << error_str << "), "
-               << "request_code " << static_cast<int>(error_event.request_code)
-               << ", "
-               << "minor_code " << static_cast<int>(error_event.minor_code)
-               << " (" << request_str << ")";
+Window CreateDummyWindow(const std::string& name, Connection* connection) {
+  auto window = connection->GenerateId<Window>();
+  connection->CreateWindow(CreateWindowRequest{
+      .wid = window,
+      .parent = connection->default_root(),
+      .x = -100,
+      .y = -100,
+      .width = 10,
+      .height = 10,
+      .c_class = WindowClass::InputOnly,
+      .override_redirect = Bool32(true),
+  });
+  if (!name.empty())
+    SetStringProperty(window, Atom::WM_NAME, Atom::STRING, name);
+  return window;
 }
 
 }  // namespace x11

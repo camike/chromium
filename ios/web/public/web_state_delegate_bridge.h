@@ -79,14 +79,20 @@
 - (void)webState:(web::WebState*)webState
     commitPreviewingViewController:(UIViewController*)previewingViewController;
 
+// Called to know the size of the view containing the WebView.
+- (UIView*)webViewContainerForWebState:(web::WebState*)webState;
+
 // Called when iOS13+ context menu is triggered and now it is required to
 // provide a UIContextMenuConfiguration to |completion_handler| to generate the
-// context menu.
+// context menu. |previewProvider| is used to show a custom ViewController to
+// preview the page.
 - (void)webState:(web::WebState*)webState
-    contextMenuConfigurationForLinkWithURL:(const GURL&)linkURL
-                         completionHandler:
-                             (void (^)(UIContextMenuConfiguration*))
-                                 completionHandler API_AVAILABLE(ios(13.0));
+    contextMenuConfigurationForParams:(const web::ContextMenuParams&)params
+                      previewProvider:
+                          (UIContextMenuContentPreviewProvider)previewProvider
+                    completionHandler:
+                        (void (^)(UIContextMenuConfiguration*))completionHandler
+    API_AVAILABLE(ios(13.0));
 
 // Called when iOS13+ context menu is ready to be showed.
 - (void)webState:(web::WebState*)webState
@@ -104,6 +110,9 @@
 - (void)webState:(web::WebState*)webState
     contextMenuDidEndForLinkWithURL:(const GURL&)linkURL
     API_AVAILABLE(ios(13.0));
+
+// This API can be used to show custom input views in the web view.
+- (id<CRWResponderInputView>)webStateInputViewProvider:(web::WebState*)webState;
 
 @end
 
@@ -133,16 +142,18 @@ class WebStateDelegateBridge : public web::WebStateDelegate {
   void OnAuthRequired(WebState* source,
                       NSURLProtectionSpace* protection_space,
                       NSURLCredential* proposed_credential,
-                      const AuthCallback& callback) override;
+                      AuthCallback callback) override;
   bool ShouldPreviewLink(WebState* web_state, const GURL& link_url) override;
   UIViewController* GetPreviewingViewController(WebState* source,
                                                 const GURL& link_url) override;
   void CommitPreviewingViewController(
       WebState* source,
       UIViewController* previewing_view_controller) override;
+  UIView* GetWebViewContainer(WebState* source) override;
   void ContextMenuConfiguration(
       WebState* source,
-      const GURL& link_url,
+      const ContextMenuParams& params,
+      UIContextMenuContentPreviewProvider preview_provider,
       void (^completion_handler)(UIContextMenuConfiguration*))
       API_AVAILABLE(ios(13.0)) override;
   void ContextMenuDidEnd(WebState* source, const GURL& link_url)
@@ -154,6 +165,8 @@ class WebStateDelegateBridge : public web::WebStateDelegate {
       API_AVAILABLE(ios(13.0)) override;
   void ContextMenuWillPresent(WebState* source, const GURL& link_url)
       API_AVAILABLE(ios(13.0)) override;
+
+  id<CRWResponderInputView> GetResponderInputView(WebState* source) override;
 
  private:
   // CRWWebStateDelegate which receives forwarded calls.

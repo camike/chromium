@@ -4,15 +4,20 @@
 
 #import "ios/chrome/browser/url_loading/url_loading_browser_agent.h"
 
+#include "base/compiler_specific.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
+#include "ios/chrome/browser/crash_report/crash_reporter_url_observer.h"
 #import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/prerender/prerender_service.h"
 #import "ios/chrome/browser/prerender/prerender_service_factory.h"
 #import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
+#import "ios/chrome/browser/ui/incognito_reauth/incognito_reauth_scene_agent.h"
+#import "ios/chrome/browser/ui/main/scene_state_browser_agent.h"
 #import "ios/chrome/browser/ui/ntp/ntp_util.h"
+#include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/url_loading/scene_url_loading_service.h"
 #import "ios/chrome/browser/url_loading/url_loading_notifier_browser_agent.h"
 #import "ios/chrome/browser/url_loading/url_loading_params.h"
@@ -32,9 +37,17 @@ namespace {
 
 // Rapidly starts leaking memory by 10MB blocks.
 void StartLeakingMemory() {
-  int* leak = new int[10 * 1024 * 1024];
-  ALLOW_UNUSED_LOCAL(leak);
-  base::PostTask(FROM_HERE, base::BindOnce(&StartLeakingMemory));
+  static NSMutableArray* memory = nil;
+  if (!memory)
+    memory = [[NSMutableArray alloc] init];
+
+  // Store block of memory into NSArray to ensure that compiler does not throw
+  // away unused code.
+  NSUInteger leak_size = 10 * 1024 * 1024;
+  int* leak = new int[leak_size];
+  [memory addObject:[NSData dataWithBytes:leak length:leak_size]];
+
+  base::ThreadPool::PostTask(FROM_HERE, base::BindOnce(&StartLeakingMemory));
 }
 
 // Helper method for inducing intentional freezes, leaks and crashes, in a
@@ -42,7 +55,7 @@ void StartLeakingMemory() {
 // present, the main thread will be frozen for that number of seconds. If a
 // crash parameter is "true" (which is the default value), the browser will
 // crash after this delay. Any other value will not trigger a crash.
-void InduceBrowserCrash(const GURL& url) {
+NOINLINE void InduceBrowserCrash(const GURL& url) {
   std::string delay_string;
   if (net::GetValueForKeyInQuery(url, "delay", &delay_string)) {
     int delay = 0;
@@ -64,7 +77,7 @@ void InduceBrowserCrash(const GURL& url) {
       (crash_string == "" || crash_string == "true")) {
     // Induce an intentional crash in the browser process.
     CHECK(false);
-    // Call another function, so that the above CHECK can't be tail-call
+    // Call another function, so that the above CHECK can't be tail call
     // optimized. This ensures that this method's name will show up in the stack
     // for easier identification.
     CHECK(true);
@@ -149,10 +162,15 @@ void UrlLoadingBrowserAgent::LoadUrlInCurrentTab(const UrlLoadParams& params) {
 
   notifier_->TabWillLoadUrl(web_params.url, web_params.transition_type);
 
+  WebStateList* web_state_list = browser_->GetWebStateList();
+  web::WebState* current_web_state = web_state_list->GetActiveWebState();
+
   // NOTE: This check for the Crash Host URL is here to avoid the URL from
   // ending up in the history causing the app to crash at every subsequent
   // restart.
   if (web_params.url.host() == kChromeUIBrowserCrashHost) {
+    CrashReporterURLObserver::GetSharedInstance()->RecordURL(
+        web_params.url, current_web_state, /*pending=*/true);
     InduceBrowserCrash(web_params.url);
     // Under a debugger, the app can continue working even after the CHECK.
     // Adding a return avoids adding the crash url to history.
@@ -167,8 +185,6 @@ void UrlLoadingBrowserAgent::LoadUrlInCurrentTab(const UrlLoadParams& params) {
   // load a disallowed URL, instead create a new tab not in the incognito state.
   // Also if there's no current web state, that means there is no current tab
   // to open in, so this also redirects to a new tab.
-  WebStateList* web_state_list = browser_->GetWebStateList();
-  web::WebState* current_web_state = web_state_list->GetActiveWebState();
   if (!current_web_state || (browser_state->IsOffTheRecord() &&
                              !IsURLAllowedInIncognito(web_params.url))) {
     if (prerenderService) {
@@ -272,6 +288,15 @@ void UrlLoadingBrowserAgent::LoadUrlInNewTab(const UrlLoadParams& params) {
   DCHECK(scene_service_);
   DCHECK(delegate_);
   DCHECK(browser_);
+
+  if (base::FeatureList::IsEnabled(kIncognitoAuthentication) &&
+      params.in_incognito) {
+    IncognitoReauthSceneAgent* reauthAgent = [IncognitoReauthSceneAgent
+        agentFromScene:SceneStateBrowserAgent::FromBrowser(browser_)
+                           ->GetSceneState()];
+    DCHECK(!reauthAgent.authenticationRequired);
+  }
+
   ChromeBrowserState* browser_state = browser_->GetBrowserState();
   ChromeBrowserState* active_browser_state =
       scene_service_->GetCurrentBrowser()->GetBrowserState();
@@ -304,12 +329,16 @@ void UrlLoadingBrowserAgent::LoadUrlInNewTab(const UrlLoadParams& params) {
   if (params.append_to == kCurrentTab)
     adjacent_web_state = browser_->GetWebStateList()->GetActiveWebState();
 
+  int insertion_index = TabInsertion::kPositionAutomatically;
+  if (params.append_to == kSpecifiedIndex)
+    insertion_index = params.insertion_index;
+
   UrlLoadParams saved_params = params;
   auto openTab = ^{
     TabInsertionBrowserAgent* insertionAgent =
         TabInsertionBrowserAgent::FromBrowser(browser_);
     insertionAgent->InsertWebState(saved_params.web_params, adjacent_web_state,
-                                   false, TabInsertion::kPositionAutomatically,
+                                   false, insertion_index,
                                    saved_params.in_background());
     notifier_->NewTabDidLoadUrl(saved_params.web_params.url,
                                 saved_params.user_initiated);

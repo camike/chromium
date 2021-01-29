@@ -10,13 +10,6 @@ GEN_INCLUDE(['../testing/chromevox_next_e2e_test_base.js']);
  */
 ChromeVoxPortalsTest = class extends ChromeVoxNextE2ETest {
   /** @override */
-  setUp() {
-    window.EventType = chrome.automation.EventType;
-    window.RoleType = chrome.automation.RoleType;
-    window.doCmd = this.doCmd;
-  }
-
-  /** @override */
   testGenCppIncludes() {
     super.testGenCppIncludes();
     GEN(`#include "third_party/blink/public/common/features.h"`);
@@ -29,17 +22,6 @@ ChromeVoxPortalsTest = class extends ChromeVoxNextE2ETest {
 
   get testServer() {
     return true;
-  }
-
-  /**
-   * Create a function which perform the command |cmd|.
-   * @param {string} cmd
-   * @return {function() : void}
-   */
-  doCmd(cmd) {
-    return function() {
-      CommandHandler.onCommand(cmd);
-    };
   }
 
   /**
@@ -84,8 +66,7 @@ ChromeVoxPortalsTest = class extends ChromeVoxNextE2ETest {
 
 TEST_F('ChromeVoxPortalsTest', 'ShouldFocusPortal', function() {
   this.runWithLoadedTree(
-      undefined,
-      function(root) {
+      undefined, function(root) {
         const portal = root.find({role: RoleType.PORTAL});
         const button = root.find({role: RoleType.BUTTON});
         assertEquals(RoleType.PORTAL, portal.role);
@@ -105,20 +86,22 @@ TEST_F('ChromeVoxPortalsTest', 'ShouldFocusPortal', function() {
         button.addEventListener(
             EventType.FOCUS,
             () => this.waitForPortal(portal).then(afterPortalIsReady));
-      }.bind(this),
-      `${testRunnerParams.testServerBaseUrl}portal/portal-and-button.html`);
+      }.bind(this), {
+        url:
+            `${testRunnerParams.testServerBaseUrl}portal/portal-and-button.html`
+      });
 });
 
 TEST_F('ChromeVoxPortalsTest', 'PortalName', function() {
   this.runWithLoadedTree(
-      undefined,
-      function(root) {
+      undefined, function(root) {
         const portal = root.find({role: RoleType.PORTAL});
         assertEquals(RoleType.PORTAL, portal.role);
         this.waitForPortal(portal).then(this.newCallback(() => {
           assertTrue(portal.firstChild.docLoaded);
           assertEquals(portal.name, 'some text');
         }));
-      }.bind(this),
-      `${testRunnerParams.testServerBaseUrl}portal/portal-with-text.html`);
+      }.bind(this), {
+        url: `${testRunnerParams.testServerBaseUrl}portal/portal-with-text.html`
+      });
 });

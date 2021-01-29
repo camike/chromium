@@ -22,35 +22,31 @@ constexpr SkColor kTrackIconColor = SK_ColorWHITE;
 
 namespace views {
 
-TrackImageButton::TrackImageButton(ButtonListener* listener,
+TrackImageButton::TrackImageButton(PressedCallback callback,
                                    const gfx::VectorIcon& icon,
                                    base::string16 label)
-    : ImageButton(listener),
+    : ImageButton(std::move(callback)),
       image_(gfx::CreateVectorIcon(icon, kTrackImageSize, kTrackIconColor)) {
   SetImageHorizontalAlignment(views::ImageButton::ALIGN_CENTER);
   SetImageVerticalAlignment(views::ImageButton::ALIGN_MIDDLE);
   SetImage(views::Button::STATE_NORMAL, image_);
 
   // Accessibility.
-  SetFocusForPlatform();
   SetAccessibleName(label);
   SetTooltipText(label);
   SetInstallFocusRingOnFocus(true);
 }
 
-gfx::Size TrackImageButton::GetLastVisibleSize() const {
-  return size().IsEmpty() ? last_visible_size_ : size();
+void TrackImageButton::SetVisible(bool visible) {
+  // We need to do more than the usual visibility change because otherwise the
+  // overlay window cannot be dragged when grabbing within the button area.
+  ImageButton::SetVisible(visible);
+  SetSize(visible ? last_visible_size_ : gfx::Size());
 }
 
 void TrackImageButton::OnBoundsChanged(const gfx::Rect&) {
   if (!size().IsEmpty())
     last_visible_size_ = size();
-}
-
-void TrackImageButton::ToggleVisibility(bool is_visible) {
-  SetVisible(is_visible);
-  SetEnabled(is_visible);
-  SetSize(is_visible ? GetLastVisibleSize() : gfx::Size());
 }
 
 }  // namespace views

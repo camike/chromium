@@ -7,19 +7,31 @@
 
 #include <set>
 #include <string>
-#include <vector>
 
+#include "base/supports_user_data.h"
+#include "components/enterprise/common/proto/connectors.pb.h"
 #include "url/gurl.h"
 
 namespace enterprise_connectors {
 
-// Enums representing each connector to be used as arguments so the appropriate
-// policies/settings can be read.
-enum class AnalysisConnector {
-  FILE_DOWNLOADED,
-  FILE_ATTACHED,
-  BULK_DATA_ENTRY,
-};
+// Alias to reduce verbosity when using TriggeredRule::Actions.
+using TriggeredRule = ContentAnalysisResponse::Result::TriggeredRule;
+
+// Keys used to read a connector's policy values.
+constexpr char kKeyServiceProvider[] = "service_provider";
+constexpr char kKeyEnable[] = "enable";
+constexpr char kKeyDisable[] = "disable";
+constexpr char kKeyUrlList[] = "url_list";
+constexpr char kKeyTags[] = "tags";
+constexpr char kKeyBlockUntilVerdict[] = "block_until_verdict";
+constexpr char kKeyBlockPasswordProtected[] = "block_password_protected";
+constexpr char kKeyBlockLargeFiles[] = "block_large_files";
+constexpr char kKeyBlockUnsupportedFileTypes[] = "block_unsupported_file_types";
+constexpr char kKeyMinimumDataSize[] = "minimum_data_size";
+constexpr char kKeyEnabledEventNames[] = "enabled_event_names";
+constexpr char kKeyCustomMessages[] = "custom_messages";
+constexpr char kKeyCustomMessagesMessage[] = "message";
+constexpr char kKeyCustomMessagesLearnMoreUrl[] = "learn_more_url";
 
 enum class ReportingConnector {
   SECURITY_EVENT,
@@ -47,16 +59,59 @@ struct AnalysisSettings {
   bool block_password_protected_files = false;
   bool block_large_files = false;
   bool block_unsupported_file_types = false;
+  base::string16 custom_message_text;
+  GURL custom_message_learn_more_url;
+
+  // Minimum text size for BulkDataEntry scans. 0 means no minimum.
+  size_t minimum_data_size = 100;
+
+  // The DM token to be used for scanning. May be empty, for example if this
+  // scan is initiated by APP.
+  std::string dm_token = "";
 };
 
 struct ReportingSettings {
   ReportingSettings();
+  explicit ReportingSettings(GURL url,
+                             const std::string& dm_token,
+                             bool per_profile);
   ReportingSettings(ReportingSettings&&);
   ReportingSettings& operator=(ReportingSettings&&);
   ~ReportingSettings();
 
-  std::vector<GURL> reporting_urls;
+  GURL reporting_url;
+  std::set<std::string> enabled_event_names;
+  std::string dm_token;
+
+  // Indicates if the report should be made for the profile, or the browser if
+  // false.
+  bool per_profile = false;
 };
+
+// Returns the pref path corresponding to a connector.
+const char* ConnectorPref(AnalysisConnector connector);
+const char* ConnectorPref(ReportingConnector connector);
+const char* ConnectorScopePref(AnalysisConnector connector);
+const char* ConnectorScopePref(ReportingConnector connector);
+
+// Returns the highest precedence action in the given parameters.
+TriggeredRule::Action GetHighestPrecedenceAction(
+    const ContentAnalysisResponse& response);
+TriggeredRule::Action GetHighestPrecedenceAction(
+    const TriggeredRule::Action& action_1,
+    const TriggeredRule::Action& action_2);
+
+// User data class to persist ContentAnalysisResponses in base::SupportsUserData
+// objects.
+struct ScanResult : public base::SupportsUserData::Data {
+  explicit ScanResult(const ContentAnalysisResponse& response);
+  ~ScanResult() override;
+  static const char kKey[];
+  ContentAnalysisResponse response;
+};
+
+// Checks if |response| contains a negative malware verdict.
+bool ContainsMalwareVerdict(const ContentAnalysisResponse& response);
 
 }  // namespace enterprise_connectors
 

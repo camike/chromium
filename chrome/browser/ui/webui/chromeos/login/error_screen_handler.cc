@@ -40,6 +40,7 @@ void ErrorScreenHandler::Show() {
 
 void ErrorScreenHandler::Hide() {
   showing_ = false;
+  show_on_init_ = false;
   if (screen_)
     screen_->DoHide();
 }
@@ -86,6 +87,14 @@ void ErrorScreenHandler::SetIsPersistentError(bool is_persistent) {
 
 void ErrorScreenHandler::SetUIState(NetworkError::UIState ui_state) {
   CallJS("login.ErrorMessageScreen.setUIState", static_cast<int>(ui_state));
+}
+
+void ErrorScreenHandler::OnCancelButtonClicked() {
+  CallJS("cr.ui.Oobe.showUserPods");
+}
+
+void ErrorScreenHandler::OnReloadGaiaClicked() {
+  CallJS("login.GaiaSigninScreen.doReload");
 }
 
 void ErrorScreenHandler::RegisterMessages() {

@@ -5,6 +5,7 @@
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_remove_keys_operation.h"
 
 #include "base/bind.h"
+#include "base/logging.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_key_manager.h"
 #include "chromeos/cryptohome/cryptohome_util.h"
 #include "chromeos/cryptohome/homedir_methods.h"
@@ -16,9 +17,9 @@ namespace chromeos {
 EasyUnlockRemoveKeysOperation::EasyUnlockRemoveKeysOperation(
     const UserContext& user_context,
     size_t start_index,
-    const RemoveKeysCallback& callback)
+    RemoveKeysCallback callback)
     : user_context_(user_context),
-      callback_(callback),
+      callback_(std::move(callback)),
       key_index_(start_index) {
   // Must have the secret and callback.
   DCHECK(!user_context_.GetKey()->GetSecret().empty());
@@ -73,11 +74,11 @@ void EasyUnlockRemoveKeysOperation::OnKeyRemoved(
   // MOUNT_ERROR_KEY_FAILURE is considered as success. Other error codes are
   // treated as failures.
   if (return_code == cryptohome::MOUNT_ERROR_KEY_FAILURE) {
-    callback_.Run(true);
+    std::move(callback_).Run(true);
   } else {
     LOG(ERROR) << "Easy unlock remove keys operation failed, code="
                << return_code;
-    callback_.Run(false);
+    std::move(callback_).Run(false);
   }
 }
 

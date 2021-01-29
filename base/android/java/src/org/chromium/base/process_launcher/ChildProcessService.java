@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Binder;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -15,6 +16,7 @@ import android.os.Looper;
 import android.os.Parcelable;
 import android.os.Process;
 import android.os.RemoteException;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.SparseArray;
 
@@ -27,7 +29,9 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.MainDex;
 import org.chromium.base.annotations.NativeMethods;
+import org.chromium.base.compat.ApiHelperForN;
 import org.chromium.base.memory.MemoryPressureMonitor;
+import org.chromium.base.metrics.RecordHistogram;
 
 import java.util.List;
 
@@ -63,6 +67,9 @@ public class ChildProcessService {
 
     // Only for a check that create is only called once.
     private static boolean sCreateCalled;
+
+    private static int sZygotePid;
+    private static long sZygoteStartupTimeMillis;
 
     private final ChildProcessServiceDelegate mDelegate;
     private final Service mService;
@@ -145,6 +152,9 @@ public class ChildProcessService {
             }
 
             parentProcess.sendPid(Process.myPid());
+            if (sZygotePid != 0) {
+                parentProcess.sendZygoteInfo(sZygotePid, sZygoteStartupTimeMillis);
+            }
             mParentProcess = parentProcess;
             processConnectionBundle(args, callbacks);
         }
@@ -211,7 +221,13 @@ public class ChildProcessService {
 
         mDelegate.onServiceCreated();
 
-        mMainThread = new Thread(new Runnable() {
+        // Unlike desktop Linux, on Android we leave the main looper thread to handle Android
+        // lifecycle events, and create a separate thread to serve as the main renderer. This
+        // affects the thread stack size: instead of getting the kernel default we get the Java
+        // default, which can be much smaller. So, explicitly set up a larger stack here.
+        long stackSize = ContextUtils.isProcess64Bit() ? 8 * 1024 * 1024 : 4 * 1024 * 1024;
+
+        mMainThread = new Thread(/*threadGroup=*/null, new Runnable() {
             @Override
             public void run() {
                 try {
@@ -265,18 +281,37 @@ public class ChildProcessService {
                             keys, fileIds, fds, regionOffsets, regionSizes);
 
                     mDelegate.onBeforeMain();
-                    mDelegate.runMain();
+                } catch (Throwable e) {
                     try {
-                        mParentProcess.reportCleanExit();
-                    } catch (RemoteException e) {
-                        Log.e(TAG, "Failed to call clean exit callback.", e);
+                        mParentProcess.reportExceptionInInit(ChildProcessService.class.getName()
+                                + "\n" + android.util.Log.getStackTraceString(e));
+                    } catch (RemoteException re) {
+                        Log.e(TAG, "Failed to call reportExceptionInInit.", re);
                     }
-                    ChildProcessServiceJni.get().exitChildProcess();
-                } catch (InterruptedException e) {
-                    Log.w(TAG, "%s startup failed: %s", MAIN_THREAD_NAME, e);
+                    throw new RuntimeException(e);
                 }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    // Record process startup time histograms.
+                    long startTime =
+                            SystemClock.uptimeMillis() - ApiHelperForN.getStartUptimeMillis();
+                    String baseHistogramName = "Android.ChildProcessStartTimeV2";
+                    String suffix = ContextUtils.isIsolatedProcess() ? ".Isolated" : ".NotIsolated";
+                    RecordHistogram.recordMediumTimesHistogram(
+                            baseHistogramName + ".All", startTime);
+                    RecordHistogram.recordMediumTimesHistogram(
+                            baseHistogramName + suffix, startTime);
+                }
+
+                mDelegate.runMain();
+                try {
+                    mParentProcess.reportCleanExit();
+                } catch (RemoteException e) {
+                    Log.e(TAG, "Failed to call clean exit callback.", e);
+                }
+                ChildProcessServiceJni.get().exitChildProcess();
             }
-        }, MAIN_THREAD_NAME);
+        }, MAIN_THREAD_NAME, stackSize);
         mMainThread.start();
     }
 
@@ -311,6 +346,12 @@ public class ChildProcessService {
         new Handler(Looper.getMainLooper())
                 .post(() -> mDelegate.preloadNativeLibrary(getApplicationContext()));
         return mBinder;
+    }
+
+    /** This will be called from the zygote on startup. */
+    public static void setZygoteInfo(int zygotePid, long zygoteStartupTimeMillis) {
+        sZygotePid = zygotePid;
+        sZygoteStartupTimeMillis = zygoteStartupTimeMillis;
     }
 
     private void processConnectionBundle(Bundle bundle, List<IBinder> clientInterfaces) {

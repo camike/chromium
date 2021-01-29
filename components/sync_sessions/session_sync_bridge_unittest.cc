@@ -8,29 +8,29 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/json/json_writer.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/mock_callback.h"
 #include "base/test/task_environment.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/sync/base/client_tag_hash.h"
 #include "components/sync/base/sync_prefs.h"
-#include "components/sync/engine/non_blocking_sync_common.h"
+#include "components/sync/engine/commit_and_get_updates_types.h"
 #include "components/sync/model/data_batch.h"
 #include "components/sync/model/data_type_activation_request.h"
 #include "components/sync/model/metadata_batch.h"
 #include "components/sync/model/metadata_change_list.h"
-#include "components/sync/model/mock_model_type_change_processor.h"
-#include "components/sync/model/model_type_store_test_util.h"
 #include "components/sync/model/model_type_sync_bridge.h"
 #include "components/sync/model/sync_metadata_store.h"
 #include "components/sync/model_impl/client_tag_based_model_type_processor.h"
 #include "components/sync/protocol/proto_value_conversions.h"
 #include "components/sync/protocol/sync.pb.h"
+#include "components/sync/test/model/mock_model_type_change_processor.h"
+#include "components/sync/test/model/model_type_store_test_util.h"
 #include "components/sync/test/test_matchers.h"
 #include "components/sync_sessions/mock_sync_sessions_client.h"
 #include "components/sync_sessions/session_sync_prefs.h"
@@ -177,11 +177,11 @@ class SessionSyncBridgeTest : public ::testing::Test {
     ON_CALL(mock_sync_sessions_client_, GetLocalSessionEventRouter())
         .WillByDefault(Return(window_getter_.router()));
 
-    session_sync_prefs_.SetSyncSessionsGUID(kLocalSessionTag);
+    session_sync_prefs_.SetLegacySyncSessionsGUID(kLocalSessionTag);
 
     // Even if we use NiceMock, let's be strict about errors and let tests
     // explicitly list them.
-    EXPECT_CALL(mock_processor_, ReportError(_)).Times(0);
+    EXPECT_CALL(mock_processor_, ReportError).Times(0);
   }
 
   ~SessionSyncBridgeTest() override {}
@@ -338,7 +338,7 @@ class SessionSyncBridgeTest : public ::testing::Test {
 };
 
 TEST_F(SessionSyncBridgeTest, ShouldCallModelReadyToSyncWhenSyncEnabled) {
-  EXPECT_CALL(mock_processor(), ModelReadyToSync(_)).Times(0);
+  EXPECT_CALL(mock_processor(), ModelReadyToSync).Times(0);
   InitializeBridge();
   EXPECT_CALL(mock_processor(), ModelReadyToSync(IsEmptyMetadataBatch()));
   StartSyncing();
@@ -352,7 +352,7 @@ TEST_F(SessionSyncBridgeTest, ShouldDeferLocalEventDueToSessionRestore) {
   const int kTabId2 = 1000003;
 
   // No notifications expected until OnSessionRestoreComplete().
-  EXPECT_CALL(mock_processor(), Put(_, _, _)).Times(0);
+  EXPECT_CALL(mock_processor(), Put).Times(0);
 
   AddWindow(kWindowId)->SetIsSessionRestoreInProgress(true);
   // Initial tab should be ignored (not exposed to processor) while session
@@ -374,7 +374,7 @@ TEST_F(SessionSyncBridgeTest, ShouldDeferLocalEventDueToSessionRestore) {
 
   // OnSessionRestoreComplete() should issue three Put() calls, one updating the
   // header and one for each of the two added tabs.
-  EXPECT_CALL(mock_processor(), Put(_, _, _)).Times(3);
+  EXPECT_CALL(mock_processor(), Put).Times(3);
   SessionRestoreComplete();
   EXPECT_THAT(GetAllData(), SizeIs(3));
 }
@@ -928,7 +928,7 @@ TEST_F(SessionSyncBridgeTest, ShouldRecycleTabNodeAfterCommitCompleted) {
   // tab, leading to a freed tab entity. However, while there are pending
   // changes to commit, the entity shouldn't be deleted (to prevent history
   // loss).
-  EXPECT_CALL(mock_processor(), Delete(_, _)).Times(0);
+  EXPECT_CALL(mock_processor(), Delete).Times(0);
   CloseTab(kTabId2);
   tab1->Navigate("http://foo2.com/");
   EXPECT_TRUE(real_processor()->HasLocalChangesForTest());
@@ -1070,7 +1070,7 @@ TEST_F(SessionSyncBridgeTest, ShouldDisableSyncAndReenable) {
                   MatchesHeader(kLocalSessionTag, {kWindowId}, {kTabId})));
   ASSERT_THAT(GetAllData(), Not(IsEmpty()));
 
-  EXPECT_CALL(mock_processor(), ModelReadyToSync(_)).Times(0);
+  EXPECT_CALL(mock_processor(), ModelReadyToSync).Times(0);
   real_processor()->OnSyncStopping(syncer::CLEAR_METADATA);
 
   StartSyncing();
@@ -1087,8 +1087,8 @@ TEST_F(SessionSyncBridgeTest, ShouldMergeForeignSession) {
   const int kForeignTabId = 2000002;
   const int kForeignTabNodeId = 2003;
 
-  EXPECT_CALL(mock_processor(), UpdateStorageKey(_, _, _)).Times(0);
-  EXPECT_CALL(mock_processor(), Put(_, _, _)).Times(0);
+  EXPECT_CALL(mock_processor(), UpdateStorageKey).Times(0);
+  EXPECT_CALL(mock_processor(), Put).Times(0);
   InitializeBridge();
 
   const sync_pb::SessionSpecifics foreign_header =
@@ -1118,8 +1118,8 @@ TEST_F(SessionSyncBridgeTest, ShouldNotExposeForeignHeaderWithoutTabs) {
   const int kForeignWindowId = 2000001;
   const int kForeignTabId = 2000002;
 
-  EXPECT_CALL(mock_processor(), UpdateStorageKey(_, _, _)).Times(0);
-  EXPECT_CALL(mock_processor(), Put(_, _, _)).Times(0);
+  EXPECT_CALL(mock_processor(), UpdateStorageKey).Times(0);
+  EXPECT_CALL(mock_processor(), Put).Times(0);
   InitializeBridge();
 
   const sync_pb::SessionSpecifics foreign_header =
@@ -1363,7 +1363,7 @@ TEST_F(SessionSyncBridgeTest, ShouldIgnoreRemoteDeletionOfLocalTab) {
   ASSERT_FALSE(real_processor()->HasLocalChangesForTest());
 
   // Mimic receiving a remote deletion of both entities.
-  EXPECT_CALL(mock_processor(), Put(_, _, _)).Times(0);
+  EXPECT_CALL(mock_processor(), Put).Times(0);
   syncer::UpdateResponseDataList updates;
   updates.push_back(CreateTombstone(kLocalSessionTag));
   updates.push_back(CreateTombstone(tab_client_tag1));
@@ -1505,7 +1505,7 @@ TEST_F(SessionSyncBridgeTest, ShouldIgnoreLocalSessionDeletionFromUI) {
   StartSyncing();
 
   EXPECT_CALL(mock_foreign_session_updated_cb(), Run()).Times(0);
-  EXPECT_CALL(mock_processor(), Delete(_, _)).Times(0);
+  EXPECT_CALL(mock_processor(), Delete).Times(0);
 
   bridge()->GetOpenTabsUIDelegate()->DeleteForeignSession(kLocalSessionTag);
 

@@ -110,7 +110,7 @@ class Executive(object):
 
         if kill_tree is True, the whole process group will be killed.
 
-        Will fail silently if pid does not exist or insufficient permissions.
+        Will fail silently if pid does not exist.
         """
         if sys.platform == 'win32':
             # Workaround for race condition that occurs when the browser is
@@ -126,7 +126,10 @@ class Executive(object):
                 NtSuspendProcess(process_handle)
                 CloseHandle(process_handle)
 
-            command = ['taskkill.exe', '/f', '/t', '/pid', pid]
+            command = ['taskkill.exe', '/f']
+            if kill_tree:
+                command.append('/t')
+            command += ['/pid', pid]
             # taskkill will exit 128 if the process is not found. We should log.
             self.run_command(command, error_handler=self.log_error)
             return
@@ -136,7 +139,9 @@ class Executive(object):
                 os.killpg(os.getpgid(pid), signal.SIGKILL)
             else:
                 os.kill(pid, signal.SIGKILL)
-            os.waitpid(pid, os.WNOHANG)
+            # At this point if no exception has been raised, the kill has
+            # succeeded, so we can safely use a blocking wait.
+            os.waitpid(pid, 0)
         except OSError as error:
             if error.errno == errno.ESRCH:
                 _log.debug("PID %s does not exist.", pid)
@@ -144,6 +149,13 @@ class Executive(object):
             if error.errno == errno.ECHILD:
                 # Can't wait on a non-child process, but the kill worked.
                 return
+            if error.errno == errno.EPERM and \
+                    kill_tree and sys.platform == 'darwin':
+                # Calling killpg on a process group whose leader is defunct
+                # causes a permission error on macOS, in which case we try to
+                # collect the defunct process.
+                if os.waitpid(pid, os.WNOHANG) == (0, 0):
+                    return
             raise
 
     def _win32_check_running_pid(self, pid):
@@ -317,7 +329,34 @@ class Executive(object):
             ignore_stderr=False,
             decode_output=True,
             debug_logging=True):
-        """Popen wrapper for convenience and to work around python bugs."""
+        """Popen wrapper for convenience and to work around python bugs.
+
+        By default, run_command will expect a zero exit code and will return the
+        program output in that case, or throw a ScriptError if the program has a
+        non-zero exit code. This behavior can be changed by setting the
+        appropriate input parameters.
+
+        Args:
+            args: the program arguments. Passed to Popen.
+            cwd: the current working directory for the program. Passed to Popen.
+            env: the environment for the program. Passed to Popen.
+            input: input to give to the program on stdin. Accepts either a file
+                handler (will be passed directly) or a string (will be passed
+                via a pipe).
+            timeout_seconds: maximum time in seconds to wait for the program to
+                terminate; on a timeout the process will be killed
+            error_handler: a custom error handler called with a ScriptError when
+                the program fails. The default handler raises the error.
+            return_exit_code: instead of returning the program output, return
+                the exit code. Setting this makes non-zero exit codes non-fatal
+                (the error_handler will not be called).
+            return_stderr: if True, include stderr in the returned output. If
+                False, stderr will be printed to the console unless ignore_stderr
+                is also True.
+            ignore_stderr: squash stderr so it doesn't appear in the console.
+            decode_output: whether to decode the program output.
+            debug_logging: whether to log details about program execution.
+        """
         assert isinstance(args, list) or isinstance(args, tuple)
         start_time = time.time()
 
@@ -335,8 +374,13 @@ class Executive(object):
             env=env,
             close_fds=self._should_close_fds())
 
+        def on_command_timeout():
+            _log.error('Error: Command timed out after %s seconds',
+                       timeout_seconds)
+            process.kill()
+
         if timeout_seconds:
-            timer = threading.Timer(timeout_seconds, process.kill)
+            timer = threading.Timer(timeout_seconds, on_command_timeout)
             timer.start()
 
         output = process.communicate(string_to_communicate)[0]

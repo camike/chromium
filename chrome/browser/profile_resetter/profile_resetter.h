@@ -71,7 +71,7 @@ class ProfileResetter : public content::BrowsingDataRemover::Observer {
   // settings. |default_settings| shouldn't be NULL.
   virtual void Reset(ResettableFlags resettable_flags,
                      std::unique_ptr<BrandcodedDefaultSettings> master_settings,
-                     const base::Closure& callback);
+                     base::OnceClosure callback);
 
   virtual bool IsActive() const;
 
@@ -94,7 +94,7 @@ class ProfileResetter : public content::BrowsingDataRemover::Observer {
   void ResetLanguages();
 
   // BrowsingDataRemover::Observer:
-  void OnBrowsingDataRemoverDone() override;
+  void OnBrowsingDataRemoverDone(uint64_t failed_data_types) override;
 
   // Callback for when TemplateURLService has loaded.
   void OnTemplateURLServiceLoaded();
@@ -108,13 +108,13 @@ class ProfileResetter : public content::BrowsingDataRemover::Observer {
   ResettableFlags pending_reset_flags_;
 
   // Called on UI thread when reset has been completed.
-  base::Closure callback_;
+  base::OnceClosure callback_;
 
   // If non-null it means removal is in progress. BrowsingDataRemover takes care
   // of deleting itself when done.
   content::BrowsingDataRemover* cookies_remover_;
 
-  std::unique_ptr<TemplateURLService::Subscription> template_url_service_sub_;
+  base::CallbackListSubscription template_url_service_subscription_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

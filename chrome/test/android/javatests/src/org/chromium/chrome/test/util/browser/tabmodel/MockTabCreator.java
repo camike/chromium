@@ -13,14 +13,15 @@ import org.chromium.chrome.browser.tab.TabCreationState;
 import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tab.TabState;
 import org.chromium.chrome.browser.tab.TabTestUtils;
-import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
+import org.chromium.chrome.browser.tabmodel.TabCreator;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.url.GURL;
 
 /** MockTabCreator for use in tests. */
-public class MockTabCreator extends TabCreatorManager.TabCreator {
+public class MockTabCreator extends TabCreator {
     public final SparseArray<TabState> created;
     public final CallbackHelper callback;
 
@@ -51,7 +52,7 @@ public class MockTabCreator extends TabCreatorManager.TabCreator {
     }
 
     @Override
-    public Tab createFrozenTab(TabState state, int id, int index) {
+    public Tab createFrozenTab(TabState state, byte[] criticalPersistedTabData, int id, int index) {
         Tab tab = new MockTab(id, state.isIncognito(), TabLaunchType.FROM_RESTORE);
         TabTestUtils.restoreFieldsFromState(tab, state);
         mSelector.getModel(mIsIncognito)
@@ -62,7 +63,7 @@ public class MockTabCreator extends TabCreatorManager.TabCreator {
 
     @Override
     public boolean createTabWithWebContents(
-            Tab parent, WebContents webContents, @TabLaunchType int type, String url) {
+            Tab parent, WebContents webContents, @TabLaunchType int type, GURL url) {
         return false;
     }
 

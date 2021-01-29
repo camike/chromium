@@ -4,9 +4,8 @@
 
 #import "ios/chrome/app/chrome_overlay_window.h"
 
-#include "base/logging.h"
-#import "ios/chrome/browser/crash_report/breakpad_helper.h"
-#import "ios/chrome/browser/metrics/drag_and_drop_recorder.h"
+#include "base/check.h"
+#import "ios/chrome/browser/crash_report/crash_keys_helper.h"
 #import "ios/chrome/browser/metrics/size_class_recorder.h"
 #import "ios/chrome/browser/metrics/user_interface_style_recorder.h"
 #import "ios/chrome/browser/ui/util/ui_util.h"
@@ -20,7 +19,6 @@
     UserInterfaceStyleRecorder* userInterfaceStyleRecorder API_AVAILABLE(
         ios(13.0));
 @property(nonatomic, strong) SizeClassRecorder* sizeClassRecorder;
-@property(nonatomic, strong) DragAndDropRecorder* dragAndDropRecorder;
 
 // Initializes the size class recorder. On iPad It starts tracking horizontal
 // size class changes.
@@ -39,7 +37,6 @@
     // When not created via a nib, create the recorders immediately.
     [self initializeSizeClassRecorder];
     [self updateBreakpad];
-    _dragAndDropRecorder = [[DragAndDropRecorder alloc] initWithView:self];
     if (@available(iOS 13, *)) {
       _userInterfaceStyleRecorder = [[UserInterfaceStyleRecorder alloc]
           initWithUserInterfaceStyle:self.traitCollection.userInterfaceStyle];
@@ -65,10 +62,23 @@
 }
 
 - (void)updateBreakpad {
-  breakpad_helper::SetCurrentHorizontalSizeClass(
+  crash_keys::SetCurrentHorizontalSizeClass(
       self.traitCollection.horizontalSizeClass);
-  breakpad_helper::SetCurrentUserInterfaceStyle(
+  crash_keys::SetCurrentUserInterfaceStyle(
       self.traitCollection.userInterfaceStyle);
+}
+
+- (void)setFrame:(CGRect)rect {
+  if (@available(iOS 13, *)) {
+    if (!IsIPadIdiom() && (rect.origin.x != 0 || rect.origin.y != 0)) {
+      // skip, this rect is wrong and probably in portrait while
+      // display is in landscape or vice-versa.
+    } else {
+      [super setFrame:rect];
+    }
+  } else {
+    [super setFrame:rect];
+  }
 }
 
 #pragma mark - UITraitEnvironment

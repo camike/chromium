@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/task/post_task.h"
+#include "base/callback_helpers.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/web_applications/components/external_install_options.h"
@@ -80,11 +80,12 @@ void WebAppPolicyManager::SetSubsystems(
 }
 
 void WebAppPolicyManager::Start() {
-  base::PostTask(
-      FROM_HERE, {content::BrowserThread::UI, base::TaskPriority::BEST_EFFORT},
-      base::BindOnce(&WebAppPolicyManager::
-                         InitChangeRegistrarAndRefreshPolicyInstalledApps,
-                     weak_ptr_factory_.GetWeakPtr()));
+  content::GetUIThreadTaskRunner({base::TaskPriority::BEST_EFFORT})
+      ->PostTask(
+          FROM_HERE,
+          base::BindOnce(&WebAppPolicyManager::
+                             InitChangeRegistrarAndRefreshPolicyInstalledApps,
+                         weak_ptr_factory_.GetWeakPtr()));
 }
 
 void WebAppPolicyManager::ReinstallPlaceholderAppIfNecessary(const GURL& url) {
@@ -166,14 +167,16 @@ void WebAppPolicyManager::RefreshPolicyInstalledApps() {
 }
 
 void WebAppPolicyManager::OnAppsSynchronized(
-    std::map<GURL, InstallResultCode> install_results,
+    std::map<GURL, PendingAppManager::InstallResult> install_results,
     std::map<GURL, bool> uninstall_results) {
   is_refreshing_ = false;
   if (needs_refresh_)
     RefreshPolicyInstalledApps();
 
-  RecordExternalAppInstallResultCode(kInstallResultHistogramName,
-                                     install_results);
+  for (const auto& url_and_result : install_results) {
+    base::UmaHistogramEnumeration(kInstallResultHistogramName,
+                                  url_and_result.second.code);
+  }
 }
 
 }  // namespace web_app

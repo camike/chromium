@@ -4,8 +4,9 @@
 
 #include "chrome/browser/ui/views/extensions/extensions_menu_view.h"
 
+#include "base/containers/contains.h"
+#include "base/i18n/case_conversion.h"
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/chrome_pages.h"
@@ -28,6 +29,7 @@
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/flex_layout.h"
 #include "ui/views/view_class_properties.h"
+#include "ui/views/view_utils.h"
 
 namespace {
 // If true, allows more than one instance of the ExtensionsMenuView, which may
@@ -40,8 +42,8 @@ constexpr int EXTENSIONS_SETTINGS_ID = 42;
 
 bool CompareExtensionMenuItemViews(const ExtensionsMenuItemView* a,
                                    const ExtensionsMenuItemView* b) {
-  return a->view_controller()->GetActionName() <
-         b->view_controller()->GetActionName();
+  return base::i18n::ToLower(a->view_controller()->GetActionName()) <
+         base::i18n::ToLower(b->view_controller()->GetActionName());
 }
 
 // A helper method to convert to an ExtensionsMenuItemView. This cannot be used
@@ -49,32 +51,23 @@ bool CompareExtensionMenuItemViews(const ExtensionsMenuItemView* a,
 // when the view is known to be one). It is only used as an extra measure to
 // prevent bad static casts.
 ExtensionsMenuItemView* GetAsMenuItemView(views::View* view) {
-  DCHECK_EQ(ExtensionsMenuItemView::kClassName, view->GetClassName());
+  DCHECK(views::IsViewClass<ExtensionsMenuItemView>(view));
   return static_cast<ExtensionsMenuItemView*>(view);
 }
 
 }  // namespace
 
-ExtensionsMenuView::ButtonListener::ButtonListener(Browser* browser)
-    : browser_(browser) {}
-
-void ExtensionsMenuView::ButtonListener::ButtonPressed(views::Button* sender,
-                                                       const ui::Event& event) {
-  DCHECK_EQ(sender->GetID(), EXTENSIONS_SETTINGS_ID);
-  chrome::ShowExtensions(browser_, std::string());
-}
-
 ExtensionsMenuView::ExtensionsMenuView(
     views::View* anchor_view,
     Browser* browser,
-    ExtensionsContainer* extensions_container)
+    ExtensionsContainer* extensions_container,
+    bool allow_pinning)
     : BubbleDialogDelegateView(anchor_view,
                                views::BubbleBorder::Arrow::TOP_RIGHT),
       browser_(browser),
       extensions_container_(extensions_container),
+      allow_pinning_(allow_pinning),
       toolbar_model_(ToolbarActionsModel::Get(browser_->profile())),
-      toolbar_model_observer_(this),
-      button_listener_(browser_),
       cant_access_{nullptr, nullptr,
                    IDS_EXTENSIONS_MENU_CANT_ACCESS_SITE_DATA_SHORT,
                    IDS_EXTENSIONS_MENU_CANT_ACCESS_SITE_DATA,
@@ -87,17 +80,26 @@ ExtensionsMenuView::ExtensionsMenuView(
                   IDS_EXTENSIONS_MENU_ACCESSING_SITE_DATA_SHORT,
                   IDS_EXTENSIONS_MENU_ACCESSING_SITE_DATA,
                   ToolbarActionViewController::PageInteractionStatus::kActive} {
-  toolbar_model_observer_.Add(toolbar_model_);
+  // Ensure layer masking is used for the extensions menu to ensure buttons with
+  // layer effects sitting flush with the bottom of the bubble are clipped
+  // appropriately.
+  SetPaintClientToLayer(true);
+
+  toolbar_model_observation_.Observe(toolbar_model_);
   browser_->tab_strip_model()->AddObserver(this);
   set_margins(gfx::Insets(0));
 
-  DialogDelegate::SetButtons(ui::DIALOG_BUTTON_NONE);
+  SetButtons(ui::DIALOG_BUTTON_NONE);
+  SetShowCloseButton(true);
+  SetTitle(IDS_EXTENSIONS_MENU_TITLE);
 
-  EnableUpDownKeyboardAccelerators();
+  SetEnableArrowKeyTraversal(true);
 
   // Let anchor view's MenuButtonController handle the highlight.
   set_highlight_button_when_shown(false);
 
+  set_fixed_width(views::LayoutProvider::Get()->GetDistanceMetric(
+      views::DISTANCE_BUBBLE_PREFERRED_WIDTH));
   SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kVertical));
   Populate();
@@ -113,21 +115,6 @@ ExtensionsMenuView::~ExtensionsMenuView() {
   // directly within TabStripModelObserver::~TabStripModelObserver().
 }
 
-base::string16 ExtensionsMenuView::GetWindowTitle() const {
-  return l10n_util::GetStringUTF16(IDS_EXTENSIONS_MENU_TITLE);
-}
-
-bool ExtensionsMenuView::ShouldShowCloseButton() const {
-  return true;
-}
-
-gfx::Size ExtensionsMenuView::CalculatePreferredSize() const {
-  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
-                        DISTANCE_BUBBLE_PREFERRED_WIDTH) -
-                    margins().width();
-  return gfx::Size(width, GetHeightForWidth(width));
-}
-
 void ExtensionsMenuView::Populate() {
   // The actions for the profile haven't been initialized yet. We'll call in
   // again once they have.
@@ -138,26 +125,49 @@ void ExtensionsMenuView::Populate() {
 
   auto extension_buttons = CreateExtensionButtonsContainer();
 
-  constexpr int kMaxExtensionButtonsHeightDp = 600;
+  // This is set so that the extensions menu doesn't fall outside the monitor in
+  // a maximized window in 1024x768. See https://crbug.com/1096630.
+  // TODO(pbos): Consider making this dynamic and handled by views. Ideally we
+  // wouldn't ever pop up so that they pop outside the screen.
+  constexpr int kMaxExtensionButtonsHeightDp = 448;
   auto scroll_view = std::make_unique<views::ScrollView>();
   scroll_view->ClipHeightTo(0, kMaxExtensionButtonsHeightDp);
   scroll_view->SetDrawOverflowIndicator(false);
-  scroll_view->SetHideHorizontalScrollBar(true);
+  scroll_view->SetHorizontalScrollBarMode(
+      views::ScrollView::ScrollBarMode::kDisabled);
   scroll_view->SetContents(std::move(extension_buttons));
   AddChildView(std::move(scroll_view));
 
   AddChildView(std::make_unique<views::Separator>());
 
+  // TODO(pbos): Consider moving this a footnote view (::SetFootnoteView()).
+  // If so this needs to be created before being added to a widget, constructor
+  // would do.
+  constexpr int kSettingsIconSize = 16;
   auto footer = CreateBubbleMenuItem(
       EXTENSIONS_SETTINGS_ID, l10n_util::GetStringUTF16(IDS_MANAGE_EXTENSION),
-      &button_listener_);
+      base::BindRepeating(&chrome::ShowExtensions, browser_, std::string()));
   footer->SetImage(
       views::Button::STATE_NORMAL,
-      gfx::CreateVectorIcon(vector_icons::kSettingsIcon, 16,
+      gfx::CreateVectorIcon(vector_icons::kSettingsIcon, kSettingsIconSize,
                             GetNativeTheme()->GetSystemColor(
                                 ui::NativeTheme::kColorId_MenuIconColor)));
-  footer->SetImageLabelSpacing(ChromeLayoutProvider::Get()->GetDistanceMetric(
-      views::DISTANCE_BUTTON_HORIZONTAL_PADDING));
+
+  // Extension icons are larger-than-favicon as they contain internal padding
+  // (space for badging). Add the same padding left and right of the icon to
+  // visually align the settings icon and text with extension menu items.
+  // TODO(pbos): Note that this code relies on CreateBubbleMenuItem() and
+  // ExtensionsMenuItemView using the same horizontal border size and
+  // image-label spacing. This dependency should probably be more explicit.
+  constexpr int kSettingsIconHorizontalPadding =
+      (ExtensionsMenuItemView::kIconSize.width() - kSettingsIconSize) / 2;
+
+  footer->SetBorder(views::CreateEmptyBorder(
+      footer->border()->GetInsets() +
+      gfx::Insets(0, kSettingsIconHorizontalPadding, 0, 0)));
+  footer->SetImageLabelSpacing(footer->GetImageLabelSpacing() +
+                               kSettingsIconHorizontalPadding);
+
   manage_extensions_button_for_testing_ = footer.get();
   AddChildView(std::move(footer));
 
@@ -191,7 +201,7 @@ ExtensionsMenuView::CreateExtensionButtonsContainer() {
         // Add an emphasized short header explaining the section.
         auto header = std::make_unique<views::Label>(
             l10n_util::GetStringUTF16(section->header_string_id),
-            ChromeTextContext::CONTEXT_BODY_TEXT_SMALL,
+            ChromeTextContext::CONTEXT_DIALOG_BODY_TEXT_SMALL,
             ChromeTextStyle::STYLE_EMPHASIZED);
         header->SetHorizontalAlignment(gfx::ALIGN_LEFT);
         header->SetBorder(views::CreateEmptyBorder(
@@ -203,7 +213,7 @@ ExtensionsMenuView::CreateExtensionButtonsContainer() {
         // Add longer text that explains the section in more detail.
         auto description = std::make_unique<views::Label>(
             l10n_util::GetStringUTF16(section->description_string_id),
-            ChromeTextContext::CONTEXT_BODY_TEXT_SMALL,
+            ChromeTextContext::CONTEXT_DIALOG_BODY_TEXT_SMALL,
             views::style::STYLE_PRIMARY);
         description->SetMultiLine(true);
         description->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -283,7 +293,8 @@ void ExtensionsMenuView::CreateAndInsertNewItem(
 
   // The bare `new` is safe here, because InsertMenuItem is guaranteed to
   // be added to the view hierarchy, which takes ownership.
-  auto* item = new ExtensionsMenuItemView(browser_, std::move(controller));
+  auto* item = new ExtensionsMenuItemView(browser_, std::move(controller),
+                                          allow_pinning_);
   extensions_menu_items_.push_back(item);
   InsertMenuItem(item);
   // Sanity check that the item was added.
@@ -456,7 +467,8 @@ void ExtensionsMenuView::OnToolbarVisibleCountChanged() {
 }
 
 void ExtensionsMenuView::OnToolbarHighlightModeChanged(bool is_highlighting) {
-  // TODO(pbos): Handle highlighting - somehow.
+  NOTREACHED()
+      << "Action highlighting is not supported with the extensions menu";
 }
 
 void ExtensionsMenuView::OnToolbarModelInitialized() {
@@ -478,10 +490,11 @@ base::AutoReset<bool> ExtensionsMenuView::AllowInstancesForTesting() {
 views::Widget* ExtensionsMenuView::ShowBubble(
     views::View* anchor_view,
     Browser* browser,
-    ExtensionsContainer* extensions_container) {
+    ExtensionsContainer* extensions_container,
+    bool allow_pinning) {
   DCHECK(!g_extensions_dialog);
-  g_extensions_dialog =
-      new ExtensionsMenuView(anchor_view, browser, extensions_container);
+  g_extensions_dialog = new ExtensionsMenuView(
+      anchor_view, browser, extensions_container, allow_pinning);
   views::Widget* widget =
       views::BubbleDialogDelegateView::CreateBubble(g_extensions_dialog);
   widget->Show();
@@ -502,4 +515,16 @@ void ExtensionsMenuView::Hide() {
 // static
 ExtensionsMenuView* ExtensionsMenuView::GetExtensionsMenuViewForTesting() {
   return g_extensions_dialog;
+}
+
+// static
+std::vector<ExtensionsMenuItemView*>
+ExtensionsMenuView::GetSortedItemsForSectionForTesting(
+    ToolbarActionViewController::PageInteractionStatus status) {
+  const ExtensionsMenuView::Section* section =
+      GetExtensionsMenuViewForTesting()->GetSectionForStatus(status);
+  std::vector<ExtensionsMenuItemView*> menu_item_views;
+  for (views::View* view : section->menu_items->children())
+    menu_item_views.push_back(GetAsMenuItemView(view));
+  return menu_item_views;
 }

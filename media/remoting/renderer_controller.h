@@ -61,6 +61,7 @@ class RendererController final : public mojom::RemotingSource,
   void OnPlaying() override;
   void OnPaused() override;
   void OnDataSourceInitialized(const GURL& url_after_redirects) override;
+  void OnHlsManifestDetected() override;
   void SetClient(MediaObserverClient* client) override;
 
   base::WeakPtr<RendererController> GetWeakPtr() {
@@ -116,11 +117,14 @@ class RendererController final : public mojom::RemotingSource,
   bool IsAudioCodecSupported() const;
   bool IsAudioOrVideoSupported() const;
 
-  // Returns true if all of the technical requirements for the media pipeline
-  // and remote rendering are being met. This does not include environmental
-  // conditions, such as the content being dominant in the viewport, available
-  // network bandwidth, etc.
-  bool CanBeRemoting() const;
+  // Returns |kCompatible| if all of the technical requirements for the media
+  // pipeline and remote rendering are being met, and the first detected
+  // reason if incompatible. This does not include environmental conditions,
+  // such as the content being dominant in the viewport, available network
+  // bandwidth, etc.
+  RemotingCompatibility GetVideoCompatibility() const;
+  RemotingCompatibility GetAudioCompatibility() const;
+  RemotingCompatibility GetCompatibility() const;
 
   // Determines whether to enter or leave Remoting mode and switches if
   // necessary. Each call to this method could cause a remoting session to be
@@ -145,10 +149,15 @@ class RendererController final : public mojom::RemotingSource,
                                 unsigned decoded_frame_count_before_delay,
                                 base::TimeTicks delayed_start_time);
 
+  // Records in a histogram and returns whether the receiver supports the given
+  // pixel rate.
+  bool RecordPixelRateSupport(double pixels_per_second);
+
   // Queries on remoting sink capabilities.
   bool HasVideoCapability(mojom::RemotingSinkVideoCapability capability) const;
   bool HasAudioCapability(mojom::RemotingSinkAudioCapability capability) const;
   bool HasFeatureCapability(mojom::RemotingSinkFeature capability) const;
+  bool SinkSupportsRemoting() const;
 
   // Callback from RpcBroker when sending message to remote sink.
   void SendMessageToSink(std::unique_ptr<std::vector<uint8_t>> message);
@@ -212,6 +221,8 @@ class RendererController final : public mojom::RemotingSource,
 
   // Current data source information.
   GURL url_after_redirects_;
+
+  bool is_hls_ = false;
 
   // Records session events of interest.
   SessionMetricsRecorder metrics_recorder_;

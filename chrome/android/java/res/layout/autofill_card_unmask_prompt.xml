@@ -12,8 +12,16 @@
     android:layout_width="wrap_content"
     android:layout_height="wrap_content">
 
+    <androidx.appcompat.widget.DialogTitle
+        android:id="@+id/title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textAppearance="@style/TextAppearance.AlertDialogTitleStyle"
+        style="@style/AlertDialogContent"/>
+
     <TextView
         android:id="@+id/no_retry_error_message"
+        android:layout_below="@+id/title"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="23dp"
@@ -67,6 +75,7 @@
                   android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
                   android:layout_marginStart="16dp"
+                  android:minHeight="48dp"
                   android:width="50sp"
                   android:maxLength="2"
                   android:gravity="center_horizontal"
@@ -85,6 +94,7 @@
                   android:id="@+id/expiration_year"
                   android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
+                  android:minHeight="48dp"
                   android:width="50sp"
                   android:maxLength="2"
                   android:gravity="center_horizontal"
@@ -101,6 +111,7 @@
                 android:layout_height="wrap_content"
                 android:layout_width="wrap_content"
                 android:layout_marginStart="16dp"
+                android:minHeight="48dp"
                 android:ems="5"
                 android:imeOptions="actionDone"
                 android:imeActionLabel="@string/autofill_save_card_prompt_confirm"

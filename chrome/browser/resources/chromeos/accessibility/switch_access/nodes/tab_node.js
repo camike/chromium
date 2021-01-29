@@ -2,13 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import {Navigator} from '../navigator.js';
+import {SAConstants, SwitchAccessMenuAction} from '../switch_access_constants.js';
+
+import {BackButtonNode} from './back_button_node.js';
+import {BasicNode, BasicRootNode} from './basic_node.js';
+import {SAChildNode, SARootNode} from './switch_access_node.js';
+
+const AutomationNode = chrome.automation.AutomationNode;
+
 /**
  * This class handles the behavior of tab nodes at the top level (i.e. as
  * groups).
  */
-class TabNode extends NodeWrapper {
+export class TabNode extends BasicNode {
   /**
-   * @param {!chrome.automation.AutomationNode} node The node in the automation
+   * @param {!AutomationNode} node The node in the automation
    *    tree
    * @param {?SARootNode} parent
    * @param {!SARootNode} tabAsRoot A pre-calculated object for exploring the
@@ -25,7 +34,7 @@ class TabNode extends NodeWrapper {
 
   /** @override */
   get actions() {
-    return [];
+    return [SwitchAccessMenuAction.SELECT];
   }
 
   // ================= General methods =================
@@ -40,16 +49,25 @@ class TabNode extends NodeWrapper {
     return true;
   }
 
+  /** @override */
+  performAction(action) {
+    if (action !== SwitchAccessMenuAction.SELECT) {
+      return SAConstants.ActionResponse.NO_ACTION_TAKEN;
+    }
+    Navigator.instance.enterGroup();
+    return SAConstants.ActionResponse.CLOSE_MENU;
+  }
+
   // ================= Static methods =================
 
   /** @override */
   static create(tabNode, parent) {
-    const tabAsRoot = new RootNodeWrapper(tabNode);
+    const tabAsRoot = new BasicRootNode(tabNode);
 
     let closeButton;
     for (const child of tabNode.children) {
       if (child.role === chrome.automation.RoleType.BUTTON) {
-        closeButton = new NodeWrapper(child, tabAsRoot);
+        closeButton = new BasicNode(child, tabAsRoot);
         break;
       }
     }
@@ -68,9 +86,9 @@ class TabNode extends NodeWrapper {
 }
 
 /** This class handles the behavior of tabs as actionable elements */
-class ActionableTabNode extends NodeWrapper {
+class ActionableTabNode extends BasicNode {
   /**
-   * @param {!chrome.automation.AutomationNode} node
+   * @param {!AutomationNode} node
    * @param {?SARootNode} parent
    * @param {?SAChildNode} closeButton
    */
@@ -85,7 +103,7 @@ class ActionableTabNode extends NodeWrapper {
 
   /** @override */
   get actions() {
-    return [SAConstants.MenuAction.SELECT];
+    return [SwitchAccessMenuAction.SELECT];
   }
 
   /** @override */
@@ -93,7 +111,7 @@ class ActionableTabNode extends NodeWrapper {
     if (!this.closeButton_) {
       return super.location;
     }
-    return RectHelper.difference(super.location, this.closeButton_.location);
+    return RectUtil.difference(super.location, this.closeButton_.location);
   }
 
   // ================= General methods =================
@@ -108,3 +126,9 @@ class ActionableTabNode extends NodeWrapper {
     return false;
   }
 }
+
+BasicNode.creators.push({
+  predicate: baseNode => baseNode.role === chrome.automation.RoleType.TAB &&
+      baseNode.root.role === chrome.automation.RoleType.DESKTOP,
+  creator: TabNode.create
+});

@@ -19,13 +19,12 @@ namespace blink {
 class ModuleMap::Entry final : public GarbageCollected<Entry>,
                                public NameClient,
                                public ModuleScriptLoaderClient {
-  USING_GARBAGE_COLLECTED_MIXIN(ModuleMap::Entry);
 
  public:
   explicit Entry(ModuleMap*);
   ~Entry() override {}
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
   const char* NameInHeapSnapshot() const override { return "ModuleMap::Entry"; }
 
   // Notify fetched |m_moduleScript| to the client asynchronously.
@@ -53,7 +52,7 @@ ModuleMap::Entry::Entry(ModuleMap* map) : map_(map) {
   DCHECK(map_);
 }
 
-void ModuleMap::Entry::Trace(Visitor* visitor) {
+void ModuleMap::Entry::Trace(Visitor* visitor) const {
   visitor->Trace(module_script_);
   visitor->Trace(map_);
   visitor->Trace(clients_);
@@ -100,7 +99,7 @@ ModuleMap::ModuleMap(Modulator* modulator)
   DCHECK(modulator);
 }
 
-void ModuleMap::Trace(Visitor* visitor) {
+void ModuleMap::Trace(Visitor* visitor) const {
   visitor->Trace(map_);
   visitor->Trace(modulator_);
   visitor->Trace(loader_registry_);
@@ -143,7 +142,10 @@ void ModuleMap::FetchSingleModuleScript(
     entry->AddClient(client);
 }
 
-ModuleScript* ModuleMap::GetFetchedModuleScript(const KURL& url) const {
+ModuleScript* ModuleMap::GetFetchedModuleScript(const KURL& url,
+                                                ModuleType module_type) const {
+  // TODO(crbug.com/1132413) Make module type part of cache key and use
+  // module_type in this lookup.
   MapImpl::const_iterator it = map_.find(url);
   if (it == map_.end())
     return nullptr;

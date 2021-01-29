@@ -10,18 +10,21 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_list.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "build/buildflag.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/test/integration/configuration_refresher.h"
 #include "chrome/browser/sync/test/integration/fake_server_invalidation_sender.h"
+#include "chrome/browser/sync/test/integration/fake_server_sync_invalidation_sender.h"
 #include "chrome/common/buildflags.h"
 #include "components/gcm_driver/instance_id/instance_id.h"
 #include "components/gcm_driver/instance_id/instance_id_driver.h"
+#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/base/user_selectable_type.h"
 #include "components/sync/test/fake_server/fake_server.h"
@@ -29,9 +32,9 @@
 #include "net/http/http_status_code.h"
 #include "services/network/test/test_url_loader_factory.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 #if defined(OS_ANDROID)
 #include "chrome/test/base/android/android_browser_test.h"
@@ -103,8 +106,8 @@ class SyncTest : public PlatformBrowserTest {
 
   class FakeInstanceID : public instance_id::InstanceID {
    public:
-    FakeInstanceID()
-        : instance_id::InstanceID("FakeAppId", /*gcm_driver = */ nullptr) {}
+    explicit FakeInstanceID(const std::string& app_id,
+                            gcm::GCMDriver* gcm_driver);
     ~FakeInstanceID() override = default;
 
     void GetID(GetIDCallback callback) override {}
@@ -114,9 +117,8 @@ class SyncTest : public PlatformBrowserTest {
     void GetToken(const std::string& authorized_entity,
                   const std::string& scope,
                   base::TimeDelta time_to_live,
-                  const std::map<std::string, std::string>& options,
                   std::set<Flags> flags,
-                  GetTokenCallback callback) override {}
+                  GetTokenCallback callback) override;
 
     void ValidateToken(const std::string& authorized_entity,
                        const std::string& scope,
@@ -131,23 +133,27 @@ class SyncTest : public PlatformBrowserTest {
     void DeleteTokenImpl(const std::string& authorized_entity,
                          const std::string& scope,
                          DeleteTokenCallback callback) override {}
-    void DeleteIDImpl(DeleteIDCallback callback) override {}
+
+    void DeleteIDImpl(DeleteIDCallback callback) override;
 
    private:
+    static std::string GenerateNextToken();
+
+    std::string token_;
     DISALLOW_COPY_AND_ASSIGN(FakeInstanceID);
   };
 
   class FakeInstanceIDDriver : public instance_id::InstanceIDDriver {
    public:
-    FakeInstanceIDDriver()
-        : instance_id::InstanceIDDriver(/*gcm_driver=*/nullptr) {}
-    ~FakeInstanceIDDriver() override = default;
+    explicit FakeInstanceIDDriver(gcm::GCMDriver* gcm_driver);
+    ~FakeInstanceIDDriver() override;
     instance_id::InstanceID* GetInstanceID(const std::string& app_id) override;
     void RemoveInstanceID(const std::string& app_id) override {}
     bool ExistsInstanceID(const std::string& app_id) const override;
 
    private:
-    FakeInstanceID fake_instance_id_;
+    gcm::GCMDriver* gcm_driver_;
+    std::map<std::string, std::unique_ptr<FakeInstanceID>> fake_instance_ids_;
     DISALLOW_COPY_AND_ASSIGN(FakeInstanceIDDriver);
   };
 
@@ -178,7 +184,7 @@ class SyncTest : public PlatformBrowserTest {
 
 #if !defined(OS_ANDROID)
   // Returns a pointer to a particular browser. Callee owns the object
-  // and manages its lifetime.
+  // and manages its lifetime. The called browser must not be closed before.
   Browser* GetBrowser(int index);
 
   // Adds a new browser belonging to the profile at |profile_index|, and appends
@@ -212,12 +218,12 @@ class SyncTest : public PlatformBrowserTest {
   Profile* verifier();
 
   // Used to determine whether the verifier profile should be updated or not.
-  bool use_verifier() { return use_verifier_; }
-
-  // After calling this method, changes made to a profile will no longer be
-  // reflected in the verifier profile. Note: Not all datatypes use this.
-  // TODO(rsimha): Hook up all datatypes to this mechanism.
-  void DisableVerifier();
+  // Default is to return false. Test should override this if they require
+  // different behavior.
+  // Warning: do not use verifier in new tests.
+  // TODO(crbug.com/1137705): remove verifier profile logic completely, once all
+  // tests are rewritten in a way to not use verifier.
+  virtual bool UseVerifier();
 
   // Initializes sync clients and profiles but does not sync any of them.
   virtual bool SetupClients() WARN_UNUSED_RESULT;
@@ -248,15 +254,6 @@ class SyncTest : public PlatformBrowserTest {
   // Default is to return true.  Test should override this if they require
   // different behavior.
   virtual bool TestUsesSelfNotifications();
-
-  // Kicks off encryption for profile |index|.
-  bool EnableEncryption(int index);
-
-  // Checks if encryption is complete for profile |index|.
-  bool IsEncryptionComplete(int index);
-
-  // Waits until IsEncryptionComplete returns true or a timeout is reached.
-  bool AwaitEncryptionComplete(int index);
 
   // Blocks until all sync clients have completed their mutual sync cycles.
   // Returns true if a quiescent state was successfully reached.
@@ -338,8 +335,6 @@ class SyncTest : public PlatformBrowserTest {
   // GAIA servers.
   void SetupMockGaiaResponsesForProfile(Profile* profile);
 
-  base::test::ScopedFeatureList feature_list_;
-
   // The FakeServer used in tests with server type IN_PROCESS_FAKE_SERVER.
   std::unique_ptr<fake_server::FakeServer> fake_server_;
 
@@ -358,15 +353,30 @@ class SyncTest : public PlatformBrowserTest {
 
   // Callback for MakeProfileForUISignin() method. It runs the quit_closure once
   // profile is created successfully.
-  static void CreateProfileCallback(const base::Closure& quit_closure,
+  static void CreateProfileCallback(const base::RepeatingClosure& quit_closure,
                                     Profile* profile,
                                     Profile::CreateStatus status);
 
   static std::unique_ptr<KeyedService> CreateProfileInvalidationProvider(
-      std::map<const Profile*, syncer::FCMNetworkHandler*>*
+      std::map<const Profile*, invalidation::FCMNetworkHandler*>*
           profile_to_fcm_network_handler_map,
-      instance_id::InstanceIDDriver* instance_id_driver,
+      std::map<const Profile*, std::unique_ptr<instance_id::InstanceIDDriver>>*
+          profile_to_instance_id_driver_map,
       content::BrowserContext* context);
+
+  static std::unique_ptr<KeyedService> CreateSyncInvalidationsService(
+      std::map<const Profile*, std::unique_ptr<instance_id::InstanceIDDriver>>*
+          profile_to_instance_id_driver_map,
+      std::vector<syncer::FCMHandler*>* sync_invalidations_fcm_handlers,
+      content::BrowserContext* context);
+
+#if !defined(OS_ANDROID)
+  // Called when the |browser| was removed externally. This just marks the
+  // |browser| in the |browsers_| list as nullptr to keep indexes in |browsers_|
+  // and |profiles_| in sync. It is used when the |browser| is removed within a
+  // test (e.g. when the last tab is closed for the |browser|).
+  void OnBrowserRemoved(Browser* browser);
+#endif
 
   // Helper to Profile::CreateProfile that handles path creation. It creates
   // a profile then registers it as a testing profile.
@@ -414,6 +424,13 @@ class SyncTest : public PlatformBrowserTest {
 
   void ClearProfiles();
 
+  // Used to differentiate between single-client and two-client tests.
+  const TestType test_type_;
+
+  // Used to remember when the test fixture was constructed and later understand
+  // how long the setup took.
+  const base::Time test_construction_time_;
+
   // GAIA account used by the test case.
   std::string username_;
 
@@ -422,13 +439,6 @@ class SyncTest : public PlatformBrowserTest {
 
   // Locally available plain text file in which GAIA credentials are stored.
   base::FilePath password_file_;
-
-  // Helper class to whitelist the notification port.
-  std::unique_ptr<net::ScopedPortException> xmpp_port_;
-
-  // Used to differentiate between single-client and two-client tests as well
-  // as wher the in-process FakeServer is used.
-  TestType test_type_;
 
   // Tells us what kind of server we're using (some tests run only on certain
   // server types).
@@ -462,6 +472,9 @@ class SyncTest : public PlatformBrowserTest {
   // managed by BrowserList, so we don't use a std::vector<std::unique_ptr<>>
   // here.
   std::vector<Browser*> browsers_;
+
+  class ClosedBrowserObserver;
+  std::unique_ptr<ClosedBrowserObserver> browser_list_observer_;
 #endif
 
   // Collection of sync clients used by a test. A sync client is associated
@@ -482,17 +495,16 @@ class SyncTest : public PlatformBrowserTest {
   // Maps a profile to the corresponding FCMNetworkHandler. Contains one entry
   // per profile. It is used to simulate an incoming FCM messages to different
   // profiles within the FakeServerInvalidationSender.
-  std::map<const Profile*, syncer::FCMNetworkHandler*>
+  std::map<const Profile*, invalidation::FCMNetworkHandler*>
       profile_to_fcm_network_handler_map_;
 
-  FakeInstanceIDDriver fake_instance_id_driver_;
+  std::map<const Profile*, std::unique_ptr<instance_id::InstanceIDDriver>>
+      profile_to_instance_id_driver_map_;
 
   // Triggers a GetUpdates via refresh after a configuration.
   std::unique_ptr<ConfigurationRefresher> configuration_refresher_;
 
-  std::unique_ptr<
-      base::CallbackList<void(content::BrowserContext*)>::Subscription>
-      will_create_browser_context_services_subscription_;
+  base::CallbackListSubscription create_services_subscription_;
 
   // Sync profile against which changes to individual profiles are verified.
   // We don't need a corresponding verifier sync client because the contents
@@ -500,26 +512,29 @@ class SyncTest : public PlatformBrowserTest {
   // synced.
   Profile* verifier_;
 
-  // Indicates whether changes to a profile should also change the verifier
-  // profile or not.
-  bool use_verifier_;
-
   // Indicates whether to use a new user data dir.
   // Only used for external server tests with two clients.
   bool use_new_user_data_dir_ = false;
+
+  // The feature list to override features for all sync tests.
+  base::test::ScopedFeatureList feature_list_;
 
 #if !defined(OS_ANDROID)
   // Disable extension install verification.
   extensions::ScopedInstallVerifierBypassForTest ignore_install_verification_;
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // A factory-like callback to create a model updater for testing, which will
   // take the place of the real updater in AppListSyncableService for testing.
   std::unique_ptr<
       app_list::AppListSyncableService::ScopedModelUpdaterFactoryForTest>
       model_updater_factory_;
 #endif
+
+  std::vector<syncer::FCMHandler*> sync_invalidations_fcm_handlers_;
+  std::unique_ptr<fake_server::FakeServerSyncInvalidationSender>
+      fake_server_sync_invalidation_sender_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncTest);
 };

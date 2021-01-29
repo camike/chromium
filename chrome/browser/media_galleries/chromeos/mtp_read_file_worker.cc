@@ -10,7 +10,6 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "chrome/browser/media_galleries/chromeos/snapshot_file_details.h"
@@ -47,11 +46,11 @@ MTPReadFileWorker::~MTPReadFileWorker() {
 }
 
 void MTPReadFileWorker::WriteDataIntoSnapshotFile(
-    const SnapshotRequestInfo& request_info,
+    SnapshotRequestInfo request_info,
     const base::File::Info& snapshot_file_info) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  ReadDataChunkFromDeviceFile(
-      std::make_unique<SnapshotFileDetails>(request_info, snapshot_file_info));
+  ReadDataChunkFromDeviceFile(std::make_unique<SnapshotFileDetails>(
+      std::move(request_info), snapshot_file_info));
 }
 
 void MTPReadFileWorker::ReadDataChunkFromDeviceFile(
@@ -121,13 +120,13 @@ void MTPReadFileWorker::OnDidWriteIntoSnapshotFile(
   DCHECK(snapshot_file_details.get());
 
   if (snapshot_file_details->error_occurred()) {
-    base::PostTask(FROM_HERE, {content::BrowserThread::IO},
-                   base::BindOnce(snapshot_file_details->error_callback(),
+    content::GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(snapshot_file_details->error_callback(),
                                   base::File::FILE_ERROR_FAILED));
     return;
   }
-  base::PostTask(FROM_HERE, {content::BrowserThread::IO},
-                 base::BindOnce(snapshot_file_details->success_callback(),
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(snapshot_file_details->success_callback(),
                                 snapshot_file_details->file_info(),
                                 snapshot_file_details->snapshot_file_path()));
 }

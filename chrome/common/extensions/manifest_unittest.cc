@@ -12,6 +12,8 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "components/crx_file/id_util.h"
+#include "extensions/common/api/shared_module.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/features/feature.h"
 #include "extensions/common/features/simple_feature.h"
@@ -55,8 +57,9 @@ class ManifestUnitTest : public testing::Test {
       manifest_value->Set(key, std::move(value));
     else
       manifest_value->Remove(key, nullptr);
-    manifest->reset(
-        new Manifest(Manifest::INTERNAL, std::move(manifest_value)));
+    ExtensionId extension_id = manifest->get()->extension_id();
+    *manifest = std::make_unique<Manifest>(
+        Manifest::INTERNAL, std::move(manifest_value), extension_id);
   }
 
   // Helper function that replaces the manifest held by |manifest| with a copy
@@ -64,12 +67,13 @@ class ManifestUnitTest : public testing::Test {
   void MutateManifestForLoginScreen(std::unique_ptr<Manifest>* manifest,
                                     bool for_login_screen) {
     auto manifest_value = manifest->get()->value()->CreateDeepCopy();
+    ExtensionId extension_id = manifest->get()->extension_id();
     if (for_login_screen) {
       *manifest = Manifest::CreateManifestForLoginScreen(
-          Manifest::EXTERNAL_POLICY, std::move(manifest_value));
+          Manifest::EXTERNAL_POLICY, std::move(manifest_value), extension_id);
     } else {
-      *manifest = std::make_unique<Manifest>(Manifest::INTERNAL,
-                                             std::move(manifest_value));
+      *manifest = std::make_unique<Manifest>(
+          Manifest::INTERNAL, std::move(manifest_value), extension_id);
     }
   }
 
@@ -87,7 +91,8 @@ TEST_F(ManifestUnitTest, Extension) {
   manifest_value->SetString("unknown_key", "foo");
 
   std::unique_ptr<Manifest> manifest(
-      new Manifest(Manifest::INTERNAL, std::move(manifest_value)));
+      new Manifest(Manifest::INTERNAL, std::move(manifest_value),
+                   crx_file::id_util::GenerateId("extid")));
   std::string error;
   std::vector<InstallWarning> warnings;
   EXPECT_TRUE(manifest->ValidateManifest(&error, &warnings));
@@ -105,12 +110,14 @@ TEST_F(ManifestUnitTest, Extension) {
   EXPECT_TRUE(manifest->GetString("unknown_key", &value));
   EXPECT_EQ("foo", value);
 
-  // Test CreateDeepCopy and Equals.
-  std::unique_ptr<Manifest> manifest2 = manifest->CreateDeepCopy();
-  EXPECT_TRUE(manifest->Equals(manifest2.get()));
-  EXPECT_TRUE(manifest2->Equals(manifest.get()));
+  // Test EqualsForTesting.
+  auto manifest2 = std::make_unique<Manifest>(
+      Manifest::INTERNAL, manifest->value()->CreateDeepCopy(),
+      crx_file::id_util::GenerateId("extid"));
+  EXPECT_TRUE(manifest->EqualsForTesting(*manifest2));
+  EXPECT_TRUE(manifest2->EqualsForTesting(*manifest));
   MutateManifest(&manifest, "foo", std::make_unique<base::Value>("blah"));
-  EXPECT_FALSE(manifest->Equals(manifest2.get()));
+  EXPECT_FALSE(manifest->EqualsForTesting(*manifest2));
 }
 
 // Verifies that key restriction based on type works.
@@ -120,7 +127,8 @@ TEST_F(ManifestUnitTest, ExtensionTypes) {
   value->SetString(keys::kVersion, "1");
 
   std::unique_ptr<Manifest> manifest(
-      new Manifest(Manifest::INTERNAL, std::move(value)));
+      new Manifest(Manifest::INTERNAL, std::move(value),
+                   crx_file::id_util::GenerateId("extid")));
   std::string error;
   std::vector<InstallWarning> warnings;
   EXPECT_TRUE(manifest->ValidateManifest(&error, &warnings));
@@ -142,10 +150,10 @@ TEST_F(ManifestUnitTest, ExtensionTypes) {
   MutateManifest(&manifest, keys::kTheme, nullptr);
 
   // Shared module.
-  MutateManifest(&manifest, keys::kExport,
+  MutateManifest(&manifest, api::shared_module::ManifestKeys::kExport,
                  std::make_unique<base::DictionaryValue>());
   AssertType(manifest.get(), Manifest::TYPE_SHARED_MODULE);
-  MutateManifest(&manifest, keys::kExport, nullptr);
+  MutateManifest(&manifest, api::shared_module::ManifestKeys::kExport, nullptr);
 
   // Packaged app.
   MutateManifest(&manifest, keys::kApp,
@@ -181,7 +189,8 @@ TEST_F(ManifestUnitTest, RestrictedKeys) {
   value->SetString(keys::kVersion, "1");
 
   std::unique_ptr<Manifest> manifest(
-      new Manifest(Manifest::INTERNAL, std::move(value)));
+      new Manifest(Manifest::INTERNAL, std::move(value),
+                   crx_file::id_util::GenerateId("extid")));
   std::string error;
   std::vector<InstallWarning> warnings;
   EXPECT_TRUE(manifest->ValidateManifest(&error, &warnings));

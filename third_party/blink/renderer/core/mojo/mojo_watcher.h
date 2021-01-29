@@ -11,6 +11,10 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 
+namespace base {
+class SingleThreadTaskRunner;
+}  // namespace base
+
 namespace blink {
 
 class ExecutionContext;
@@ -21,7 +25,6 @@ class MojoWatcher final : public ScriptWrappable,
                           public ActiveScriptWrappable<MojoWatcher>,
                           public ExecutionContextLifecycleObserver {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(MojoWatcher);
 
  public:
   static MojoWatcher* Create(mojo::Handle,
@@ -34,7 +37,7 @@ class MojoWatcher final : public ScriptWrappable,
 
   MojoResult cancel();
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   // ActiveScriptWrappable
   bool HasPendingActivity() const final;

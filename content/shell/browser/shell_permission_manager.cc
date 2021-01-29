@@ -38,13 +38,13 @@ bool IsWhitelistedPermissionType(PermissionType permission) {
     // default.
     case PermissionType::STORAGE_ACCESS_GRANT:
       return true;
+
     case PermissionType::MIDI_SYSEX:
     case PermissionType::NOTIFICATIONS:
     case PermissionType::PROTECTED_MEDIA_IDENTIFIER:
     case PermissionType::DURABLE_STORAGE:
     case PermissionType::AUDIO_CAPTURE:
     case PermissionType::VIDEO_CAPTURE:
-    case PermissionType::FLASH:
     case PermissionType::CLIPBOARD_READ_WRITE:
     case PermissionType::CLIPBOARD_SANITIZED_WRITE:
     case PermissionType::NUM:
@@ -53,6 +53,9 @@ bool IsWhitelistedPermissionType(PermissionType permission) {
     case PermissionType::VR:
     case PermissionType::AR:
     case PermissionType::CAMERA_PAN_TILT_ZOOM:
+    case PermissionType::WINDOW_PLACEMENT:
+    case PermissionType::FONT_ACCESS:
+    case PermissionType::DISPLAY_CAPTURE:
       return false;
   }
 

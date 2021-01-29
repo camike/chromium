@@ -6,17 +6,22 @@
 
 #import <Foundation/Foundation.h>
 #import <WebKit/WebKit.h>
+#include <vector>
 
+#include "base/check.h"
 #include "base/ios/ios_util.h"
-#include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/safe_browsing/core/features.h"
 #include "ios/web/common/features.h"
 #import "ios/web/js_messaging/crw_wk_script_message_router.h"
+#import "ios/web/js_messaging/java_script_feature_manager.h"
+#include "ios/web/js_messaging/java_script_feature_util_impl.h"
 #import "ios/web/js_messaging/page_script_util.h"
 #include "ios/web/public/browser_state.h"
 #include "ios/web/public/web_client.h"
+#import "ios/web/web_state/ui/wk_content_rule_list_provider.h"
 #import "ios/web/web_state/ui/wk_web_view_configuration_provider_observer.h"
 #import "ios/web/webui/crw_web_ui_scheme_handler.h"
 
@@ -89,7 +94,9 @@ WKWebViewConfigurationProvider::FromBrowserState(BrowserState* browser_state) {
 
 WKWebViewConfigurationProvider::WKWebViewConfigurationProvider(
     BrowserState* browser_state)
-    : browser_state_(browser_state) {}
+    : browser_state_(browser_state),
+      content_rule_list_provider_(
+          std::make_unique<WKContentRuleListProvider>(browser_state)) {}
 
 WKWebViewConfigurationProvider::~WKWebViewConfigurationProvider() = default;
 
@@ -112,10 +119,7 @@ void WKWebViewConfigurationProvider::ResetWithWebViewConfiguration(
         setWebsiteDataStore:[WKWebsiteDataStore nonPersistentDataStore]];
   }
 
-  if (base::FeatureList::IsEnabled(
-          web::features::kIgnoresViewportScaleLimits)) {
-    [configuration_ setIgnoresViewportScaleLimits:YES];
-  }
+  [configuration_ setIgnoresViewportScaleLimits:YES];
 
   if (@available(iOS 13, *)) {
     @try {
@@ -124,9 +128,11 @@ void WKWebViewConfigurationProvider::ResetWithWebViewConfiguration(
       // displayed and also prevents the iOS 13 ContextMenu delegate methods
       // from being called.
       // https://github.com/WebKit/webkit/blob/1233effdb7826a5f03b3cdc0f67d713741e70976/Source/WebKit/UIProcess/API/Cocoa/WKWebViewConfiguration.mm#L307
-      BOOL enable_long_press_action =
-          !web::GetWebClient()->EnableLongPressAndForceTouchHandling();
-      [configuration_ setValue:@(enable_long_press_action)
+      BOOL disable_long_press_system_actions =
+
+          web::GetWebClient()->EnableLongPressAndForceTouchHandling() ||
+          web::GetWebClient()->EnableLongPressUIContextMenu();
+      [configuration_ setValue:@(!disable_long_press_system_actions)
                         forKey:@"longPressActionsEnabled"];
     } @catch (NSException* exception) {
       NOTREACHED() << "Error setting value for longPressActionsEnabled";
@@ -134,27 +140,15 @@ void WKWebViewConfigurationProvider::ResetWithWebViewConfiguration(
 
     // WKWebView's "fradulentWebsiteWarning" is an iOS 13+ feature that is
     // conceptually similar to Safe Browsing but uses a non-Google provider and
-    // only works for devices in certain locales. Disable this feature when
-    // Safe Browsing is available.
-    if (base::FeatureList::IsEnabled(
-            safe_browsing::kSafeBrowsingAvailableOnIOS)) {
-      [[configuration_ preferences] setFraudulentWebsiteWarningEnabled:NO];
-    }
+    // only works for devices in certain locales. Disable this feature since
+    // Chrome uses Google-provided Safe Browsing.
+    [[configuration_ preferences] setFraudulentWebsiteWarningEnabled:NO];
   }
 
   [configuration_ setAllowsInlineMediaPlayback:YES];
   // setJavaScriptCanOpenWindowsAutomatically is required to support popups.
   [[configuration_ preferences] setJavaScriptCanOpenWindowsAutomatically:YES];
-  // Main frame script depends upon scripts injected into all frames, so the
-  // "AllFrames" scripts must be injected first.
-  [[configuration_ userContentController]
-      addUserScript:InternalGetDocumentStartScriptForAllFrames(browser_state_)];
-  [[configuration_ userContentController]
-      addUserScript:InternalGetDocumentStartScriptForMainFrame(browser_state_)];
-  [[configuration_ userContentController]
-      addUserScript:InternalGetDocumentEndScriptForAllFrames(browser_state_)];
-  [[configuration_ userContentController]
-      addUserScript:InternalGetDocumentEndScriptForMainFrame(browser_state_)];
+  UpdateScripts();
 
   if (!scheme_handler_) {
     scoped_refptr<network::SharedURLLoaderFactory> shared_loader_factory =
@@ -169,6 +163,9 @@ void WKWebViewConfigurationProvider::ResetWithWebViewConfiguration(
     [configuration_ setURLSchemeHandler:scheme_handler_
                            forURLScheme:base::SysUTF8ToNSString(scheme)];
   }
+
+  content_rule_list_provider_->SetUserContentController(
+      configuration_.userContentController);
 
   for (auto& observer : observers_)
     observer.DidCreateNewConfiguration(this, configuration_);
@@ -205,6 +202,40 @@ WKWebViewConfigurationProvider::GetScriptMessageRouter() {
         initWithUserContentController:userContentController];
   }
   return router_;
+}
+
+WKContentRuleListProvider*
+WKWebViewConfigurationProvider::GetContentRuleListProvider() {
+  return content_rule_list_provider_.get();
+}
+
+void WKWebViewConfigurationProvider::UpdateScripts() {
+  [configuration_.userContentController removeAllUserScripts];
+
+  JavaScriptFeatureManager* java_script_feature_manager =
+      JavaScriptFeatureManager::FromBrowserState(browser_state_);
+
+  std::vector<JavaScriptFeature*> features;
+  for (JavaScriptFeature* feature :
+       java_script_features::GetBuiltInJavaScriptFeatures()) {
+    features.push_back(feature);
+  }
+  for (JavaScriptFeature* feature :
+       GetWebClient()->GetJavaScriptFeatures(browser_state_)) {
+    features.push_back(feature);
+  }
+  java_script_feature_manager->ConfigureFeatures(features);
+
+  // Main frame script depends upon scripts injected into all frames, so the
+  // "AllFrames" scripts must be injected first.
+  [configuration_.userContentController
+      addUserScript:InternalGetDocumentStartScriptForAllFrames(browser_state_)];
+  [configuration_.userContentController
+      addUserScript:InternalGetDocumentStartScriptForMainFrame(browser_state_)];
+  [configuration_.userContentController
+      addUserScript:InternalGetDocumentEndScriptForAllFrames(browser_state_)];
+  [configuration_.userContentController
+      addUserScript:InternalGetDocumentEndScriptForMainFrame(browser_state_)];
 }
 
 void WKWebViewConfigurationProvider::Purge() {

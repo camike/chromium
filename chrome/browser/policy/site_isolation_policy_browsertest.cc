@@ -22,6 +22,7 @@
 #include "content/public/browser/site_isolation_policy.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "url/gurl.h"
 
@@ -59,7 +60,7 @@ class SiteIsolationPolicyBrowserTest : public InProcessBrowserTest {
     }
   }
 
-  policy::MockConfigurationPolicyProvider provider_;
+  testing::NiceMock<policy::MockConfigurationPolicyProvider> provider_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SiteIsolationPolicyBrowserTest);
@@ -76,8 +77,10 @@ class SitePerProcessPolicyBrowserTest : public SiteIsolationPolicyBrowserTest {
     // to the renderer via a command-line. Setting the policy in the test
     // itself or in SetUpOnMainThread works for update-able policies, but
     // is too late for this one.
-    EXPECT_CALL(provider_, IsInitializationComplete(testing::_))
-        .WillRepeatedly(testing::Return(true));
+    ON_CALL(provider_, IsInitializationComplete(testing::_))
+        .WillByDefault(testing::Return(true));
+    ON_CALL(provider_, IsFirstPolicyLoadComplete(testing::_))
+        .WillByDefault(testing::Return(true));
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
 
     policy::PolicyMap values;
@@ -89,7 +92,7 @@ class SitePerProcessPolicyBrowserTest : public SiteIsolationPolicyBrowserTest {
 #endif
     values.Set(kPolicyName, policy::POLICY_LEVEL_MANDATORY,
                policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
-               std::make_unique<base::Value>(policy_value), nullptr);
+               base::Value(policy_value), nullptr);
     provider_.UpdateChromePolicy(values);
   }
 
@@ -112,16 +115,18 @@ class IsolateOriginsPolicyBrowserTest : public SiteIsolationPolicyBrowserTest {
     // to the renderer via a command-line. Setting the policy in the test
     // itself or in SetUpOnMainThread works for update-able policies, but
     // is too late for this one.
-    EXPECT_CALL(provider_, IsInitializationComplete(testing::_))
-        .WillRepeatedly(testing::Return(true));
+    ON_CALL(provider_, IsInitializationComplete(testing::_))
+        .WillByDefault(testing::Return(true));
+    ON_CALL(provider_, IsFirstPolicyLoadComplete(testing::_))
+        .WillByDefault(testing::Return(true));
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
 
     policy::PolicyMap values;
-    values.Set(policy::key::kIsolateOrigins, policy::POLICY_LEVEL_MANDATORY,
-               policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
-               std::make_unique<base::Value>(
-                   "https://policy1.example.org/,http://policy2.example.com"),
-               nullptr);
+    values.Set(
+        policy::key::kIsolateOrigins, policy::POLICY_LEVEL_MANDATORY,
+        policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
+        base::Value("https://policy1.example.org/,http://policy2.example.com"),
+        nullptr);
     provider_.UpdateChromePolicy(values);
   }
 
@@ -167,11 +172,11 @@ IN_PROC_BROWSER_TEST_F(IsolateOriginsPolicyBrowserTest, Simple) {
 
   // Simulate updating the policy at "browser runtime".
   policy::PolicyMap values;
-  values.Set(policy::key::kIsolateOrigins, policy::POLICY_LEVEL_MANDATORY,
-             policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
-             std::make_unique<base::Value>(
-                 "https://policy3.example.org/,http://policy4.example.com"),
-             nullptr);
+  values.Set(
+      policy::key::kIsolateOrigins, policy::POLICY_LEVEL_MANDATORY,
+      policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
+      base::Value("https://policy3.example.org/,http://policy4.example.com"),
+      nullptr);
   provider_.UpdateChromePolicy(values);
 
   // Verify that the policy update above has taken effect:

@@ -15,6 +15,7 @@
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/scoped_cftyperef.h"
+#include "base/notreached.h"
 #include "base/numerics/safe_math.h"
 #include "base/stl_util.h"
 #include "base/strings/sys_string_conversions.h"
@@ -76,7 +77,7 @@ struct UDIFResourceFile {
 
   uint8_t  reserved2[40];
 
-  UDIFChecksum master_checksum;
+  UDIFChecksum main_checksum;
 
   uint32_t image_variant;
   uint64_t sector_count;
@@ -108,7 +109,7 @@ static void ConvertBigEndian(UDIFResourceFile* file) {
   ConvertBigEndian(&file->plist_length);
   ConvertBigEndian(&file->code_signature_offset);
   ConvertBigEndian(&file->code_signature_length);
-  ConvertBigEndian(&file->master_checksum);
+  ConvertBigEndian(&file->main_checksum);
   ConvertBigEndian(&file->image_variant);
   ConvertBigEndian(&file->sector_count);
   // Reserved fields are skipped.

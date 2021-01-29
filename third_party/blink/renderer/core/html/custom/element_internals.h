@@ -14,18 +14,17 @@
 
 namespace blink {
 
-class DOMTokenList;
+class CustomStateSet;
 class HTMLElement;
 class ValidityStateFlags;
 
 class CORE_EXPORT ElementInternals : public ScriptWrappable,
                                      public ListedElement {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(ElementInternals);
 
  public:
   ElementInternals(HTMLElement& target);
-  void Trace(Visitor* visitor) override;
+  void Trace(Visitor* visitor) const override;
 
   HTMLElement& Target() const { return *target_; }
   void DidUpgrade();
@@ -51,9 +50,11 @@ class CORE_EXPORT ElementInternals : public ScriptWrappable,
   bool checkValidity(ExceptionState& exception_state);
   bool reportValidity(ExceptionState& exception_state);
   LabelsNodeList* labels(ExceptionState& exception_state);
-  DOMTokenList* states();
+  CustomStateSet* states();
 
   bool HasState(const AtomicString& state) const;
+
+  ShadowRoot* shadowRoot() const;
 
   // We need these functions because we are reflecting ARIA attributes.
   // See dom/aria_attributes.idl.
@@ -106,7 +107,7 @@ class CORE_EXPORT ElementInternals : public ScriptWrappable,
   Member<ValidityStateFlags> validity_flags_;
   Member<Element> validation_anchor_;
 
-  Member<DOMTokenList> custom_states_;
+  Member<CustomStateSet> custom_states_;
 
   HashMap<QualifiedName, AtomicString> accessibility_semantics_map_;
 

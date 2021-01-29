@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "media/base/test_data_util.h"
 #include "media/gpu/test/video.h"
@@ -47,11 +48,10 @@ constexpr const char* help_msg =
     "                       e.g. --vmodule=*media/gpu*=2.\n\n"
     "  --disable_validator  disable frame validation.\n"
     "  --use_vd             use the new VD-based video decoders, instead of\n"
-    "                       the default VDA-based video decoders.\n\n"
-    "  --use_vd_vda         use the new VD-based video decoders with a wrapper"
-    "                       that translates to the VDA interface, used to test"
-    "                       interaction with older components expecting the VDA"
-    "                       interface.\n"
+    "                       the default VDA-based video decoders.\n"
+    "  --use_vd_vda         use the new VD-based video decoders with a\n"
+    "                       wrapper that translates to the VDA interface,\n"
+    "                       used to test interaction with older components\n"
     "  --output_frames      write the selected video frames to disk, possible\n"
     "                       values are \"all|corrupt\".\n"
     "  --output_format      set the format of frames saved to disk, supported\n"
@@ -104,9 +104,17 @@ class VideoDecoderTest : public ::testing::Test {
             output_folder, g_env->GetFrameOutputFormat(),
             g_env->GetFrameOutputLimit());
       }
-
+      if (g_env->Video()->BitDepth() != 8u &&
+          g_env->Video()->BitDepth() != 10u) {
+        LOG(ERROR) << "Unsupported bit depth: "
+                   << base::strict_cast<int>(g_env->Video()->BitDepth());
+        return nullptr;
+      }
+      const VideoPixelFormat validation_format =
+          g_env->Video()->BitDepth() == 10 ? PIXEL_FORMAT_YUV420P10
+                                           : PIXEL_FORMAT_I420;
       frame_processors.push_back(media::test::MD5VideoFrameValidator::Create(
-          video->FrameChecksums(), PIXEL_FORMAT_I420, std::move(frame_writer)));
+          video->FrameChecksums(), validation_format, std::move(frame_writer)));
     }
 
     config.implementation = g_env->GetDecoderImplementation();
@@ -183,7 +191,11 @@ TEST_F(VideoDecoderTest, ResetMidStream) {
   EXPECT_TRUE(tvp->WaitForFlushDone());
 
   EXPECT_EQ(tvp->GetResetDoneCount(), 1u);
-  EXPECT_EQ(tvp->GetFlushDoneCount(), 1u);
+  // In the case of a very short clip the decoder may be able
+  // to decode all the frames before a reset is sent.
+  // A flush occurs after the last frame, so in this situation
+  // there will be 2 flushes that occur.
+  EXPECT_TRUE(tvp->GetFlushDoneCount() == 1u || tvp->GetFlushDoneCount() == 2u);
   EXPECT_EQ(tvp->GetFrameDecodedCount(),
             numFramesDecoded + g_env->Video()->NumFrames());
   EXPECT_TRUE(tvp->WaitForFrameProcessors());

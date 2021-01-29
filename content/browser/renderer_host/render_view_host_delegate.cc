@@ -4,9 +4,6 @@
 
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 
-#include "content/public/common/web_preferences.h"
-#include "url/gurl.h"
-
 namespace content {
 
 RenderViewHostDelegateView* RenderViewHostDelegate::GetDelegateView() {
@@ -33,8 +30,8 @@ RenderViewHostDelegate::GetSessionStorageNamespaceMap() {
   return SessionStorageNamespaceMap();
 }
 
-FrameTree* RenderViewHostDelegate::GetFrameTree() {
-  return nullptr;
+bool RenderViewHostDelegate::IsWebPreferencesSet() const {
+  return false;
 }
 
 bool RenderViewHostDelegate::IsNeverComposited() {

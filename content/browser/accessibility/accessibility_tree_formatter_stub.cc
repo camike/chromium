@@ -2,25 +2,34 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "content/browser/accessibility/accessibility_tree_formatter_blink.h"
+#include "content/public/browser/ax_inspect_factory.h"
+#include "ui/base/buildflags.h"
 
 namespace content {
 
-#if !defined(PLATFORM_HAS_NATIVE_ACCESSIBILITY_IMPL)
+#if !BUILDFLAG(HAS_PLATFORM_ACCESSIBILITY_SUPPORT)
+
 // static
-std::unique_ptr<AccessibilityTreeFormatter>
-AccessibilityTreeFormatter::Create() {
-  return AccessibilityTreeFormatterBlink::CreateBlink();
+std::unique_ptr<ui::AXTreeFormatter>
+AXInspectFactory::CreatePlatformFormatter() {
+  return AXInspectFactory::CreateFormatter(kBlink);
 }
 
 // static
-std::vector<AccessibilityTreeFormatter::TestPass>
-AccessibilityTreeFormatter::GetTestPasses() {
-  return {
-      {"blink", &AccessibilityTreeFormatterBlink::CreateBlink},
-  };
+std::unique_ptr<ui::AXTreeFormatter> AXInspectFactory::CreateFormatter(
+    AXInspectFactory::Type type) {
+  switch (type) {
+    case kBlink:
+      return std::make_unique<AccessibilityTreeFormatterBlink>();
+    default:
+      NOTREACHED() << "Unsupported formatter type " << type;
+  }
+  return nullptr;
 }
+
 #endif
 
 }  // namespace content

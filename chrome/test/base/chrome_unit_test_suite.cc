@@ -6,10 +6,10 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/process/process_handle.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/data_use_measurement/chrome_data_use_measurement.h"
@@ -32,8 +32,9 @@
 #include "ui/base/ui_base_paths.h"
 #include "ui/gl/test/gl_surface_test_support.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chromeos/constants/chromeos_paths.h"
+#include "chromeos/dbus/constants/dbus_paths.h"
 #endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -56,8 +57,12 @@ class ChromeContentBrowserClientWithoutNetworkServiceInitialization
 // Creates a TestingBrowserProcess for each test.
 class ChromeUnitTestSuiteInitializer : public testing::EmptyTestEventListener {
  public:
-  ChromeUnitTestSuiteInitializer() {}
-  virtual ~ChromeUnitTestSuiteInitializer() {}
+  ChromeUnitTestSuiteInitializer() = default;
+  ChromeUnitTestSuiteInitializer(const ChromeUnitTestSuiteInitializer&) =
+      delete;
+  ChromeUnitTestSuiteInitializer& operator=(
+      const ChromeUnitTestSuiteInitializer&) = delete;
+  ~ChromeUnitTestSuiteInitializer() override = default;
 
   void OnTestStart(const testing::TestInfo& test_info) override {
     content_client_.reset(new ChromeContentClient);
@@ -80,7 +85,7 @@ class ChromeUnitTestSuiteInitializer : public testing::EmptyTestEventListener {
     browser_content_client_.reset();
     utility_content_client_.reset();
     content_client_.reset();
-    content::SetContentClient(NULL);
+    content::SetContentClient(nullptr);
 
     TestingBrowserProcess::DeleteInstance();
   }
@@ -90,16 +95,12 @@ class ChromeUnitTestSuiteInitializer : public testing::EmptyTestEventListener {
   std::unique_ptr<ChromeContentClient> content_client_;
   std::unique_ptr<ChromeContentBrowserClient> browser_content_client_;
   std::unique_ptr<ChromeContentUtilityClient> utility_content_client_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeUnitTestSuiteInitializer);
 };
 
 }  // namespace
 
 ChromeUnitTestSuite::ChromeUnitTestSuite(int argc, char** argv)
     : ChromeTestSuite(argc, argv) {}
-
-ChromeUnitTestSuite::~ChromeUnitTestSuite() {}
 
 void ChromeUnitTestSuite::Initialize() {
   // Add an additional listener to do the extra initialization for unit tests.
@@ -142,15 +143,16 @@ void ChromeUnitTestSuite::InitializeProviders() {
   content::RegisterPathProvider();
   ui::RegisterPathProvider();
   component_updater::RegisterPathProvider(chrome::DIR_COMPONENTS,
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
                                           chromeos::DIR_PREINSTALLED_COMPONENTS,
 #else
                                           chrome::DIR_INTERNAL_PLUGINS,
 #endif
                                           chrome::DIR_USER_DATA);
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   chromeos::RegisterPathProvider();
+  chromeos::dbus_paths::RegisterPathProvider();
 #endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -172,9 +174,15 @@ void ChromeUnitTestSuite::InitializeResourceBundle() {
   // Force unittests to run using en-US so if we test against string
   // output, it'll pass regardless of the system language.
   ui::ResourceBundle::InitSharedInstanceWithLocale(
-      "en-US", NULL, ui::ResourceBundle::LOAD_COMMON_RESOURCES);
+      "en-US", nullptr, ui::ResourceBundle::LOAD_COMMON_RESOURCES);
   base::FilePath resources_pack_path;
   base::PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
   ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
       resources_pack_path, ui::SCALE_FACTOR_NONE);
+
+  base::FilePath unit_tests_pack_path;
+  ASSERT_TRUE(base::PathService::Get(base::DIR_MODULE, &unit_tests_pack_path));
+  unit_tests_pack_path = unit_tests_pack_path.AppendASCII("unit_tests.pak");
+  ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
+      unit_tests_pack_path, ui::SCALE_FACTOR_NONE);
 }

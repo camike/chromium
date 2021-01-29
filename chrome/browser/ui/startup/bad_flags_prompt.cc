@@ -14,6 +14,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/common/chrome_paths.h"
@@ -36,8 +37,9 @@
 #include "gpu/config/gpu_switches.h"
 #include "media/base/media_switches.h"
 #include "media/media_buildflags.h"
+#include "sandbox/policy/switches.h"
+#include "services/device/public/cpp/hid/hid_switches.h"
 #include "services/network/public/cpp/network_switches.h"
-#include "services/service_manager/sandbox/switches.h"
 #include "third_party/blink/public/common/features.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -58,12 +60,12 @@ namespace {
 static const char* kBadFlags[] = {
     network::switches::kIgnoreCertificateErrorsSPKIList,
     // These flags disable sandbox-related security.
-    service_manager::switches::kDisableGpuSandbox,
-    service_manager::switches::kDisableSeccompFilterSandbox,
-    service_manager::switches::kDisableSetuidSandbox,
-    service_manager::switches::kNoSandbox,
+    sandbox::policy::switches::kDisableGpuSandbox,
+    sandbox::policy::switches::kDisableSeccompFilterSandbox,
+    sandbox::policy::switches::kDisableSetuidSandbox,
+    sandbox::policy::switches::kNoSandbox,
 #if defined(OS_WIN)
-    service_manager::switches::kAllowThirdPartyModules,
+    sandbox::policy::switches::kAllowThirdPartyModules,
 #endif
     switches::kDisableSiteIsolation,
     switches::kDisableWebSecurity,
@@ -79,6 +81,10 @@ static const char* kBadFlags[] = {
     switches::kDisableWebRtcEncryption,
     switches::kIgnoreCertificateErrors,
 
+    // This flag could prevent QuotaChange events from firing or cause the event
+    // to fire too often, potentially impacting web application behavior.
+    switches::kQuotaChangeEventInterval,
+
     // These flags change the URLs that handle PII.
     switches::kGaiaUrl,
     translate::switches::kTranslateScriptURL,
@@ -88,24 +94,26 @@ static const char* kBadFlags[] = {
     extensions::switches::kExtensionsOnChromeURLs,
 #endif
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
     // Speech dispatcher is buggy, it can crash and it can make Chrome freeze.
     // http://crbug.com/327295
     switches::kEnableSpeechDispatcher,
 #endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
     // This flag is only used for performance tests in mac, to ensure that
     // calculated values are reliable. Should not be used elsewhere.
     switches::kUseHighGPUThreadPriorityForPerfTests,
-#endif  // OS_MACOSX
+#endif  // OS_MAC
 
     // These flags control Blink feature state, which is not supported and is
     // intended only for use by Chromium developers.
     switches::kDisableBlinkFeatures,
     switches::kEnableBlinkFeatures,
 
-    // This flag allows people to whitelist certain origins as secure, even
+    // This flag allows people to allowlist certain origins as secure, even
     // if they are not.
     network::switches::kUnsafelyTreatInsecureOriginAsSecure,
 
@@ -136,6 +144,9 @@ static const char* kBadFlags[] = {
     // A flag to support local file based WebBundle loading, only for testing
     // purpose.
     switches::kTrustableWebBundleFileUrl,
+
+    // A flag to bypass the WebHID blocklist for testing purposes.
+    switches::kDisableHidBlocklist,
 };
 #endif  // OS_ANDROID
 
@@ -143,7 +154,6 @@ static const char* kBadFlags[] = {
 // "stability and security will suffer".
 static const base::Feature* kBadFeatureFlagsInAboutFlags[] = {
     &blink::features::kRawClipboard,
-    &features::kAllowSignedHTTPExchangeCertsWithoutExtension,
     &features::kWebBundlesFromNetwork,
 #if defined(OS_ANDROID)
     &chrome::android::kCommandLineOnNonRooted,

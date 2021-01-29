@@ -25,7 +25,6 @@
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/memory/ref_counted.h"
 #include "base/numerics/math_constants.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/scoped_feature_list.h"
@@ -46,6 +45,7 @@
 #include "ui/display/manager/test/touch_device_manager_test_api.h"
 #include "ui/display/screen.h"
 #include "ui/display/test/display_manager_test_api.h"
+#include "ui/events/devices/touchscreen_device.h"
 #include "ui/gfx/geometry/vector3d_f.h"
 
 namespace ash {
@@ -129,6 +129,10 @@ class DisplayPrefsTest : public AshTestBase {
   void LoggedInAsUser() { SimulateUserLogin("user1@test.com"); }
 
   void LoggedInAsGuest() { SimulateGuestLogin(); }
+
+  void LoggedInAsPublicAccount() {
+    SimulateUserLogin("pa@test.com", user_manager::USER_TYPE_PUBLIC_ACCOUNT);
+  }
 
   void LoadDisplayPreferences() { display_prefs()->LoadDisplayPreferences(); }
 
@@ -342,9 +346,10 @@ TEST_F(DisplayPrefsTest, BasicStores) {
   display_manager()->UpdateZoomFactor(id2, zoom_factor_2);
 
   // Set touch calibration data for display |id2|.
-  uint32_t id_1 = 1234;
-  uint32_t port_1 = 5678;
-  const display::TouchDeviceIdentifier touch_device_identifier_1(id_1, port_1);
+  ui::TouchscreenDevice touchdevice(11, ui::InputDeviceType::INPUT_DEVICE_USB,
+                                    std::string("test touch device"),
+                                    gfx::Size(123, 456), 1);
+  touchdevice.phys = "5678";
   display::TouchCalibrationData::CalibrationPointPairQuad point_pair_quad_1 = {
       {std::make_pair(gfx::Point(10, 10), gfx::Point(11, 12)),
        std::make_pair(gfx::Point(190, 10), gfx::Point(195, 8)),
@@ -352,9 +357,11 @@ TEST_F(DisplayPrefsTest, BasicStores) {
        std::make_pair(gfx::Point(190, 90), gfx::Point(189, 88))}};
   gfx::Size touch_size_1(200, 150);
 
-  uint32_t id_2 = 2345;
-  uint32_t port_2 = 3456;
-  const display::TouchDeviceIdentifier touch_device_identifier_2(id_2, port_2);
+  ui::TouchscreenDevice touchdevice_2(12, ui::InputDeviceType::INPUT_DEVICE_USB,
+                                      std::string("test touch device 2"),
+                                      gfx::Size(132, 465), 1);
+  touchdevice_2.phys = "3456";
+
   display::TouchCalibrationData::CalibrationPointPairQuad point_pair_quad_2 = {
       {std::make_pair(gfx::Point(10, 10), gfx::Point(11, 12)),
        std::make_pair(gfx::Point(190, 10), gfx::Point(195, 8)),
@@ -364,15 +371,17 @@ TEST_F(DisplayPrefsTest, BasicStores) {
 
   // Create a 3rd touch device which has the same primary ID as the 2nd touch
   // device but is connected to a different port.
-  uint32_t port_3 = 1357;
-  const display::TouchDeviceIdentifier touch_device_identifier_3(id_2, port_3);
+  ui::TouchscreenDevice touchdevice_3(15, ui::InputDeviceType::INPUT_DEVICE_USB,
+                                      std::string("test touch device 3"),
+                                      gfx::Size(231, 416), 1);
+  touchdevice_3.phys = "1357";
 
-  display_manager()->SetTouchCalibrationData(
-      id2, point_pair_quad_1, touch_size_1, touch_device_identifier_1);
-  display_manager()->SetTouchCalibrationData(
-      id2, point_pair_quad_2, touch_size_2, touch_device_identifier_2);
-  display_manager()->SetTouchCalibrationData(
-      id2, point_pair_quad_2, touch_size_1, touch_device_identifier_3);
+  display_manager()->SetTouchCalibrationData(id2, point_pair_quad_1,
+                                             touch_size_1, touchdevice);
+  display_manager()->SetTouchCalibrationData(id2, point_pair_quad_2,
+                                             touch_size_2, touchdevice_2);
+  display_manager()->SetTouchCalibrationData(id2, point_pair_quad_2,
+                                             touch_size_1, touchdevice_3);
 
   const base::DictionaryValue* displays =
       local_state()->GetDictionary(prefs::kSecondaryDisplays);
@@ -467,7 +476,7 @@ TEST_F(DisplayPrefsTest, BasicStores) {
   EXPECT_FALSE(property->GetInteger("width", &width));
   EXPECT_FALSE(property->GetInteger("height", &height));
 
-  display::ManagedDisplayMode mode(gfx::Size(300, 200), 60.0f, false, true,
+  display::ManagedDisplayMode mode(gfx::Size(300, 200), 60.0f, false, false,
                                    1.25f /* device_scale_factor */);
   display_manager()->SetDisplayMode(id2, mode);
 
@@ -599,7 +608,6 @@ TEST_F(DisplayPrefsTest, BasicStores) {
 }
 
 TEST_F(DisplayPrefsTest, PreventStore) {
-  ResolutionNotificationController::SuppressTimerForTest();
   LoggedInAsUser();
   UpdateDisplay("400x300#500x400|400x300|300x200");
   int64_t id = display::Screen::GetScreen()->GetPrimaryDisplay().id();
@@ -607,8 +615,9 @@ TEST_F(DisplayPrefsTest, PreventStore) {
   // display preferences should not stored meanwhile.
   Shell* shell = Shell::Get();
 
-  display::ManagedDisplayMode old_mode(gfx::Size(400, 300));
-  display::ManagedDisplayMode new_mode(gfx::Size(500, 400));
+  display::ManagedDisplayMode old_mode(gfx::Size(400, 300), 60.0f, false,
+                                       false);
+  display::ManagedDisplayMode new_mode(gfx::Size(500, 400), 60.0f, false, true);
   EXPECT_TRUE(shell->resolution_notification_controller()
                   ->PrepareNotificationAndSetDisplayMode(
                       id, old_mode, new_mode, mojom::DisplayConfigSource::kUser,
@@ -764,6 +773,84 @@ TEST_F(DisplayPrefsTestGuest, DisplayPrefsTestGuest) {
   EXPECT_EQ(1.0f, info_primary.zoom_factor());
 }
 
+// Test case which accepts the boolean value of the
+// AllowMGSToStoreDisplayProperties policy. When set to True, this policy allows
+// managed guest session to store display configuration permanently in the local
+// state. When set to False or unset, the display configuration is not stored in
+// the local state.
+class DisplayPrefsPublicAccountTest : public DisplayPrefsTestGuest,
+                                      public testing::WithParamInterface<bool> {
+ public:
+  bool IsMGSAllowedToStoreDisplayProperties() const { return GetParam(); }
+
+  void SetUp() override {
+    DisplayPrefsTestGuest::SetUp();
+
+    UpdateDisplay("200x200*2,200x200");
+    local_state()->SetBoolean(prefs::kAllowMGSToStoreDisplayProperties,
+                              IsMGSAllowedToStoreDisplayProperties());
+  }
+};
+
+TEST_P(DisplayPrefsPublicAccountTest, StoreDisplayPrefsForPublicAccount) {
+  WindowTreeHostManager* window_tree_host_manager =
+      Shell::Get()->window_tree_host_manager();
+  LoggedInAsPublicAccount();
+
+  int64_t id1 = display::Screen::GetScreen()->GetPrimaryDisplay().id();
+  display::test::ScopedSetInternalDisplayId set_internal(
+      Shell::Get()->display_manager(), id1);
+  int64_t id2 = display::test::DisplayManagerTestApi(display_manager())
+                    .GetSecondaryDisplay()
+                    .id();
+  display_manager()->SetLayoutForCurrentDisplays(
+      display::test::CreateDisplayLayout(display_manager(),
+                                         display::DisplayPlacement::TOP, 10));
+  const float scale = 1.25f;
+  display_manager()->UpdateZoomFactor(id1, 1.f / scale);
+  window_tree_host_manager->SetPrimaryDisplayId(id2);
+  const int64_t new_primary =
+      display::Screen::GetScreen()->GetPrimaryDisplay().id();
+  window_tree_host_manager->SetOverscanInsets(new_primary,
+                                              gfx::Insets(10, 11, 12, 13));
+  display_manager()->SetDisplayRotation(new_primary,
+                                        display::Display::ROTATE_90,
+                                        display::Display::RotationSource::USER);
+
+  // Preferences should only be stored if the AllowMGSToStoreDisplayProperties
+  // policy was set to true.
+  EXPECT_EQ(IsMGSAllowedToStoreDisplayProperties(),
+            local_state()
+                ->FindPreference(prefs::kSecondaryDisplays)
+                ->HasUserSetting());
+  EXPECT_EQ(IsMGSAllowedToStoreDisplayProperties(),
+            local_state()
+                ->FindPreference(prefs::kDisplayProperties)
+                ->HasUserSetting());
+
+  // Settings are still notified to the system.
+  display::Screen* screen = display::Screen::GetScreen();
+  EXPECT_EQ(id2, screen->GetPrimaryDisplay().id());
+  const display::DisplayPlacement& placement =
+      display_manager()->GetCurrentDisplayLayout().placement_list[0];
+  EXPECT_EQ(display::DisplayPlacement::BOTTOM, placement.position);
+  EXPECT_EQ(-10, placement.offset);
+  const display::Display& primary_display = screen->GetPrimaryDisplay();
+  EXPECT_EQ("178x176", primary_display.bounds().size().ToString());
+  EXPECT_EQ(display::Display::ROTATE_90, primary_display.rotation());
+
+  const display::ManagedDisplayInfo& info1 =
+      display_manager()->GetDisplayInfo(id1);
+  EXPECT_FLOAT_EQ(1.f / scale, info1.zoom_factor());
+
+  const display::ManagedDisplayInfo& info_primary =
+      display_manager()->GetDisplayInfo(new_primary);
+  EXPECT_EQ(display::Display::ROTATE_90, info_primary.GetActiveRotation());
+  EXPECT_EQ(1.0f, info_primary.zoom_factor());
+}
+
+INSTANTIATE_TEST_CASE_P(All, DisplayPrefsPublicAccountTest, testing::Bool());
+
 TEST_F(DisplayPrefsTest, StorePowerStateNoLogin) {
   EXPECT_FALSE(local_state()->HasPrefPath(prefs::kDisplayPowerState));
 
@@ -836,20 +923,18 @@ TEST_F(DisplayPrefsTest, DontSaveTabletModeControllerRotations) {
                                         display::Display::RotationSource::USER);
 
   // Open up 270 degrees to trigger tablet mode
-  scoped_refptr<AccelerometerUpdate> update(new AccelerometerUpdate());
-  update->Set(ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD, false, 0.0f, 0.0f,
-              -base::kMeanGravityFloat);
-  update->Set(ACCELEROMETER_SOURCE_SCREEN, false, 0.0f, base::kMeanGravityFloat,
-              0.0f);
+  AccelerometerUpdate update;
+  update.Set(ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD, 0.0f, 0.0f,
+             -base::kMeanGravityFloat);
+  update.Set(ACCELEROMETER_SOURCE_SCREEN, 0.0f, base::kMeanGravityFloat, 0.0f);
   TabletModeController* controller = Shell::Get()->tablet_mode_controller();
   controller->OnAccelerometerUpdated(update);
   EXPECT_TRUE(controller->InTabletMode());
 
   // Trigger 90 degree rotation
-  update->Set(ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD, false,
-              base::kMeanGravityFloat, 0.0f, 0.0f);
-  update->Set(ACCELEROMETER_SOURCE_SCREEN, false, base::kMeanGravityFloat, 0.0f,
-              0.0f);
+  update.Set(ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD, base::kMeanGravityFloat,
+             0.0f, 0.0f);
+  update.Set(ACCELEROMETER_SOURCE_SCREEN, base::kMeanGravityFloat, 0.0f, 0.0f);
   controller->OnAccelerometerUpdated(update);
   shell->screen_orientation_controller()->OnAccelerometerUpdated(update);
   EXPECT_EQ(display::Display::ROTATE_90, GetCurrentInternalDisplayRotation());
@@ -986,11 +1071,10 @@ TEST_F(DisplayPrefsTest, LoadRotationNoLogin) {
   EXPECT_EQ(display::Display::ROTATE_0, before_tablet_mode_rotation);
 
   // Open up 270 degrees to trigger tablet mode
-  scoped_refptr<AccelerometerUpdate> update(new AccelerometerUpdate());
-  update->Set(ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD, false, 0.0f, 0.0f,
-              -base::kMeanGravityFloat);
-  update->Set(ACCELEROMETER_SOURCE_SCREEN, false, 0.0f, base::kMeanGravityFloat,
-              0.0f);
+  AccelerometerUpdate update;
+  update.Set(ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD, 0.0f, 0.0f,
+             -base::kMeanGravityFloat);
+  update.Set(ACCELEROMETER_SOURCE_SCREEN, 0.0f, base::kMeanGravityFloat, 0.0f);
   TabletModeController* tablet_mode_controller =
       Shell::Get()->tablet_mode_controller();
   tablet_mode_controller->OnAccelerometerUpdated(update);
@@ -1231,9 +1315,13 @@ TEST_F(DisplayPrefsTest, LegacyTouchCalibrationDataSupport) {
   gfx::Size touch_size_2(300, 300);
   display::TouchCalibrationData data_2(point_pair_quad, touch_size_2);
 
-  display::TouchDeviceIdentifier identifier(12345);
+  const ui::TouchscreenDevice touchdevice_4(
+      19, ui::InputDeviceType::INPUT_DEVICE_USB,
+      std::string("test touch device 4"), gfx::Size(231, 416), 1);
+  display::TouchDeviceIdentifier identifier =
+      display::TouchDeviceIdentifier::FromDevice(touchdevice_4);
   display_manager()->SetTouchCalibrationData(id_2, point_pair_quad,
-                                             touch_size_2, identifier);
+                                             touch_size_2, touchdevice_4);
 
   EXPECT_TRUE(tdm->touch_associations().count(identifier));
   EXPECT_TRUE(tdm->touch_associations().at(identifier).count(id_2));

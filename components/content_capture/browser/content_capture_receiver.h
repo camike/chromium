@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
+#include "components/content_capture/browser/content_capture_frame.h"
 #include "components/content_capture/common/content_capture.mojom.h"
 #include "components/content_capture/common/content_capture_data.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
@@ -44,11 +45,13 @@ class ContentCaptureReceiver : public mojom::ContentCaptureReceiver {
 
   content::RenderFrameHost* rfh() const { return rfh_; }
 
-  // Return ContentCaptureData of the associated frame.
-  const ContentCaptureData& GetFrameContentCaptureData();
-  const ContentCaptureData& GetFrameContentCaptureDataLastSeen() const {
+  // Return ContentCaptureFrame of the associated frame.
+  const ContentCaptureFrame& GetContentCaptureFrame();
+  const ContentCaptureFrame& GetContentCaptureFrameLastSeen() const {
     return frame_content_capture_data_;
   }
+
+  void RemoveSession();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ContentCaptureReceiverTest, RenderFrameHostGone);
@@ -58,7 +61,7 @@ class ContentCaptureReceiver : public mojom::ContentCaptureReceiver {
 
   mojo::AssociatedReceiver<mojom::ContentCaptureReceiver> receiver_{this};
   content::RenderFrameHost* rfh_;
-  ContentCaptureData frame_content_capture_data_;
+  ContentCaptureFrame frame_content_capture_data_;
 
   // The content id of the associated frame, it is composed of RenderProcessHost
   // unique ID and frame routing ID, and is unique in a WebContents.
@@ -68,6 +71,12 @@ class ContentCaptureReceiver : public mojom::ContentCaptureReceiver {
   // ContentCaptureReceiverManager can't get parent frame id in both cases.
   int64_t id_;
   bool content_capture_enabled_ = false;
+
+  // Indicates whether this receiver is visible to consumer. It should be set
+  // upon the |frame_content_capture_data_| is created and reset on the session
+  // removed; the former is caused by either the content captured or the
+  // |frame_content_capture_data_| required by child frame.
+  bool has_session_ = false;
   mojo::AssociatedRemote<mojom::ContentCaptureSender> content_capture_sender_;
   DISALLOW_COPY_AND_ASSIGN(ContentCaptureReceiver);
 };

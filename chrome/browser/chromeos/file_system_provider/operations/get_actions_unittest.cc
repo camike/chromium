@@ -77,15 +77,12 @@ void CreateRequestValueFromJSON(const std::string& json,
   using extensions::api::file_system_provider_internal::
       GetActionsRequestedSuccess::Params;
 
-  int json_error_code;
-  std::string json_error_msg;
-  std::unique_ptr<base::Value> value =
-      base::JSONReader::ReadAndReturnErrorDeprecated(
-          json, base::JSON_PARSE_RFC, &json_error_code, &json_error_msg);
-  ASSERT_TRUE(value.get()) << json_error_msg;
+  base::JSONReader::ValueWithError parsed_json =
+      base::JSONReader::ReadAndReturnValueWithError(json);
+  ASSERT_TRUE(parsed_json.value) << parsed_json.error_message;
 
   base::ListValue* value_as_list;
-  ASSERT_TRUE(value->GetAsList(&value_as_list));
+  ASSERT_TRUE(parsed_json.value->GetAsList(&value_as_list));
   std::unique_ptr<Params> params(Params::Create(*value_as_list));
   ASSERT_TRUE(params.get());
   *result = RequestValue::CreateForGetActionsSuccess(std::move(params));
@@ -120,11 +117,11 @@ TEST_F(FileSystemProviderOperationsGetActionsTest, Execute) {
   CallbackLogger callback_logger;
 
   GetActions get_actions(NULL, file_system_info_, entry_paths_,
-                         base::Bind(&CallbackLogger::OnGetActions,
-                                    base::Unretained(&callback_logger)));
+                         base::BindOnce(&CallbackLogger::OnGetActions,
+                                        base::Unretained(&callback_logger)));
   get_actions.SetDispatchEventImplForTesting(
-      base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
-                 base::Unretained(&dispatcher)));
+      base::BindRepeating(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
+                          base::Unretained(&dispatcher)));
 
   EXPECT_TRUE(get_actions.Execute(kRequestId));
 
@@ -154,11 +151,11 @@ TEST_F(FileSystemProviderOperationsGetActionsTest, Execute_NoListener) {
   CallbackLogger callback_logger;
 
   GetActions get_actions(NULL, file_system_info_, entry_paths_,
-                         base::Bind(&CallbackLogger::OnGetActions,
-                                    base::Unretained(&callback_logger)));
+                         base::BindOnce(&CallbackLogger::OnGetActions,
+                                        base::Unretained(&callback_logger)));
   get_actions.SetDispatchEventImplForTesting(
-      base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
-                 base::Unretained(&dispatcher)));
+      base::BindRepeating(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
+                          base::Unretained(&dispatcher)));
 
   EXPECT_FALSE(get_actions.Execute(kRequestId));
 }
@@ -168,11 +165,11 @@ TEST_F(FileSystemProviderOperationsGetActionsTest, OnSuccess) {
   CallbackLogger callback_logger;
 
   GetActions get_actions(NULL, file_system_info_, entry_paths_,
-                         base::Bind(&CallbackLogger::OnGetActions,
-                                    base::Unretained(&callback_logger)));
+                         base::BindOnce(&CallbackLogger::OnGetActions,
+                                        base::Unretained(&callback_logger)));
   get_actions.SetDispatchEventImplForTesting(
-      base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
-                 base::Unretained(&dispatcher)));
+      base::BindRepeating(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
+                          base::Unretained(&dispatcher)));
 
   EXPECT_TRUE(get_actions.Execute(kRequestId));
 
@@ -227,11 +224,11 @@ TEST_F(FileSystemProviderOperationsGetActionsTest, OnError) {
   CallbackLogger callback_logger;
 
   GetActions get_actions(NULL, file_system_info_, entry_paths_,
-                         base::Bind(&CallbackLogger::OnGetActions,
-                                    base::Unretained(&callback_logger)));
+                         base::BindOnce(&CallbackLogger::OnGetActions,
+                                        base::Unretained(&callback_logger)));
   get_actions.SetDispatchEventImplForTesting(
-      base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
-                 base::Unretained(&dispatcher)));
+      base::BindRepeating(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
+                          base::Unretained(&dispatcher)));
 
   EXPECT_TRUE(get_actions.Execute(kRequestId));
 

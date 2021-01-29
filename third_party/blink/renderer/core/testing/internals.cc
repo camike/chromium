@@ -26,18 +26,21 @@
 
 #include "third_party/blink/renderer/core/testing/internals.h"
 
+#include <atomic>
 #include <memory>
 
 #include "base/macros.h"
 #include "base/optional.h"
+#include "base/process/process_handle.h"
 #include "cc/layers/picture_layer.h"
+#include "cc/trees/layer_tree_host.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "third_party/blink/public/common/widget/device_emulation_params.h"
 #include "third_party/blink/public/mojom/devtools/inspector_issue.mojom-blink.h"
 #include "third_party/blink/public/mojom/favicon/favicon_url.mojom-blink.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
-#include "third_party/blink/public/web/web_device_emulation_params.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
@@ -58,7 +61,6 @@
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/range.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
-#include "third_party/blink/renderer/core/dom/shadow_root_v0.h"
 #include "third_party/blink/renderer/core/dom/static_node_list.h"
 #include "third_party/blink/renderer/core/dom/tree_scope.h"
 #include "third_party/blink/renderer/core/editing/drag_caret.h"
@@ -102,7 +104,6 @@
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_text_area_element.h"
 #include "third_party/blink/renderer/core/html/forms/text_control_inner_elements.h"
-#include "third_party/blink/renderer/core/html/html_content_element.h"
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
@@ -112,7 +113,6 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/input/keyboard_event_manager.h"
-#include "third_party/blink/renderer/core/inspector/inspector_issue.h"
 #include "third_party/blink/renderer/core/inspector/main_thread_debugger.h"
 #include "third_party/blink/renderer/core/intersection_observer/intersection_observer.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
@@ -127,12 +127,10 @@
 #include "third_party/blink/renderer/core/page/print_context.h"
 #include "third_party/blink/renderer/core/page/scrolling/root_scroller_controller.h"
 #include "third_party/blink/renderer/core/page/scrolling/scroll_state.h"
-#include "third_party/blink/renderer/core/page/scrolling/scrolling_coordinator_context.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation_controller.h"
 #include "third_party/blink/renderer/core/page/validation_message_client.h"
 #include "third_party/blink/renderer/core/page/viewport_description.h"
 #include "third_party/blink/renderer/core/paint/compositing/composited_layer_mapping.h"
-#include "third_party/blink/renderer/core/paint/compositing/graphics_layer_tree_as_text.h"
 #include "third_party/blink/renderer/core/paint/compositing/paint_layer_compositor.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
@@ -142,6 +140,13 @@
 #include "third_party/blink/renderer/core/scroll/programmatic_scroll_animator.h"
 #include "third_party/blink/renderer/core/scroll/scroll_animator_base.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
+#include "third_party/blink/renderer/core/streams/readable_stream.h"
+#include "third_party/blink/renderer/core/streams/readable_stream_default_controller_with_script_scope.h"
+#include "third_party/blink/renderer/core/streams/readable_stream_transferring_optimizer.h"
+#include "third_party/blink/renderer/core/streams/underlying_sink_base.h"
+#include "third_party/blink/renderer/core/streams/underlying_source_base.h"
+#include "third_party/blink/renderer/core/streams/writable_stream.h"
+#include "third_party/blink/renderer/core/streams/writable_stream_transferring_optimizer.h"
 #include "third_party/blink/renderer/core/style_property_shorthand.h"
 #include "third_party/blink/renderer/core/svg/svg_image_element.h"
 #include "third_party/blink/renderer/core/svg_names.h"
@@ -189,7 +194,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/string_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding_registry.h"
 #include "ui/base/cursor/cursor.h"
-#include "ui/base/mojom/cursor_type.mojom-blink.h"
+#include "ui/base/cursor/mojom/cursor_type.mojom-blink.h"
 #include "ui/base/ui_base_features.h"
 #include "v8/include/v8.h"
 
@@ -215,7 +220,7 @@ class UseCounterHelperObserverImpl final : public UseCounterHelper::Observer {
     return true;
   }
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     UseCounterHelper::Observer::Trace(visitor);
     visitor->Trace(resolver_);
   }
@@ -225,6 +230,373 @@ class UseCounterHelperObserverImpl final : public UseCounterHelper::Observer {
   WebFeature feature_;
   DISALLOW_COPY_AND_ASSIGN(UseCounterHelperObserverImpl);
 };
+
+class TestReadableStreamSource : public UnderlyingSourceBase {
+ public:
+  class Generator;
+
+  using Reply = CrossThreadOnceFunction<void(std::unique_ptr<Generator>)>;
+  using OptimizerCallback =
+      CrossThreadOnceFunction<void(scoped_refptr<base::SingleThreadTaskRunner>,
+                                   Reply)>;
+
+  enum class Type {
+    kWithNullOptimizer,
+    kWithPerformNullOptimizer,
+    kWithObservableOptimizer,
+    kWithPerfectOptimizer,
+  };
+
+  class Generator final {
+    USING_FAST_MALLOC(Generator);
+
+   public:
+    explicit Generator(int max_count) : max_count_(max_count) {}
+
+    base::Optional<int> Generate() {
+      if (count_ >= max_count_) {
+        return base::nullopt;
+      }
+      ++count_;
+      return current_++;
+    }
+
+    void Add(int n) { current_ += n; }
+
+   private:
+    friend class Optimizer;
+
+    int current_ = 0;
+    int count_ = 0;
+    const int max_count_;
+  };
+
+  class Optimizer final : public ReadableStreamTransferringOptimizer {
+    USING_FAST_MALLOC(Optimizer);
+
+   public:
+    Optimizer(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+              OptimizerCallback callback,
+              Type type)
+        : task_runner_(std::move(task_runner)),
+          callback_(std::move(callback)),
+          type_(type) {}
+
+    UnderlyingSourceBase* PerformInProcessOptimization(
+        ScriptState* script_state) override;
+
+   private:
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+    OptimizerCallback callback_;
+    const Type type_;
+  };
+
+  TestReadableStreamSource(ScriptState* script_state, Type type)
+      : UnderlyingSourceBase(script_state), type_(type) {}
+
+  ScriptPromise Start(ScriptState* script_state) override {
+    if (generator_) {
+      return ScriptPromise::CastUndefined(script_state);
+    }
+    resolver_ = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+    return resolver_->Promise();
+  }
+
+  ScriptPromise pull(ScriptState* script_state) override {
+    if (!generator_) {
+      return ScriptPromise::CastUndefined(script_state);
+    }
+
+    const auto result = generator_->Generate();
+    if (!result) {
+      Controller()->Close();
+      return ScriptPromise::CastUndefined(script_state);
+    }
+    Controller()->Enqueue(*result);
+    return ScriptPromise::CastUndefined(script_state);
+  }
+
+  std::unique_ptr<ReadableStreamTransferringOptimizer>
+  CreateTransferringOptimizer(ScriptState* script_state) {
+    switch (type_) {
+      case Type::kWithNullOptimizer:
+        return nullptr;
+      case Type::kWithPerformNullOptimizer:
+        return std::make_unique<ReadableStreamTransferringOptimizer>();
+      case Type::kWithObservableOptimizer:
+      case Type::kWithPerfectOptimizer:
+        ExecutionContext* context = ExecutionContext::From(script_state);
+        return std::make_unique<Optimizer>(
+            context->GetTaskRunner(TaskType::kInternalDefault),
+            CrossThreadBindOnce(&TestReadableStreamSource::Detach,
+                                WrapCrossThreadWeakPersistent(this)),
+            type_);
+    }
+  }
+
+  void Attach(std::unique_ptr<Generator> generator) {
+    if (type_ == Type::kWithObservableOptimizer) {
+      generator->Add(100);
+    }
+    generator_ = std::move(generator);
+    if (resolver_) {
+      resolver_->Resolve();
+    }
+  }
+
+  void Detach(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+              Reply reply) {
+    Controller()->Close();
+    PostCrossThreadTask(
+        *task_runner, FROM_HERE,
+        CrossThreadBindOnce(std::move(reply), std::move(generator_)));
+  }
+
+  void Trace(Visitor* visitor) const override {
+    visitor->Trace(resolver_);
+    UnderlyingSourceBase::Trace(visitor);
+  }
+
+ private:
+  const Type type_;
+  std::unique_ptr<Generator> generator_;
+  Member<ScriptPromiseResolver> resolver_;
+};
+
+UnderlyingSourceBase*
+TestReadableStreamSource::Optimizer::PerformInProcessOptimization(
+    ScriptState* script_state) {
+  TestReadableStreamSource* source =
+      MakeGarbageCollected<TestReadableStreamSource>(script_state, type_);
+  ExecutionContext* context = ExecutionContext::From(script_state);
+
+  Reply reply = CrossThreadBindOnce(&TestReadableStreamSource::Attach,
+                                    WrapCrossThreadPersistent(source));
+
+  PostCrossThreadTask(
+      *task_runner_, FROM_HERE,
+      CrossThreadBindOnce(std::move(callback_),
+                          context->GetTaskRunner(TaskType::kInternalDefault),
+                          std::move(reply)));
+  return source;
+}
+
+class TestWritableStreamSink final : public UnderlyingSinkBase {
+ public:
+  class InternalSink;
+
+  using Reply = CrossThreadOnceFunction<void(std::unique_ptr<InternalSink>)>;
+  using OptimizerCallback =
+      CrossThreadOnceFunction<void(scoped_refptr<base::SingleThreadTaskRunner>,
+                                   Reply)>;
+  enum class Type {
+    kWithNullOptimizer,
+    kWithPerformNullOptimizer,
+    kWithObservableOptimizer,
+    kWithPerfectOptimizer,
+  };
+
+  class InternalSink final {
+    USING_FAST_MALLOC(InternalSink);
+
+   public:
+    InternalSink(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+                 CrossThreadOnceFunction<void(std::string)> success_callback,
+                 CrossThreadOnceFunction<void()> error_callback)
+        : task_runner_(std::move(task_runner)),
+          success_callback_(std::move(success_callback)),
+          error_callback_(std::move(error_callback)) {}
+
+    void Append(const std::string& s) { result_.append(s); }
+    void Close() {
+      PostCrossThreadTask(
+          *task_runner_, FROM_HERE,
+          CrossThreadBindOnce(std::move(success_callback_), result_));
+    }
+    void Abort() {
+      PostCrossThreadTask(*task_runner_, FROM_HERE, std::move(error_callback_));
+    }
+
+    // We don't use WTF::String because this object can be accessed from
+    // multiple threads.
+    std::string result_;
+
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+    CrossThreadOnceFunction<void(std::string)> success_callback_;
+    CrossThreadOnceFunction<void()> error_callback_;
+  };
+
+  class Optimizer final : public WritableStreamTransferringOptimizer {
+    USING_FAST_MALLOC(Optimizer);
+
+   public:
+    Optimizer(
+        scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+        OptimizerCallback callback,
+        scoped_refptr<base::RefCountedData<std::atomic_bool>> optimizer_flag,
+        Type type)
+        : task_runner_(std::move(task_runner)),
+          callback_(std::move(callback)),
+          optimizer_flag_(std::move(optimizer_flag)),
+          type_(type) {}
+
+    UnderlyingSinkBase* PerformInProcessOptimization(
+        ScriptState* script_state) override;
+
+   private:
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+    OptimizerCallback callback_;
+    scoped_refptr<base::RefCountedData<std::atomic_bool>> optimizer_flag_;
+    const Type type_;
+  };
+
+  explicit TestWritableStreamSink(ScriptState* script_state, Type type)
+      : type_(type),
+        optimizer_flag_(
+            base::MakeRefCounted<base::RefCountedData<std::atomic_bool>>(
+                base::in_place,
+                false)) {}
+
+  ScriptPromise start(ScriptState* script_state,
+                      WritableStreamDefaultController*,
+                      ExceptionState&) override {
+    if (internal_sink_) {
+      return ScriptPromise::CastUndefined(script_state);
+    }
+    start_resolver_ = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+    return start_resolver_->Promise();
+  }
+  ScriptPromise write(ScriptState* script_state,
+                      ScriptValue chunk,
+                      WritableStreamDefaultController*,
+                      ExceptionState&) override {
+    DCHECK(internal_sink_);
+    internal_sink_->Append(
+        ToCoreString(chunk.V8Value()
+                         ->ToString(script_state->GetContext())
+                         .ToLocalChecked())
+            .Utf8());
+    return ScriptPromise::CastUndefined(script_state);
+  }
+  ScriptPromise close(ScriptState* script_state, ExceptionState&) override {
+    DCHECK(internal_sink_);
+    closed_ = true;
+    if (!optimizer_flag_->data.load()) {
+      // The normal closure case.
+      internal_sink_->Close();
+      return ScriptPromise::CastUndefined(script_state);
+    }
+
+    // When the optimizer is active, we need to detach `internal_sink_` and
+    // pass it to the optimizer (i.e., the sink in the destination realm).
+    if (detached_) {
+      PostCrossThreadTask(
+          *reply_task_runner_, FROM_HERE,
+          CrossThreadBindOnce(std::move(reply_), std::move(internal_sink_)));
+    }
+    return ScriptPromise::CastUndefined(script_state);
+  }
+  ScriptPromise abort(ScriptState* script_state,
+                      ScriptValue reason,
+                      ExceptionState&) override {
+    return ScriptPromise::CastUndefined(script_state);
+  }
+
+  void Attach(std::unique_ptr<InternalSink> internal_sink) {
+    DCHECK(!internal_sink_);
+
+    if (type_ == Type::kWithObservableOptimizer) {
+      internal_sink->Append("A");
+    }
+
+    internal_sink_ = std::move(internal_sink);
+    if (start_resolver_) {
+      start_resolver_->Resolve();
+    }
+  }
+
+  void Detach(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+              Reply reply) {
+    detached_ = true;
+
+    // We need to wait for the close signal before actually detaching
+    // `internal_sink_`.
+    if (closed_) {
+      PostCrossThreadTask(
+          *task_runner, FROM_HERE,
+          CrossThreadBindOnce(std::move(reply), std::move(internal_sink_)));
+    } else {
+      reply_ = std::move(reply);
+      reply_task_runner_ = std::move(task_runner);
+    }
+  }
+
+  std::unique_ptr<WritableStreamTransferringOptimizer>
+  CreateTransferringOptimizer(ScriptState* script_state) {
+    DCHECK(internal_sink_);
+
+    if (type_ == Type::kWithNullOptimizer) {
+      return nullptr;
+    }
+
+    ExecutionContext* context = ExecutionContext::From(script_state);
+    return std::make_unique<Optimizer>(
+        context->GetTaskRunner(TaskType::kInternalDefault),
+        CrossThreadBindOnce(&TestWritableStreamSink::Detach,
+                            WrapCrossThreadWeakPersistent(this)),
+        optimizer_flag_, type_);
+  }
+
+  void Trace(Visitor* visitor) const override {
+    visitor->Trace(start_resolver_);
+    UnderlyingSinkBase::Trace(visitor);
+  }
+
+  static void Resolve(ScriptPromiseResolver* resolver, std::string result) {
+    resolver->Resolve(String::FromUTF8(result));
+  }
+  static void Reject(ScriptPromiseResolver* resolver) {
+    ScriptState* script_state = resolver->GetScriptState();
+    ScriptState::Scope scope(script_state);
+    resolver->Reject(
+        V8ThrowException::CreateTypeError(script_state->GetIsolate(), "error"));
+  }
+
+ private:
+  const Type type_;
+  // `optimizer_flag_` is always non_null. The flag referenced is false
+  // initially, and set atomically when the associated optimizer is activated.
+  scoped_refptr<base::RefCountedData<std::atomic_bool>> optimizer_flag_;
+  std::unique_ptr<InternalSink> internal_sink_;
+  Member<ScriptPromiseResolver> start_resolver_;
+  bool closed_ = false;
+  bool detached_ = false;
+  Reply reply_;
+  scoped_refptr<base::SingleThreadTaskRunner> reply_task_runner_;
+};
+
+UnderlyingSinkBase*
+TestWritableStreamSink::Optimizer::PerformInProcessOptimization(
+    ScriptState* script_state) {
+  if (type_ == Type::kWithPerformNullOptimizer) {
+    return nullptr;
+  }
+  TestWritableStreamSink* sink =
+      MakeGarbageCollected<TestWritableStreamSink>(script_state, type_);
+
+  // Set the flag atomically, to notify that this optimizer is active.
+  optimizer_flag_->data.store(true);
+
+  ExecutionContext* context = ExecutionContext::From(script_state);
+  Reply reply = CrossThreadBindOnce(&TestWritableStreamSink::Attach,
+                                    WrapCrossThreadPersistent(sink));
+  PostCrossThreadTask(
+      *task_runner_, FROM_HERE,
+      CrossThreadBindOnce(std::move(callback_),
+                          context->GetTaskRunner(TaskType::kInternalDefault),
+                          std::move(reply)));
+  return sink;
+}
 
 }  // namespace
 
@@ -265,11 +637,9 @@ static ScrollableArea* ScrollableAreaForNode(Node* node) {
   if (!node)
     return nullptr;
 
-  LayoutObject* layout_object = node->GetLayoutObject();
-  if (!layout_object || !layout_object->IsBox())
-    return nullptr;
-
-  return ToLayoutBox(layout_object)->GetScrollableArea();
+  if (auto* box = DynamicTo<LayoutBox>(node->GetLayoutObject()))
+    return box->GetScrollableArea();
+  return nullptr;
 }
 
 void Internals::ResetToConsistentState(Page* page) {
@@ -277,9 +647,7 @@ void Internals::ResetToConsistentState(Page* page) {
 
   page->SetIsCursorVisible(true);
   // Ensure the PageScaleFactor always stays within limits, if the test changed
-  // the limits. BlinkTestRunner will reset the limits to those set by
-  // LayoutTestDefaultPreferences when preferences are reapplied after this
-  // call.
+  // the limits.
   page->SetDefaultPageScaleLimits(1, 4);
   page->SetPageScaleFactor(1);
   page->GetChromeClient().GetWebView()->DisableDeviceEmulation();
@@ -309,6 +677,8 @@ void Internals::ResetToConsistentState(Page* page) {
 
   IntersectionObserver::SetThrottleDelayEnabledForTesting(true);
   g_mock_overlay_scrollbars.reset();
+
+  Page::SetMaxNumberOfFramesToTenForTesting(false);
 }
 
 Internals::Internals(ExecutionContext* context)
@@ -477,9 +847,11 @@ bool Internals::isPreloadedBy(const String& url, Document* document) {
 bool Internals::isLoading(const String& url) {
   if (!document_)
     return false;
-  const String cache_identifier = document_->Fetcher()->GetCacheIdentifier();
-  Resource* resource = GetMemoryCache()->ResourceForURL(
-      document_->CompleteURL(url), cache_identifier);
+  const KURL full_url = document_->CompleteURL(url);
+  const String cache_identifier =
+      document_->Fetcher()->GetCacheIdentifier(full_url);
+  Resource* resource =
+      GetMemoryCache()->ResourceForURL(full_url, cache_identifier);
   // We check loader() here instead of isLoading(), because a multipart
   // ImageResource lies isLoading() == false after the first part is loaded.
   return resource && resource->Loader();
@@ -488,9 +860,11 @@ bool Internals::isLoading(const String& url) {
 bool Internals::isLoadingFromMemoryCache(const String& url) {
   if (!document_)
     return false;
-  const String cache_identifier = document_->Fetcher()->GetCacheIdentifier();
-  Resource* resource = GetMemoryCache()->ResourceForURL(
-      document_->CompleteURL(url), cache_identifier);
+  const KURL full_url = document_->CompleteURL(url);
+  const String cache_identifier =
+      document_->Fetcher()->GetCacheIdentifier(full_url);
+  Resource* resource =
+      GetMemoryCache()->ResourceForURL(full_url, cache_identifier);
   return resource && resource->GetStatus() == ResourceStatus::kCached;
 }
 
@@ -531,19 +905,6 @@ String Internals::getResourceHeader(const String& url,
   if (!resource)
     return String();
   return resource->GetResourceRequest().HttpHeaderField(AtomicString(header));
-}
-
-bool Internals::isValidContentSelect(Element* insertion_point,
-                                     ExceptionState& exception_state) {
-  DCHECK(insertion_point);
-  if (!insertion_point->IsV0InsertionPoint()) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidAccessError,
-                                      "The element is not an insertion point.");
-    return false;
-  }
-
-  auto* html_content_element = DynamicTo<HTMLContentElement>(insertion_point);
-  return html_content_element && html_content_element->IsSelectValid();
 }
 
 Node* Internals::treeScopeRootNode(Node* node) {
@@ -598,8 +959,9 @@ void Internals::pauseAnimations(double pause_time,
   if (!GetFrame())
     return;
 
-  GetFrame()->View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
-  GetFrame()->GetDocument()->Timeline().PauseAnimationsForTesting(pause_time);
+  GetFrame()->View()->UpdateAllLifecyclePhasesForTest();
+  GetFrame()->GetDocument()->Timeline().PauseAnimationsForTesting(
+      AnimationTimeDelta::FromSecondsD(pause_time));
 }
 
 bool Internals::isCompositedAnimation(Animation* animation) {
@@ -614,11 +976,11 @@ void Internals::advanceImageAnimation(Element* image,
                                       ExceptionState& exception_state) {
   DCHECK(image);
 
-  ImageResourceContent* resource = nullptr;
+  ImageResourceContent* content = nullptr;
   if (auto* html_image = DynamicTo<HTMLImageElement>(*image)) {
-    resource = html_image->CachedImage();
+    content = html_image->CachedImage();
   } else if (auto* svg_image = DynamicTo<SVGImageElement>(*image)) {
-    resource = svg_image->CachedImage();
+    content = svg_image->CachedImage();
   } else {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidAccessError,
@@ -626,38 +988,14 @@ void Internals::advanceImageAnimation(Element* image,
     return;
   }
 
-  if (!resource || !resource->HasImage()) {
+  if (!content || !content->HasImage()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidAccessError,
                                       "The image resource is not available.");
     return;
   }
 
-  Image* image_data = resource->GetImage();
+  Image* image_data = content->GetImage();
   image_data->AdvanceAnimationForTesting();
-}
-
-bool Internals::hasShadowInsertionPoint(const Node* root,
-                                        ExceptionState& exception_state) const {
-  DCHECK(root);
-  if (!IsA<ShadowRoot>(root)) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kInvalidAccessError,
-        "The node argument is not a shadow root.");
-    return false;
-  }
-  return To<ShadowRoot>(root)->V0().ContainsShadowElements();
-}
-
-bool Internals::hasContentElement(const Node* root,
-                                  ExceptionState& exception_state) const {
-  DCHECK(root);
-  if (!IsA<ShadowRoot>(root)) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kInvalidAccessError,
-        "The node argument is not a shadow root.");
-    return false;
-  }
-  return To<ShadowRoot>(root)->V0().ContainsContentElements();
 }
 
 uint32_t Internals::countElementShadow(const Node* root,
@@ -734,8 +1072,7 @@ Node* Internals::previousInFlatTree(Node* node,
 String Internals::elementLayoutTreeAsText(Element* element,
                                           ExceptionState& exception_state) {
   DCHECK(element);
-  element->GetDocument().View()->UpdateAllLifecyclePhases(
-      DocumentUpdateReason::kTest);
+  element->GetDocument().View()->UpdateAllLifecyclePhasesForTest();
 
   String representation = ExternalRepresentation(element);
   if (representation.IsEmpty()) {
@@ -800,8 +1137,6 @@ String Internals::shadowRootType(const Node* root,
   switch (shadow_root->GetType()) {
     case ShadowRootType::kUserAgent:
       return String("UserAgentShadowRoot");
-    case ShadowRootType::V0:
-      return String("V0ShadowRoot");
     case ShadowRootType::kOpen:
       return String("OpenShadowRoot");
     case ShadowRootType::kClosed:
@@ -973,10 +1308,10 @@ void Internals::setMarker(Document* document,
     document->Markers().AddGrammarMarker(EphemeralRange(range));
 }
 
-unsigned Internals::markerCountForNode(Node* node,
+unsigned Internals::markerCountForNode(Text* text,
                                        const String& marker_type,
                                        ExceptionState& exception_state) {
-  DCHECK(node);
+  DCHECK(text);
   base::Optional<DocumentMarker::MarkerTypes> marker_types =
       MarkerTypesFrom(marker_type);
   if (!marker_types) {
@@ -986,18 +1321,18 @@ unsigned Internals::markerCountForNode(Node* node,
     return 0;
   }
 
-  return node->GetDocument()
+  return text->GetDocument()
       .Markers()
-      .MarkersFor(To<Text>(*node), marker_types.value())
+      .MarkersFor(*text, marker_types.value())
       .size();
 }
 
-unsigned Internals::activeMarkerCountForNode(Node* node) {
-  DCHECK(node);
+unsigned Internals::activeMarkerCountForNode(Text* text) {
+  DCHECK(text);
 
   // Only TextMatch markers can be active.
-  DocumentMarkerVector markers = node->GetDocument().Markers().MarkersFor(
-      To<Text>(*node), DocumentMarker::MarkerTypes::TextMatch());
+  DocumentMarkerVector markers = text->GetDocument().Markers().MarkersFor(
+      *text, DocumentMarker::MarkerTypes::TextMatch());
 
   unsigned active_marker_count = 0;
   for (const auto& marker : markers) {
@@ -1008,11 +1343,11 @@ unsigned Internals::activeMarkerCountForNode(Node* node) {
   return active_marker_count;
 }
 
-DocumentMarker* Internals::MarkerAt(Node* node,
+DocumentMarker* Internals::MarkerAt(Text* text,
                                     const String& marker_type,
                                     unsigned index,
                                     ExceptionState& exception_state) {
-  DCHECK(node);
+  DCHECK(text);
   base::Optional<DocumentMarker::MarkerTypes> marker_types =
       MarkerTypesFrom(marker_type);
   if (!marker_types) {
@@ -1022,42 +1357,42 @@ DocumentMarker* Internals::MarkerAt(Node* node,
     return nullptr;
   }
 
-  DocumentMarkerVector markers = node->GetDocument().Markers().MarkersFor(
-      To<Text>(*node), marker_types.value());
+  DocumentMarkerVector markers =
+      text->GetDocument().Markers().MarkersFor(*text, marker_types.value());
   if (markers.size() <= index)
     return nullptr;
   return markers[index];
 }
 
-Range* Internals::markerRangeForNode(Node* node,
+Range* Internals::markerRangeForNode(Text* text,
                                      const String& marker_type,
                                      unsigned index,
                                      ExceptionState& exception_state) {
-  DCHECK(node);
-  DocumentMarker* marker = MarkerAt(node, marker_type, index, exception_state);
+  DCHECK(text);
+  DocumentMarker* marker = MarkerAt(text, marker_type, index, exception_state);
   if (!marker)
     return nullptr;
-  return MakeGarbageCollected<Range>(node->GetDocument(), node,
-                                     marker->StartOffset(), node,
+  return MakeGarbageCollected<Range>(text->GetDocument(), text,
+                                     marker->StartOffset(), text,
                                      marker->EndOffset());
 }
 
-String Internals::markerDescriptionForNode(Node* node,
+String Internals::markerDescriptionForNode(Text* text,
                                            const String& marker_type,
                                            unsigned index,
                                            ExceptionState& exception_state) {
-  DocumentMarker* marker = MarkerAt(node, marker_type, index, exception_state);
+  DocumentMarker* marker = MarkerAt(text, marker_type, index, exception_state);
   if (!marker || !IsSpellCheckMarker(*marker))
     return String();
   return To<SpellCheckMarker>(marker)->Description();
 }
 
 unsigned Internals::markerBackgroundColorForNode(
-    Node* node,
+    Text* text,
     const String& marker_type,
     unsigned index,
     ExceptionState& exception_state) {
-  DocumentMarker* marker = MarkerAt(node, marker_type, index, exception_state);
+  DocumentMarker* marker = MarkerAt(text, marker_type, index, exception_state);
   auto* style_marker = DynamicTo<StyleableMarker>(marker);
   if (!style_marker)
     return 0;
@@ -1065,11 +1400,11 @@ unsigned Internals::markerBackgroundColorForNode(
 }
 
 unsigned Internals::markerUnderlineColorForNode(
-    Node* node,
+    Text* text,
     const String& marker_type,
     unsigned index,
     ExceptionState& exception_state) {
-  DocumentMarker* marker = MarkerAt(node, marker_type, index, exception_state);
+  DocumentMarker* marker = MarkerAt(text, marker_type, index, exception_state);
   auto* style_marker = DynamicTo<StyleableMarker>(marker);
   if (!style_marker)
     return 0;
@@ -1475,6 +1810,23 @@ void Internals::setAutofilled(Element* element,
       enabled ? WebAutofillState::kAutofilled : WebAutofillState::kNotFilled);
 }
 
+void Internals::setSelectionRangeForNumberType(
+    Element* input_element,
+    uint32_t start,
+    uint32_t end,
+    ExceptionState& exception_state) {
+  DCHECK(input_element);
+  auto* html_input_element = DynamicTo<HTMLInputElement>(input_element);
+  if (!html_input_element) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kInvalidNodeTypeError,
+        "The element provided is not an input element.");
+    return;
+  }
+
+  html_input_element->SetSelectionRangeForTesting(start, end, exception_state);
+}
+
 Range* Internals::rangeFromLocationAndLength(Element* scope,
                                              int range_location,
                                              int range_length) {
@@ -1803,7 +2155,9 @@ unsigned Internals::touchEndOrCancelEventHandlerCount(
 
 unsigned Internals::pointerEventHandlerCount(Document* document) const {
   DCHECK(document);
-  return EventHandlerCount(*document, EventHandlerRegistry::kPointerEvent);
+  return EventHandlerCount(*document, EventHandlerRegistry::kPointerEvent) +
+         EventHandlerCount(*document,
+                           EventHandlerRegistry::kPointerRawUpdateEvent);
 }
 
 // Given a vector of rects, merge those that are adjacent, leaving empty rects
@@ -1852,35 +2206,6 @@ static void MergeRects(Vector<IntRect>& rects) {
   }
 }
 
-static void AccumulateTouchActionRectList(
-    PaintLayerCompositor* compositor,
-    GraphicsLayer* graphics_layer,
-    HitTestLayerRectList* hit_test_rects) {
-  const cc::TouchActionRegion& touch_action_region =
-      graphics_layer->CcLayer()->touch_action_region();
-  if (!touch_action_region.GetAllRegions().IsEmpty()) {
-    const auto& layer_position = graphics_layer->GetOffsetFromTransformNode();
-    const auto& layer_bounds = graphics_layer->CcLayer()->bounds();
-    IntRect layer_rect(layer_position.X(), layer_position.Y(),
-                       layer_bounds.width(), layer_bounds.height());
-
-    Vector<IntRect> layer_hit_test_rects;
-    for (const gfx::Rect& hit_test_rect : touch_action_region.GetAllRegions())
-      layer_hit_test_rects.push_back(IntRect(hit_test_rect));
-    MergeRects(layer_hit_test_rects);
-
-    for (const IntRect& hit_test_rect : layer_hit_test_rects) {
-      if (!hit_test_rect.IsEmpty()) {
-        hit_test_rects->Append(DOMRectReadOnly::FromIntRect(layer_rect),
-                               DOMRectReadOnly::FromIntRect(hit_test_rect));
-      }
-    }
-  }
-
-  for (GraphicsLayer* child_layer : graphics_layer->Children())
-    AccumulateTouchActionRectList(compositor, child_layer, hit_test_rects);
-}
-
 HitTestLayerRectList* Internals::touchEventTargetLayerRects(
     Document* document,
     ExceptionState& exception_state) {
@@ -1891,60 +2216,31 @@ HitTestLayerRectList* Internals::touchEventTargetLayerRects(
     return nullptr;
   }
 
-  if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
-    auto* pac = document->View()->GetPaintArtifactCompositor();
-    document->View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  document->View()->UpdateAllLifecyclePhasesForTest();
 
-    auto* hit_test_rects = MakeGarbageCollected<HitTestLayerRectList>();
-    for (const auto& layer : pac->RootLayer()->children()) {
-      const cc::TouchActionRegion& touch_action_region =
-          layer->touch_action_region();
-      if (!touch_action_region.GetAllRegions().IsEmpty()) {
-        const auto& offset = layer->offset_to_transform_parent();
-        IntRect layer_rect(RoundedIntPoint(FloatPoint(offset.x(), offset.y())),
-                           IntSize(layer->bounds()));
+  auto* hit_test_rects = MakeGarbageCollected<HitTestLayerRectList>();
+  for (const auto& layer : document->View()->RootCcLayer()->children()) {
+    const cc::TouchActionRegion& touch_action_region =
+        layer->touch_action_region();
+    if (!touch_action_region.GetAllRegions().IsEmpty()) {
+      const auto& offset = layer->offset_to_transform_parent();
+      IntRect layer_rect(RoundedIntPoint(FloatPoint(offset.x(), offset.y())),
+                         IntSize(layer->bounds()));
 
-        Vector<IntRect> layer_hit_test_rects;
-        for (const auto& hit_test_rect : touch_action_region.GetAllRegions())
-          layer_hit_test_rects.push_back(IntRect(hit_test_rect));
-        MergeRects(layer_hit_test_rects);
+      Vector<IntRect> layer_hit_test_rects;
+      for (const auto& hit_test_rect : touch_action_region.GetAllRegions())
+        layer_hit_test_rects.push_back(IntRect(hit_test_rect));
+      MergeRects(layer_hit_test_rects);
 
-        for (const IntRect& hit_test_rect : layer_hit_test_rects) {
-          if (!hit_test_rect.IsEmpty()) {
-            hit_test_rects->Append(DOMRectReadOnly::FromIntRect(layer_rect),
-                                   DOMRectReadOnly::FromIntRect(hit_test_rect));
-          }
+      for (const IntRect& hit_test_rect : layer_hit_test_rects) {
+        if (!hit_test_rect.IsEmpty()) {
+          hit_test_rects->Append(DOMRectReadOnly::FromIntRect(layer_rect),
+                                 DOMRectReadOnly::FromIntRect(hit_test_rect));
         }
       }
     }
-    return hit_test_rects;
   }
-
-  if (ScrollingCoordinator* scrolling_coordinator =
-          document->GetPage()->GetScrollingCoordinator()) {
-    FrameView* view = document->GetPage()->MainFrame()->View();
-    if (view->IsLocalFrameView()) {
-      scrolling_coordinator->UpdateAfterPaint(
-          static_cast<LocalFrameView*>(view));
-    } else {
-      NOTREACHED();
-    }
-  }
-
-  if (auto* view = document->GetLayoutView()) {
-    if (PaintLayerCompositor* compositor = view->Compositor()) {
-      // Use the paint-root since we sometimes want to know about touch rects
-      // on layers outside the document hierarchy (e.g. when we replace the
-      // document with a video layer).
-      if (GraphicsLayer* root_layer = compositor->PaintRootGraphicsLayer()) {
-        auto* hit_test_rects = MakeGarbageCollected<HitTestLayerRectList>();
-        AccumulateTouchActionRectList(compositor, root_layer, hit_test_rects);
-        return hit_test_rects;
-      }
-    }
-  }
-
-  return nullptr;
+  return hit_test_rects;
 }
 
 bool Internals::executeCommand(Document* document,
@@ -1967,7 +2263,7 @@ void Internals::triggerTestInspectorIssue(Document* document) {
   auto info = mojom::blink::InspectorIssueInfo::New(
       mojom::InspectorIssueCode::kSameSiteCookieIssue,
       mojom::blink::InspectorIssueDetails::New());
-  document->AddInspectorIssue(InspectorIssue::Create(std::move(info)));
+  document->GetFrame()->AddInspectorIssue(std::move(info));
 }
 
 AtomicString Internals::htmlNamespace() {
@@ -2163,8 +2459,7 @@ bool Internals::scrollsWithRespectTo(Element* element1,
                                      ExceptionState& exception_state) {
   DCHECK(!RuntimeEnabledFeatures::CompositeAfterPaintEnabled());
   DCHECK(element1 && element2);
-  element1->GetDocument().View()->UpdateAllLifecyclePhases(
-      DocumentUpdateReason::kTest);
+  element1->GetDocument().View()->UpdateAllLifecyclePhasesForTest();
 
   LayoutObject* layout_object1 = element1->GetLayoutObject();
   LayoutObject* layout_object2 = element2->GetLayoutObject();
@@ -2185,8 +2480,8 @@ bool Internals::scrollsWithRespectTo(Element* element1,
     return false;
   }
 
-  PaintLayer* layer1 = ToLayoutBox(layout_object1)->Layer();
-  PaintLayer* layer2 = ToLayoutBox(layout_object2)->Layer();
+  PaintLayer* layer1 = To<LayoutBox>(layout_object1)->Layer();
+  PaintLayer* layer2 = To<LayoutBox>(layout_object2)->Layer();
   if (!layer1 || !layer2) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidAccessError,
@@ -2209,7 +2504,7 @@ String Internals::layerTreeAsText(Document* document,
     return String();
   }
 
-  document->View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  document->View()->UpdateAllLifecyclePhasesForTest();
 
   return document->GetFrame()->GetLayerTreeAsTextForTesting(flags);
 }
@@ -2228,20 +2523,9 @@ String Internals::mainThreadScrollingReasons(
     return String();
   }
 
-  document->GetFrame()->View()->UpdateAllLifecyclePhases(
-      DocumentUpdateReason::kTest);
+  document->GetFrame()->View()->UpdateAllLifecyclePhasesForTest();
 
   return document->GetFrame()->View()->MainThreadScrollingReasonsAsText();
-}
-
-void Internals::markGestureScrollRegionDirty(
-    Document* document,
-    ExceptionState& exception_state) const {
-  FrameView* frame_view = document->View();
-  if (!frame_view || !frame_view->IsLocalFrameView())
-    return;
-  LocalFrameView* lfv = static_cast<LocalFrameView*>(frame_view);
-  lfv->GetScrollingContext()->SetScrollGestureRegionIsDirty(true);
 }
 
 DOMRectList* Internals::nonFastScrollableRects(
@@ -2255,11 +2539,7 @@ DOMRectList* Internals::nonFastScrollableRects(
     return nullptr;
   }
 
-  // Update lifecycle. This includes the compositing update and
-  // ScrollingCoordinator::UpdateAfterPaint, which computes the non-fast
-  // scrollable region. For CompositeAfterPaint, this includes running
-  // PaintArtifactCompositor which updates the non-fast regions.
-  frame->View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  frame->View()->UpdateAllLifecyclePhasesForTest();
 
   auto* pac = document->View()->GetPaintArtifactCompositor();
   auto* layer_tree_host = pac->RootLayer()->layer_tree_host();
@@ -2360,7 +2640,7 @@ int Internals::numberOfPages(float page_width,
 }
 
 String Internals::pageProperty(String property_name,
-                               int page_number,
+                               unsigned page_number,
                                ExceptionState& exception_state) const {
   if (!GetFrame()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidAccessError,
@@ -2373,7 +2653,7 @@ String Internals::pageProperty(String property_name,
 }
 
 String Internals::pageSizeAndMarginsInPixels(
-    int page_number,
+    unsigned page_number,
     int width,
     int height,
     int margin_top,
@@ -2431,6 +2711,17 @@ void Internals::setPageScaleFactorLimits(float min_scale_factor,
   page->SetDefaultPageScaleLimits(min_scale_factor, max_scale_factor);
 }
 
+float Internals::pageZoomFactor(ExceptionState& exception_state) {
+  if (!document_->GetPage()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kInvalidAccessError,
+        "The document's page cannot be retrieved.");
+    return 0;
+  }
+  // Page zoom without Device Scale Factor.
+  return document_->GetPage()->GetChromeClient().UserZoomFactor();
+}
+
 void Internals::setIsCursorVisible(Document* document,
                                    bool is_visible,
                                    ExceptionState& exception_state) {
@@ -2441,6 +2732,11 @@ void Internals::setIsCursorVisible(Document* document,
     return;
   }
   document->GetPage()->SetIsCursorVisible(is_visible);
+}
+
+void Internals::setMaxNumberOfFramesToTen(bool enabled) {
+  // This gets reset by Internals::ResetToConsistentState
+  Page::SetMaxNumberOfFramesToTenForTesting(enabled);
 }
 
 String Internals::effectivePreload(HTMLMediaElement* media_element) {
@@ -2578,7 +2874,7 @@ void Internals::startTrackingRepaints(Document* document,
   }
 
   LocalFrameView* frame_view = document->View();
-  frame_view->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  frame_view->UpdateAllLifecyclePhasesForTest();
   frame_view->SetTracksRasterInvalidations(true);
 }
 
@@ -2592,7 +2888,7 @@ void Internals::stopTrackingRepaints(Document* document,
   }
 
   LocalFrameView* frame_view = document->View();
-  frame_view->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  frame_view->UpdateAllLifecyclePhasesForTest();
   frame_view->SetTracksRasterInvalidations(false);
 }
 
@@ -2627,9 +2923,8 @@ void Internals::forceFullRepaint(Document* document,
     return;
   }
 
-  auto* layout_view = document->GetLayoutView();
-  if (layout_view)
-    layout_view->InvalidatePaintForViewAndCompositedLayers();
+  if (auto* layout_view = document->GetLayoutView())
+    layout_view->InvalidatePaintForViewAndDescendants();
 }
 
 DOMRectList* Internals::draggableRegions(Document* document,
@@ -2838,7 +3133,7 @@ ScriptValue Internals::deserializeBuffer(v8::Isolate* isolate,
                                          DOMArrayBuffer* buffer) const {
   scoped_refptr<SerializedScriptValue> serialized_value =
       SerializedScriptValue::Create(static_cast<const char*>(buffer->Data()),
-                                    buffer->ByteLengthAsSizeT());
+                                    buffer->ByteLength());
   return ScriptValue(isolate, serialized_value->Deserialize(isolate));
 }
 
@@ -2923,6 +3218,8 @@ DOMRect* Internals::selectionBounds(ExceptionState& exception_state) {
     return nullptr;
   }
 
+  GetFrame()->View()->UpdateLifecycleToLayoutClean(
+      DocumentUpdateReason::kSelection);
   return DOMRect::FromFloatRect(
       FloatRect(GetFrame()->Selection().AbsoluteUnclippedBounds()));
 }
@@ -3026,8 +3323,16 @@ void Internals::forceCompositingUpdate(Document* document,
     return;
   }
 
-  document->GetFrame()->View()->UpdateAllLifecyclePhases(
-      DocumentUpdateReason::kTest);
+  document->GetFrame()->View()->UpdateAllLifecyclePhasesForTest();
+}
+
+void Internals::setForcedColorsAndDarkPreferredColorScheme(Document* document) {
+  DCHECK(document);
+  ColorSchemeHelper color_scheme_helper(*document);
+  color_scheme_helper.SetPreferredColorScheme(
+      mojom::blink::PreferredColorScheme::kDark);
+  color_scheme_helper.SetForcedColors(*document, ForcedColors::kActive);
+  document->GetFrame()->View()->UpdateAllLifecyclePhasesForTest();
 }
 
 void Internals::setShouldRevealPassword(Element* element,
@@ -3046,25 +3351,16 @@ void Internals::setShouldRevealPassword(Element* element,
 
 namespace {
 
-class AddOneFunction : public ScriptFunction {
+class AddOneFunction : public NewScriptFunction::Callable {
  public:
-  static v8::Local<v8::Function> CreateFunction(ScriptState* script_state) {
-    AddOneFunction* self = MakeGarbageCollected<AddOneFunction>(script_state);
-    return self->BindToV8Function();
-  }
-
-  explicit AddOneFunction(ScriptState* script_state)
-      : ScriptFunction(script_state) {}
-
- private:
-  ScriptValue Call(ScriptValue value) override {
+  ScriptValue Call(ScriptState* script_state, ScriptValue value) override {
     v8::Local<v8::Value> v8_value = value.V8Value();
     DCHECK(v8_value->IsNumber());
     int32_t int_value =
         static_cast<int32_t>(v8_value.As<v8::Integer>()->Value());
     return ScriptValue(
-        GetScriptState()->GetIsolate(),
-        v8::Integer::New(GetScriptState()->GetIsolate(), int_value + 1));
+        script_state->GetIsolate(),
+        v8::Integer::New(script_state->GetIsolate(), int_value + 1));
   }
 };
 
@@ -3088,7 +3384,8 @@ ScriptPromise Internals::createRejectedPromise(ScriptState* script_state,
 
 ScriptPromise Internals::addOneToPromise(ScriptState* script_state,
                                          ScriptPromise promise) {
-  return promise.Then(AddOneFunction::CreateFunction(script_state));
+  return promise.Then(MakeGarbageCollected<NewScriptFunction>(
+      script_state, MakeGarbageCollected<AddOneFunction>()));
 }
 
 ScriptPromise Internals::promiseCheck(ScriptState* script_state,
@@ -3141,7 +3438,7 @@ ScriptPromise Internals::promiseCheckOverload(ScriptState* script_state,
                              V8String(script_state->GetIsolate(), "done"));
 }
 
-void Internals::Trace(Visitor* visitor) {
+void Internals::Trace(Visitor* visitor) const {
   visitor->Trace(runtime_flags_);
   visitor->Trace(document_);
   ScriptWrappable::Trace(visitor);
@@ -3186,6 +3483,13 @@ Element* Internals::interestedElement() {
       .GetInterestedElement();
 }
 
+bool Internals::isActivated() {
+  if (!GetFrame())
+    return false;
+
+  return GetFrame()->GetPage()->GetFocusController().IsActive();
+}
+
 bool Internals::isInCanvasFontCache(Document* document,
                                     const String& font_string) {
   return document->GetCanvasFontCache()->IsInCache(font_string);
@@ -3202,14 +3506,6 @@ void Internals::setScrollChain(ScrollState* scroll_state,
   for (wtf_size_t i = 0; i < elements.size(); ++i)
     scroll_chain.push_back(DOMNodeIds::IdForNode(elements[i].Get()));
   scroll_state->SetScrollChain(scroll_chain);
-}
-
-void Internals::revealSelection() {
-  GetFrame()->Selection().RevealSelection(ScrollAlignment::ToEdgeIfNeeded());
-}
-
-void Internals::scheduleBlinkGC() {
-  ThreadState::Current()->ScheduleForcedGCForTesting();
 }
 
 String Internals::selectedHTMLForClipboard() {
@@ -3235,8 +3531,14 @@ String Internals::selectedTextForClipboard() {
 void Internals::setVisualViewportOffset(int x, int y) {
   if (!GetFrame())
     return;
+  FloatPoint offset(x, y);
 
-  GetFrame()->GetPage()->GetVisualViewport().SetLocation(FloatPoint(x, y));
+  // `setVisualViewportOffset()` inputs are in physical pixels, but
+  // `SetLocation()` gets positions in DIPs when --use-zoom-for-dsf disabled.
+  GetFrame()->GetPage()->GetVisualViewport().SetLocation(
+      Platform::Current()->IsUseZoomForDSFEnabled()
+          ? offset
+          : offset.ScaledBy(1 / GetFrame()->DevicePixelRatio()));
 }
 
 bool Internals::isUseCounted(Document* document, uint32_t feature) {
@@ -3248,13 +3550,13 @@ bool Internals::isUseCounted(Document* document, uint32_t feature) {
 bool Internals::isCSSPropertyUseCounted(Document* document,
                                         const String& property_name) {
   return document->IsPropertyCounted(
-      unresolvedCSSPropertyID(document->GetExecutionContext(), property_name));
+      UnresolvedCSSPropertyID(document->GetExecutionContext(), property_name));
 }
 
 bool Internals::isAnimatedCSSPropertyUseCounted(Document* document,
                                                 const String& property_name) {
   return document->IsAnimatedPropertyCounted(
-      unresolvedCSSPropertyID(document->GetExecutionContext(), property_name));
+      UnresolvedCSSPropertyID(document->GetExecutionContext(), property_name));
 }
 
 void Internals::clearUseCounter(Document* document, uint32_t feature) {
@@ -3288,7 +3590,7 @@ Vector<String> Internals::getCSSPropertyShorthands() const {
 Vector<String> Internals::getCSSPropertyAliases() const {
   Vector<String> result;
   for (CSSPropertyID alias : kCSSPropertyAliasList) {
-    DCHECK(isPropertyAlias(alias));
+    DCHECK(IsPropertyAlias(alias));
     result.push_back(CSSUnresolvedProperty::GetAliasProperty(alias)
                          ->GetPropertyNameString());
   }
@@ -3368,6 +3670,11 @@ double Internals::monotonicTimeToZeroBasedDocumentTime(
       .InSecondsF();
 }
 
+int64_t Internals::zeroBasedDocumentTimeToMonotonicTime(double dom_event_time) {
+  return document_->Loader()->GetTiming().ZeroBasedDocumentTimeToMonotonicTime(
+      dom_event_time);
+}
+
 int64_t Internals::currentTimeTicks() {
   return base::TimeTicks::Now().since_origin().InMicroseconds();
 }
@@ -3382,14 +3689,6 @@ String Internals::getProgrammaticScrollAnimationState(Node* node) const {
   if (ScrollableArea* scrollable_area = ScrollableAreaForNode(node))
     return scrollable_area->GetProgrammaticScrollAnimator().RunStateAsText();
   return String();
-}
-
-DOMRect* Internals::visualRect(Node* node) {
-  if (!node || !node->GetLayoutObject())
-    return DOMRect::Create();
-
-  return DOMRect::FromFloatRect(
-      FloatRect(node->GetLayoutObject()->FragmentsVisualRectBoundingBox()));
 }
 
 void Internals::crash() {
@@ -3502,7 +3801,7 @@ void Internals::setDeviceEmulationScale(float scale,
         "The document's page cannot be retrieved.");
     return;
   }
-  WebDeviceEmulationParams params;
+  DeviceEmulationParams params;
   params.scale = scale;
   page->GetChromeClient().GetWebView()->EnableDeviceEmulation(params);
 }
@@ -3516,10 +3815,8 @@ String Internals::getAgentId(DOMWindow* window) {
   if (!window->IsLocalDOMWindow())
     return String();
 
-  // Sounds like there's no notion of "process ID" in Blink, but the main
-  // thread's thread ID serves for that purpose.
-  PlatformThreadId process_id = Thread::MainThread()->ThreadId();
-
+  // Create a unique id from the process id and the address of the agent.
+  const base::ProcessId process_id = base::GetCurrentProcId();
   uintptr_t agent_address =
       reinterpret_cast<uintptr_t>(To<LocalDOMWindow>(window)->GetAgent());
 
@@ -3545,7 +3842,99 @@ void Internals::generateTestReport(const String& message) {
       MakeGarbageCollected<Report>("test", document_->Url().GetString(), body);
 
   // Send the test report to any ReportingObservers.
-  ReportingContext::From(document_->ExecutingWindow())->QueueReport(report);
+  ReportingContext::From(document_->domWindow())->QueueReport(report);
+}
+
+void Internals::setIsAdSubframe(HTMLIFrameElement* iframe,
+                                ExceptionState& exception_state) {
+  if (!iframe->ContentFrame() || !iframe->ContentFrame()->IsLocalFrame()) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
+                                      "Frame cannot be accessed.");
+    return;
+  }
+  LocalFrame* parent_frame = iframe->GetDocument().GetFrame();
+  LocalFrame* child_frame = To<LocalFrame>(iframe->ContentFrame());
+  bool parent_is_ad = parent_frame && parent_frame->IsAdSubframe();
+  child_frame->SetIsAdSubframe(parent_is_ad
+                                   ? blink::mojom::AdFrameType::kChildAd
+                                   : blink::mojom::AdFrameType::kRootAd);
+}
+
+ReadableStream* Internals::createReadableStream(
+    ScriptState* script_state,
+    int32_t queue_size,
+    const String& optimizer,
+    ExceptionState& exception_state) {
+  TestReadableStreamSource::Type type;
+  if (optimizer.IsEmpty()) {
+    type = TestReadableStreamSource::Type::kWithNullOptimizer;
+  } else if (optimizer == "perform-null") {
+    type = TestReadableStreamSource::Type::kWithPerformNullOptimizer;
+  } else if (optimizer == "observable") {
+    type = TestReadableStreamSource::Type::kWithObservableOptimizer;
+  } else if (optimizer == "perfect") {
+    type = TestReadableStreamSource::Type::kWithPerformNullOptimizer;
+  } else {
+    exception_state.ThrowRangeError(
+        "The \"optimizer\" parameter is not correctly set.");
+    return nullptr;
+  }
+  auto* source =
+      MakeGarbageCollected<TestReadableStreamSource>(script_state, type);
+  source->Attach(std::make_unique<TestReadableStreamSource::Generator>(10));
+  return ReadableStream::CreateWithCountQueueingStrategy(
+      script_state, source, queue_size,
+      source->CreateTransferringOptimizer(script_state));
+}
+
+ScriptValue Internals::createWritableStreamAndSink(
+    ScriptState* script_state,
+    int32_t queue_size,
+    const String& optimizer,
+    ExceptionState& exception_state) {
+  TestWritableStreamSink::Type type;
+  if (optimizer.IsEmpty()) {
+    type = TestWritableStreamSink::Type::kWithNullOptimizer;
+  } else if (optimizer == "perform-null") {
+    type = TestWritableStreamSink::Type::kWithPerformNullOptimizer;
+  } else if (optimizer == "observable") {
+    type = TestWritableStreamSink::Type::kWithObservableOptimizer;
+  } else if (optimizer == "perfect") {
+    type = TestWritableStreamSink::Type::kWithPerfectOptimizer;
+  } else {
+    exception_state.ThrowRangeError(
+        "The \"optimizer\" parameter is not correctly set.");
+    return ScriptValue();
+  }
+
+  ExecutionContext* context = ExecutionContext::From(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  auto internal_sink = std::make_unique<TestWritableStreamSink::InternalSink>(
+      context->GetTaskRunner(TaskType::kInternalDefault),
+      CrossThreadBindOnce(&TestWritableStreamSink::Resolve,
+                          WrapCrossThreadPersistent(resolver)),
+      CrossThreadBindOnce(&TestWritableStreamSink::Reject,
+                          WrapCrossThreadPersistent(resolver)));
+  auto* sink = MakeGarbageCollected<TestWritableStreamSink>(script_state, type);
+
+  sink->Attach(std::move(internal_sink));
+  auto* stream = WritableStream::CreateWithCountQueueingStrategy(
+      script_state, sink, queue_size,
+      sink->CreateTransferringOptimizer(script_state));
+
+  v8::Local<v8::Object> object = v8::Object::New(script_state->GetIsolate());
+  object
+      ->Set(script_state->GetContext(),
+            V8String(script_state->GetIsolate(), "stream"),
+            ToV8(stream, script_state))
+
+      .Check();
+  object
+      ->Set(script_state->GetContext(),
+            V8String(script_state->GetIsolate(), "sink"),
+            ToV8(resolver->Promise(), script_state))
+      .Check();
+  return ScriptValue(script_state->GetIsolate(), object);
 }
 
 }  // namespace blink

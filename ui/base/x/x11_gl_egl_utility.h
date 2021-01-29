@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "third_party/khronos/EGL/egl.h"
+#include "ui/gfx/x/xproto.h"
 
 namespace ui {
 
@@ -18,6 +19,15 @@ void GetPlatformExtraDisplayAttribs(EGLenum platform_type,
 // Sets custom alpha and buffer size.
 void ChoosePlatformCustomAlphaAndBufferSize(EGLint* alpha_size,
                                             EGLint* buffer_size);
+
+// Returns whether transparent background is suppored.
+bool IsTransparentBackgroundSupported();
+
+// Wraps XVisualManager::UpdateVisualsOnGpuInfoChanged(), passes parameters to
+// it directly. Returns whether provided visuals are valid.
+bool UpdateVisualsOnGpuInfoChanged(bool software_rendering,
+                                   x11::VisualId default_visual_id,
+                                   x11::VisualId transparent_visual_id);
 
 }  // namespace ui
 

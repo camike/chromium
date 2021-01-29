@@ -9,33 +9,25 @@
       rgba(66, 133, 244, 0.4); /* #4284f4 */
 }
 
-.step {
+html:not([new-layout]) .step {
   box-sizing: border-box;
   position: absolute;
+  user-select: none;
 }
 
-.step.animated:not(.faded) {
-  transition: transform 200ms ease-in-out,
-              opacity 200ms ease-in-out,
-              visibility 200ms ease-in-out;
+html[new-layout] .step {
+  box-sizing: border-box;
+  height: var(--oobe-adaptive-dialog-height);
+  user-select: none;
+  width: var(--oobe-adaptive-dialog-width)
 }
 
 .step.hidden {
   visibility: hidden;
 }
 
-.faded,
-.left,
-.right {
+.faded {
   opacity: 0;
-}
-
-.step.right {
-  transform: translateX(50px);
-}
-
-.step.left {
-  transform: translateX(-50px)
 }
 
 .step.fullscreen {

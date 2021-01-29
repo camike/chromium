@@ -8,8 +8,9 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/compiler_specific.h"
+#include "base/callback.h"
 #include "base/macros.h"
+#include "chrome/browser/chromeos/login/screens/base_screen.h"
 
 namespace chromeos {
 
@@ -17,17 +18,42 @@ class GaiaView;
 
 // This class represents GAIA screen: login screen that is responsible for
 // GAIA-based sign-in.
-class GaiaScreen {
+class GaiaScreen : public BaseScreen {
  public:
-  GaiaScreen() = default;
-  virtual ~GaiaScreen() = default;
+  using TView = GaiaView;
 
-  void set_view(GaiaView* view) { view_ = view; }
+  enum class Result {
+    BACK,
+    CANCEL,
+    ENTERPRISE_ENROLL,
+    START_CONSUMER_KIOSK,
+  };
 
-  void MaybePreloadAuthExtension();
+  static std::string GetResultString(Result result);
+
+  using ScreenExitCallback = base::RepeatingCallback<void(Result result)>;
+
+  explicit GaiaScreen(const ScreenExitCallback& exit_callback);
+  ~GaiaScreen() override;
+
+  void SetView(GaiaView* view);
+
+  // Loads online Gaia into the webview.
+  void LoadOnline(const AccountId& account);
+  // Loads online Gaia (for child signup) into the webview.
+  void LoadOnlineForChildSignup();
+  // Loads online Gaia (for child signin) into the webview.
+  void LoadOnlineForChildSignin();
 
  private:
+  void ShowImpl() override;
+  void HideImpl() override;
+  void OnUserAction(const std::string& action_id) override;
+  bool HandleAccelerator(ash::LoginAcceleratorAction action) override;
+
   GaiaView* view_ = nullptr;
+
+  ScreenExitCallback exit_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(GaiaScreen);
 };

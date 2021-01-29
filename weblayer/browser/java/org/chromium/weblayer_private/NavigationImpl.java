@@ -29,6 +29,14 @@ public final class NavigationImpl extends INavigation.Stub {
     // WARNING: NavigationImpl may outlive the native side, in which case this member is set to 0.
     private long mNativeNavigationImpl;
 
+    // Set to true if/when it is determined that an external intent was launched for this
+    // navigation.
+    private boolean mIntentLaunched;
+
+    // Set to true if/when it is determined that this navigation result in UI being presented to the
+    // user via which the user will determine whether an intent should be launched.
+    private boolean mIsUserDecidingIntentLaunch;
+
     public NavigationImpl(INavigationControllerClient client, long nativeNavigationImpl) {
         mNativeNavigationImpl = nativeNavigationImpl;
         try {
@@ -64,45 +72,42 @@ public final class NavigationImpl extends INavigation.Stub {
     public int getState() {
         StrictModeWorkaround.apply();
         throwIfNativeDestroyed();
-        return implTypeToJavaType(
-                NavigationImplJni.get().getState(mNativeNavigationImpl, NavigationImpl.this));
+        return implTypeToJavaType(NavigationImplJni.get().getState(mNativeNavigationImpl));
     }
 
     @Override
     public String getUri() {
         StrictModeWorkaround.apply();
         throwIfNativeDestroyed();
-        return NavigationImplJni.get().getUri(mNativeNavigationImpl, NavigationImpl.this);
+        return NavigationImplJni.get().getUri(mNativeNavigationImpl);
     }
 
     @Override
     public List<String> getRedirectChain() {
         StrictModeWorkaround.apply();
         throwIfNativeDestroyed();
-        return Arrays.asList(NavigationImplJni.get().getRedirectChain(
-                mNativeNavigationImpl, NavigationImpl.this));
+        return Arrays.asList(NavigationImplJni.get().getRedirectChain(mNativeNavigationImpl));
     }
 
     @Override
     public int getHttpStatusCode() {
         StrictModeWorkaround.apply();
         throwIfNativeDestroyed();
-        return NavigationImplJni.get().getHttpStatusCode(
-                mNativeNavigationImpl, NavigationImpl.this);
+        return NavigationImplJni.get().getHttpStatusCode(mNativeNavigationImpl);
     }
 
     @Override
     public boolean isSameDocument() {
         StrictModeWorkaround.apply();
         throwIfNativeDestroyed();
-        return NavigationImplJni.get().isSameDocument(mNativeNavigationImpl, NavigationImpl.this);
+        return NavigationImplJni.get().isSameDocument(mNativeNavigationImpl);
     }
 
     @Override
     public boolean isErrorPage() {
         StrictModeWorkaround.apply();
         throwIfNativeDestroyed();
-        return NavigationImplJni.get().isErrorPage(mNativeNavigationImpl, NavigationImpl.this);
+        return NavigationImplJni.get().isErrorPage(mNativeNavigationImpl);
     }
 
     @Override
@@ -110,7 +115,7 @@ public final class NavigationImpl extends INavigation.Stub {
         StrictModeWorkaround.apply();
         throwIfNativeDestroyed();
         return implLoadErrorToLoadError(
-                NavigationImplJni.get().getLoadError(mNativeNavigationImpl, NavigationImpl.this));
+                NavigationImplJni.get().getLoadError(mNativeNavigationImpl));
     }
 
     @Override
@@ -121,9 +126,86 @@ public final class NavigationImpl extends INavigation.Stub {
         if (!NavigationImplJni.get().isValidRequestHeaderValue(value)) {
             throw new IllegalArgumentException("Invalid value");
         }
-        if (!NavigationImplJni.get().setRequestHeader(mNativeNavigationImpl, this, name, value)) {
+        if (!NavigationImplJni.get().setRequestHeader(mNativeNavigationImpl, name, value)) {
             throw new IllegalStateException();
         }
+    }
+
+    @Override
+    public void setUserAgentString(String value) {
+        if (!NavigationImplJni.get().isValidRequestHeaderValue(value)) {
+            throw new IllegalArgumentException("Invalid value");
+        }
+        if (!NavigationImplJni.get().setUserAgentString(mNativeNavigationImpl, value)) {
+            throw new IllegalStateException();
+        }
+    }
+
+    @Override
+    public boolean isDownload() {
+        StrictModeWorkaround.apply();
+        throwIfNativeDestroyed();
+        return NavigationImplJni.get().isDownload(mNativeNavigationImpl);
+    }
+
+    @Override
+    public boolean isKnownProtocol() {
+        StrictModeWorkaround.apply();
+        throwIfNativeDestroyed();
+        return NavigationImplJni.get().isKnownProtocol(mNativeNavigationImpl);
+    }
+
+    @Override
+    public boolean wasIntentLaunched() {
+        return mIntentLaunched;
+    }
+
+    @Override
+    public boolean isUserDecidingIntentLaunch() {
+        return mIsUserDecidingIntentLaunch;
+    }
+
+    @Override
+    public boolean wasStopCalled() {
+        StrictModeWorkaround.apply();
+        throwIfNativeDestroyed();
+        return NavigationImplJni.get().wasStopCalled(mNativeNavigationImpl);
+    }
+
+    @Override
+    public boolean isPageInitiated() {
+        StrictModeWorkaround.apply();
+        throwIfNativeDestroyed();
+        return NavigationImplJni.get().isPageInitiated(mNativeNavigationImpl);
+    }
+
+    @Override
+    public boolean isReload() {
+        StrictModeWorkaround.apply();
+        throwIfNativeDestroyed();
+        return NavigationImplJni.get().isReload(mNativeNavigationImpl);
+    }
+
+    @Override
+    public boolean isServedFromBackForwardCache() {
+        StrictModeWorkaround.apply();
+        throwIfNativeDestroyed();
+        return NavigationImplJni.get().isServedFromBackForwardCache(mNativeNavigationImpl);
+    }
+
+    @Override
+    public void disableNetworkErrorAutoReload() {
+        if (!NavigationImplJni.get().disableNetworkErrorAutoReload(mNativeNavigationImpl)) {
+            throw new IllegalStateException();
+        }
+    }
+
+    public void setIntentLaunched() {
+        mIntentLaunched = true;
+    }
+
+    public void setIsUserDecidingIntentLaunch() {
+        mIsUserDecidingIntentLaunch = true;
     }
 
     private void throwIfNativeDestroyed() {
@@ -147,6 +229,8 @@ public final class NavigationImpl extends INavigation.Stub {
                 return LoadError.CONNECTIVITY_ERROR;
             case ImplLoadError.OTHER_ERROR:
                 return LoadError.OTHER_ERROR;
+            case ImplLoadError.SAFE_BROWSING_ERROR:
+                return LoadError.SAFE_BROWSING_ERROR;
             default:
                 throw new IllegalArgumentException("Unexpected load error " + loadError);
         }
@@ -161,16 +245,23 @@ public final class NavigationImpl extends INavigation.Stub {
     @NativeMethods
     interface Natives {
         void setJavaNavigation(long nativeNavigationImpl, NavigationImpl caller);
-        int getState(long nativeNavigationImpl, NavigationImpl caller);
-        String getUri(long nativeNavigationImpl, NavigationImpl caller);
-        String[] getRedirectChain(long nativeNavigationImpl, NavigationImpl caller);
-        int getHttpStatusCode(long nativeNavigationImpl, NavigationImpl caller);
-        boolean isSameDocument(long nativeNavigationImpl, NavigationImpl caller);
-        boolean isErrorPage(long nativeNavigationImpl, NavigationImpl caller);
-        int getLoadError(long nativeNavigationImpl, NavigationImpl caller);
-        boolean setRequestHeader(
-                long nativeNavigationImpl, NavigationImpl caller, String name, String value);
+        int getState(long nativeNavigationImpl);
+        String getUri(long nativeNavigationImpl);
+        String[] getRedirectChain(long nativeNavigationImpl);
+        int getHttpStatusCode(long nativeNavigationImpl);
+        boolean isSameDocument(long nativeNavigationImpl);
+        boolean isErrorPage(long nativeNavigationImpl);
+        boolean isDownload(long nativeNavigationImpl);
+        boolean isKnownProtocol(long nativeNavigationImpl);
+        boolean wasStopCalled(long nativeNavigationImpl);
+        int getLoadError(long nativeNavigationImpl);
+        boolean setRequestHeader(long nativeNavigationImpl, String name, String value);
         boolean isValidRequestHeaderName(String name);
         boolean isValidRequestHeaderValue(String value);
+        boolean setUserAgentString(long nativeNavigationImpl, String value);
+        boolean isPageInitiated(long nativeNavigationImpl);
+        boolean isReload(long nativeNavigationImpl);
+        boolean isServedFromBackForwardCache(long nativeNavigationImpl);
+        boolean disableNetworkErrorAutoReload(long nativeNavigationImpl);
     }
 }

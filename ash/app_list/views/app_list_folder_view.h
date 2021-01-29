@@ -13,9 +13,10 @@
 #include "ash/app_list/views/apps_grid_view_folder_delegate.h"
 #include "ash/app_list/views/folder_header_view.h"
 #include "ash/app_list/views/folder_header_view_delegate.h"
-#include "base/macros.h"
 #include "base/optional.h"
+#include "ui/compositor/throughput_tracker.h"
 #include "ui/views/controls/button/button.h"
+#include "ui/views/metadata/metadata_header_macros.h"
 #include "ui/views/view.h"
 #include "ui/views/view_model.h"
 
@@ -34,9 +35,13 @@ class APP_LIST_EXPORT AppListFolderView : public views::View,
                                           public AppListModelObserver,
                                           public AppsGridViewFolderDelegate {
  public:
+  METADATA_HEADER(AppListFolderView);
+
   AppListFolderView(AppsContainerView* container_view,
                     AppListModel* model,
                     ContentsView* contents_view);
+  AppListFolderView(const AppListFolderView&) = delete;
+  AppListFolderView& operator=(const AppListFolderView&) = delete;
   ~AppListFolderView() override;
 
   // An interface for the folder opening and closing animations.
@@ -68,7 +73,6 @@ class APP_LIST_EXPORT AppListFolderView : public views::View,
   gfx::Size CalculatePreferredSize() const override;
   void Layout() override;
   bool OnKeyPressed(const ui::KeyEvent& event) override;
-  const char* GetClassName() const override;
 
   // AppListModelObserver
   void OnAppListItemWillBeDeleted(AppListItem* item) override;
@@ -114,10 +118,6 @@ class APP_LIST_EXPORT AppListFolderView : public views::View,
 
   // Called when tablet mode starts and ends.
   void OnTabletModeChanged(bool started);
-
-  // When transform in |contents_view_| is updated, notify accessibility to show
-  // ChromeVox focus in correct locations.
-  void NotifyAccessibilityLocationChanges();
 
  private:
   void CalculateIdealBounds();
@@ -195,10 +195,7 @@ class APP_LIST_EXPORT AppListFolderView : public views::View,
   std::unique_ptr<Animation> contents_container_animation_;
 
   // Records smoothness of the folder show/hide animation.
-  std::unique_ptr<AppListAnimationMetricsRecorder> show_hide_metrics_recorder_;
-  std::unique_ptr<FolderShowHideAnimationReporter> show_hide_metrics_reporter_;
-
-  DISALLOW_COPY_AND_ASSIGN(AppListFolderView);
+  base::Optional<ui::ThroughputTracker> show_hide_metrics_tracker_;
 };
 
 }  // namespace ash

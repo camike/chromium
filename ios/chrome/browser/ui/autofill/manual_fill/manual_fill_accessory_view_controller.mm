@@ -182,27 +182,32 @@ static NSTimeInterval MFAnimationDuration = 0.2;
   self.passwordButton.contentEdgeInsets = UIEdgeInsetsMake(0, 2, 0, 2);
   [icons addObject:self.passwordButton];
 
-    self.cardsButton =
-        [self manualFillButtonWithAction:@selector(cardButtonPressed:)
-                              ImageNamed:@"ic_credit_card"
-                 accessibilityIdentifier:
-                     manual_fill::AccessoryCreditCardAccessibilityIdentifier
-                      accessibilityLabel:
-                          l10n_util::GetNSString(
-                              IDS_IOS_MANUAL_FALLBACK_SHOW_CREDIT_CARDS)];
-    self.cardsButton.hidden = self.isCreditCardButtonHidden;
-    [icons addObject:self.cardsButton];
+  self.cardsButton =
+      [self manualFillButtonWithAction:@selector(cardButtonPressed:)
+                            ImageNamed:@"ic_credit_card"
+               accessibilityIdentifier:
+                   manual_fill::AccessoryCreditCardAccessibilityIdentifier
+                    accessibilityLabel:
+                        l10n_util::GetNSString(
+                            IDS_IOS_MANUAL_FALLBACK_SHOW_CREDIT_CARDS)];
+  self.cardsButton.hidden = self.isCreditCardButtonHidden;
+  [icons addObject:self.cardsButton];
 
-    self.accountButton = [self
-        manualFillButtonWithAction:@selector(accountButtonPressed:)
-                        ImageNamed:@"ic_place"
-           accessibilityIdentifier:manual_fill::
-                                       AccessoryAddressAccessibilityIdentifier
-                accessibilityLabel:l10n_util::GetNSString(
-                                       IDS_IOS_MANUAL_FALLBACK_SHOW_ADDRESSES)];
+  self.accountButton = [self
+      manualFillButtonWithAction:@selector(accountButtonPressed:)
+                      ImageNamed:@"ic_place"
+         accessibilityIdentifier:manual_fill::
+                                     AccessoryAddressAccessibilityIdentifier
+              accessibilityLabel:l10n_util::GetNSString(
+                                     IDS_IOS_MANUAL_FALLBACK_SHOW_ADDRESSES)];
 
-    self.accountButton.hidden = self.isAddressButtonHidden;
-    [icons addObject:self.accountButton];
+  self.accountButton.hidden = self.isAddressButtonHidden;
+  [icons addObject:self.accountButton];
+
+  if (@available(iOS 13.4, *)) {
+      for (UIButton* button in icons)
+        button.pointerInteractionEnabled = YES;
+  }
 
   UIStackView* stackView = [[UIStackView alloc] initWithArrangedSubviews:icons];
   stackView.spacing =

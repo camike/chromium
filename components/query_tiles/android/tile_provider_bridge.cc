@@ -10,57 +10,34 @@
 
 #include "base/android/callback_android.h"
 #include "base/android/jni_string.h"
+#include "base/bind.h"
+#include "components/query_tiles/android/tile_conversion_bridge.h"
 #include "components/query_tiles/jni_headers/TileProviderBridge_jni.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/image/image.h"
 
 using base::android::AttachCurrentThread;
-using base::android::ConvertJavaStringToUTF8;
-using base::android::ConvertUTF8ToJavaString;
 
-namespace upboarding {
+namespace query_tiles {
 
 namespace {
 const char kTileProviderBridgeKey[] = "tile_provider_bridge";
 
-ScopedJavaLocalRef<jobject> CreateJavaTileAndMaybeAddToList(
-    JNIEnv* env,
-    ScopedJavaLocalRef<jobject> jlist,
-    const Tile& tile) {
-  ScopedJavaLocalRef<jobject> jchildren =
-      Java_TileProviderBridge_createList(env);
-
-  for (const auto& subtile : tile.sub_tiles)
-    CreateJavaTileAndMaybeAddToList(env, jchildren, *subtile.get());
-
-  return Java_TileProviderBridge_createTileAndMaybeAddToList(
-      env, jlist, ConvertUTF8ToJavaString(env, tile.id),
-      ConvertUTF8ToJavaString(env, tile.display_text),
-      ConvertUTF8ToJavaString(env, tile.accessibility_text),
-      ConvertUTF8ToJavaString(env, tile.query_text), jchildren);
-}
-
-ScopedJavaLocalRef<jobject> CreateJavaTiles(JNIEnv* env,
-                                            std::vector<Tile> tiles) {
-  ScopedJavaLocalRef<jobject> jlist = Java_TileProviderBridge_createList(env);
-
-  for (const auto& tile : tiles)
-    CreateJavaTileAndMaybeAddToList(env, jlist, tile);
-
-  return jlist;
-}
-
 void RunGetTilesCallback(const JavaRef<jobject>& j_callback,
                          std::vector<Tile> tiles) {
   JNIEnv* env = AttachCurrentThread();
-  RunObjectCallbackAndroid(j_callback, CreateJavaTiles(env, std::move(tiles)));
+  RunObjectCallbackAndroid(
+      j_callback, TileConversionBridge::CreateJavaTiles(env, std::move(tiles)));
 }
 
-void RunGeVisualsCallback(const JavaRef<jobject>& j_callback,
-                          const gfx::Image& image) {
-  ScopedJavaLocalRef<jobject> j_bitmap =
-      gfx::ConvertToJavaBitmap(image.ToSkBitmap());
-  RunObjectCallbackAndroid(j_callback, j_bitmap);
+void RunGetTileCallback(const JavaRef<jobject>& j_callback,
+                        base::Optional<Tile> tile) {
+  JNIEnv* env = AttachCurrentThread();
+  RunObjectCallbackAndroid(
+      j_callback,
+      TileConversionBridge::CreateJavaTiles(
+          env, tile.has_value() ? std::move(tile->sub_tiles)
+                                : std::vector<std::unique_ptr<Tile>>()));
 }
 
 }  // namespace
@@ -96,19 +73,24 @@ TileProviderBridge::~TileProviderBridge() {
 
 void TileProviderBridge::GetQueryTiles(JNIEnv* env,
                                        const JavaParamRef<jobject>& jcaller,
+                                       const JavaParamRef<jstring>& j_tile_id,
                                        const JavaParamRef<jobject>& jcallback) {
-  tile_service_->GetQueryTiles(base::BindOnce(
-      &RunGetTilesCallback, ScopedJavaGlobalRef<jobject>(jcallback)));
+  // TODO(qinmin): refactor TileService to use a single call to handle both
+  // cases.
+  if (j_tile_id.is_null()) {
+    tile_service_->GetQueryTiles(base::BindOnce(
+        &RunGetTilesCallback, ScopedJavaGlobalRef<jobject>(jcallback)));
+  } else {
+    tile_service_->GetTile(
+        ConvertJavaStringToUTF8(env, j_tile_id),
+        base::BindOnce(&RunGetTileCallback,
+                       ScopedJavaGlobalRef<jobject>(jcallback)));
+  }
 }
 
-void TileProviderBridge::GetVisuals(JNIEnv* env,
-                                    const JavaParamRef<jobject>& jcaller,
-                                    const JavaParamRef<jstring>& jid,
-                                    const JavaParamRef<jobject>& jcallback) {
-  std::string tile_id = ConvertJavaStringToUTF8(env, jid);
-  tile_service_->GetVisuals(
-      tile_id, base::BindOnce(&RunGeVisualsCallback,
-                              ScopedJavaGlobalRef<jobject>(jcallback)));
+void TileProviderBridge::OnTileClicked(JNIEnv* env,
+                                       const JavaParamRef<jstring>& j_tile_id) {
+  tile_service_->OnTileClicked(ConvertJavaStringToUTF8(env, j_tile_id));
 }
 
-}  // namespace upboarding
+}  // namespace query_tiles

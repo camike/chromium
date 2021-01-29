@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
@@ -22,12 +23,12 @@ const int64_t SyncTaskToken::kMinimumBackgroundTaskTokenID = 1;
 
 // static
 std::unique_ptr<SyncTaskToken> SyncTaskToken::CreateForTesting(
-    const SyncStatusCallback& callback) {
+    SyncStatusCallback callback) {
   return base::WrapUnique(new SyncTaskToken(base::WeakPtr<SyncTaskManager>(),
                                             base::ThreadTaskRunnerHandle::Get(),
                                             kTestingTaskTokenID,
                                             nullptr,  // task_blocker
-                                            callback));
+                                            std::move(callback)));
 }
 
 // static
@@ -52,10 +53,10 @@ std::unique_ptr<SyncTaskToken> SyncTaskToken::CreateForBackgroundTask(
 }
 
 void SyncTaskToken::UpdateTask(const base::Location& location,
-                               const SyncStatusCallback& callback) {
+                               SyncStatusCallback callback) {
   DCHECK(callback_.is_null());
   location_ = location;
-  callback_ = callback;
+  callback_ = std::move(callback);
   DVLOG(2) << "Token updated: " << location_.ToString();
 }
 
@@ -118,11 +119,11 @@ SyncTaskToken::SyncTaskToken(
     const scoped_refptr<base::SequencedTaskRunner>& task_runner,
     int64_t token_id,
     std::unique_ptr<TaskBlocker> task_blocker,
-    const SyncStatusCallback& callback)
+    SyncStatusCallback callback)
     : manager_(manager),
       task_runner_(task_runner),
       token_id_(token_id),
-      callback_(callback),
+      callback_(std::move(callback)),
       task_blocker_(std::move(task_blocker)) {}
 
 }  // namespace drive_backend

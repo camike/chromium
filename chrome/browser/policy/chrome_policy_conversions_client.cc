@@ -10,6 +10,7 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_refptr.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/policy/chrome_browser_policy_connector.h"
@@ -33,7 +34,7 @@
 #include "extensions/common/manifest_constants.h"
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/chromeos/policy/active_directory_policy_manager.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
@@ -53,7 +54,7 @@ namespace policy {
 
 namespace {
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 Value GetIdentityFieldsFromPolicy(
     const enterprise_management::PolicyData* policy) {
   Value identity_fields(Value::Type::DICTIONARY);
@@ -81,7 +82,7 @@ Value GetIdentityFieldsFromPolicy(
   return identity_fields;
 }
 
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace
 
@@ -123,13 +124,13 @@ Value ChromePolicyConversionsClient::GetExtensionPolicies(
 
   const bool for_signin_screen =
       policy_domain == POLICY_DOMAIN_SIGNIN_EXTENSIONS;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   Profile* extension_profile = for_signin_screen
                                    ? chromeos::ProfileHelper::GetSigninProfile()
                                    : profile_;
-#else   // defined(OS_CHROMEOS)
+#else   // BUILDFLAG(IS_CHROMEOS_ASH)
   Profile* extension_profile = profile_;
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   const extensions::ExtensionRegistry* registry =
       extensions::ExtensionRegistry::Get(extension_profile);
@@ -162,7 +163,7 @@ Value ChromePolicyConversionsClient::GetExtensionPolicies(
         GetPolicyValues(extension_profile->GetProfilePolicyConnector()
                             ->policy_service()
                             ->GetPolicies(policy_namespace),
-                        &empty_error_map, DeprecatedPoliciesSet(),
+                        &empty_error_map, PoliciesSet(), PoliciesSet(),
                         GetKnownPolicies(schema_map, policy_namespace));
     Value extension_policies_data(Value::Type::DICTIONARY);
     extension_policies_data.SetKey("name", Value(extension->name()));
@@ -175,7 +176,7 @@ Value ChromePolicyConversionsClient::GetExtensionPolicies(
   return policies;
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 Value ChromePolicyConversionsClient::GetDeviceLocalAccountPolicies() {
   Value policies(Value::Type::LIST);
   // DeviceLocalAccount policies are only available for affiliated users and for
@@ -233,15 +234,16 @@ Value ChromePolicyConversionsClient::GetDeviceLocalAccountPolicies() {
     const ConfigurationPolicyHandlerList* handler_list =
         connector->GetHandlerList();
     PolicyErrorMap errors;
-    DeprecatedPoliciesSet deprecated_policies;
+    PoliciesSet deprecated_policies;
+    PoliciesSet future_policies;
     handler_list->ApplyPolicySettings(map, nullptr, &errors,
-                                      &deprecated_policies);
+                                      &deprecated_policies, &future_policies);
 
     // Convert dictionary values to strings for display.
     handler_list->PrepareForDisplaying(&map);
 
     Value current_account_policies =
-        GetPolicyValues(map, &errors, deprecated_policies,
+        GetPolicyValues(map, &errors, deprecated_policies, future_policies,
                         GetKnownPolicies(schema_map, policy_namespace));
     Value current_account_policies_data(Value::Type::DICTIONARY);
     current_account_policies_data.SetKey("id", Value(user_id));

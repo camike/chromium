@@ -21,17 +21,19 @@
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/signin/signin_util.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/user_manager.h"
+#include "chrome/browser/ui/profile_picker.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_profile.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/test_launcher.h"
 
 namespace {
 
 void UnblockOnProfileCreation(Profile::CreateStatus expected_final_status,
-                              const base::Closure& quit_closure,
+                              base::OnceClosure quit_closure,
                               Profile* profile,
                               Profile::CreateStatus status) {
   // If the status is CREATE_STATUS_CREATED, then the function will be called
@@ -40,19 +42,19 @@ void UnblockOnProfileCreation(Profile::CreateStatus expected_final_status,
     return;
 
   EXPECT_EQ(expected_final_status, status);
-  quit_closure.Run();
+  std::move(quit_closure).Run();
 }
 
-void UnblockOnProfileInitialized(const base::Closure& quit_closure,
+void UnblockOnProfileInitialized(base::OnceClosure quit_closure,
                                  Profile* profile,
                                  Profile::CreateStatus status) {
-  UnblockOnProfileCreation(Profile::CREATE_STATUS_INITIALIZED, quit_closure,
-                           profile, status);
+  UnblockOnProfileCreation(Profile::CREATE_STATUS_INITIALIZED,
+                           std::move(quit_closure), profile, status);
 }
 
-void OnCloseAllBrowsersSucceeded(const base::Closure& quit_closure,
+void OnCloseAllBrowsersSucceeded(base::OnceClosure quit_closure,
                                  const base::FilePath& path) {
-  quit_closure.Run();
+  std::move(quit_closure).Run();
 }
 
 void CreateAndSwitchToProfile(const std::string& basepath) {
@@ -62,7 +64,8 @@ void CreateAndSwitchToProfile(const std::string& basepath) {
   base::FilePath path = profile_manager->user_data_dir().AppendASCII(basepath);
   base::RunLoop run_loop;
   profile_manager->CreateProfileAsync(
-      path, base::Bind(&UnblockOnProfileInitialized, run_loop.QuitClosure()),
+      path,
+      base::BindRepeating(&UnblockOnProfileInitialized, run_loop.QuitClosure()),
       base::string16(), std::string());
   // Run the message loop to allow profile creation to take place; the loop is
   // terminated by UnblockOnProfileCreation when the profile is created.
@@ -92,24 +95,32 @@ void CheckBrowserWindows(const std::vector<std::string>& expected_basepaths) {
 
 void ExpectUserManagerToShow() {
   // If the user manager is not shown yet, wait for the user manager to appear.
-  if (!UserManager::IsShowing()) {
+  if (!ProfilePicker::IsOpen()) {
     base::RunLoop run_loop;
-    UserManager::AddOnUserManagerShownCallbackForTesting(
+    ProfilePicker::AddOnProfilePickerOpenedCallbackForTesting(
         run_loop.QuitClosure());
     run_loop.Run();
   }
-  ASSERT_TRUE(UserManager::IsShowing());
+  ASSERT_TRUE(ProfilePicker::IsOpen());
 
   // We must hide the user manager before the test ends.
-  UserManager::Hide();
+  ProfilePicker::Hide();
 }
 
 }  // namespace
 
-class StartupBrowserCreatorCorruptProfileTest : public InProcessBrowserTest {
+class StartupBrowserCreatorCorruptProfileTest
+    : public InProcessBrowserTest,
+      public ::testing::WithParamInterface<bool> {
  public:
-  StartupBrowserCreatorCorruptProfileTest()
-      : test_body_has_run_(false), expect_test_body_to_run_(true) {}
+  StartupBrowserCreatorCorruptProfileTest() {
+    TestingProfile::SetScopedFeatureListForEphemeralGuestProfiles(
+        scoped_feature_list_, GetParam());
+  }
+  StartupBrowserCreatorCorruptProfileTest(
+      const StartupBrowserCreatorCorruptProfileTest&) = delete;
+  StartupBrowserCreatorCorruptProfileTest& operator=(
+      const StartupBrowserCreatorCorruptProfileTest&) = delete;
 
   void SetExpectTestBodyToRun(bool expected_result) {
     expect_test_body_to_run_ = expected_result;
@@ -122,7 +133,7 @@ class StartupBrowserCreatorCorruptProfileTest : public InProcessBrowserTest {
 
     base::FilePath dir_to_delete = user_data_dir.AppendASCII(basepath);
     return base::DirectoryExists(dir_to_delete) &&
-           base::DeleteFileRecursively(dir_to_delete);
+           base::DeletePathRecursively(dir_to_delete);
   }
 
   bool RemoveCreateDirectoryPermissionForUserDataDirectory() {
@@ -156,7 +167,8 @@ class StartupBrowserCreatorCorruptProfileTest : public InProcessBrowserTest {
     base::RunLoop run_loop;
     BrowserList::GetInstance()->CloseAllBrowsersWithProfile(
         profile,
-        base::Bind(&OnCloseAllBrowsersSucceeded, run_loop.QuitClosure()),
+        base::BindRepeating(&OnCloseAllBrowsersSucceeded,
+                            run_loop.QuitClosure()),
         BrowserList::CloseCallback(), false);
   }
 
@@ -168,11 +180,14 @@ class StartupBrowserCreatorCorruptProfileTest : public InProcessBrowserTest {
   // In this test fixture, SetUpUserDataDirectory must be handled for all
   // non-PRE_ tests.
   bool SetUpUserDataDirectory() override {
-#define SET_UP_USER_DATA_DIRECTORY_FOR(testname) \
-if (testing::UnitTest::GetInstance()->current_test_info()->name() == \
-    std::string(#testname)) {\
-  return this->SetUpUserDataDirectoryFor ## testname(); \
-}
+    // Drop the param from test name.
+    std::string test_name =
+        testing::UnitTest::GetInstance()->current_test_info()->name();
+    test_name.resize(test_name.length() - 2);
+#define SET_UP_USER_DATA_DIRECTORY_FOR(testname)        \
+  if (test_name == std::string(#testname)) {            \
+    return this->SetUpUserDataDirectoryFor##testname(); \
+  }
 
     SET_UP_USER_DATA_DIRECTORY_FOR(LastOpenedProfileMissing);
     SET_UP_USER_DATA_DIRECTORY_FOR(LastUsedProfileFallbackToLastOpenedProfiles);
@@ -205,9 +220,9 @@ if (testing::UnitTest::GetInstance()->current_test_info()->name() == \
   }
 
  private:
-  bool test_body_has_run_;
-  bool expect_test_body_to_run_;
-  DISALLOW_COPY_AND_ASSIGN(StartupBrowserCreatorCorruptProfileTest);
+  bool test_body_has_run_ = false;
+  bool expect_test_body_to_run_ = true;
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 // Most of the tests below have three sections:
@@ -226,7 +241,7 @@ if (testing::UnitTest::GetInstance()->current_test_info()->name() == \
 // LastOpenedProfileMissing : If any last opened profile is missing, that
 // profile is skipped, but other last opened profiles should be opened in the
 // browser.
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        PRE_LastOpenedProfileMissing) {
   CreateAndSwitchToProfile("Profile 1");
   CreateAndSwitchToProfile("Profile 2");
@@ -238,14 +253,14 @@ bool StartupBrowserCreatorCorruptProfileTest::
          RemoveCreateDirectoryPermissionForUserDataDirectory();
 }
 
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        LastOpenedProfileMissing) {
   CheckBrowserWindows({"Default", "Profile 2"});
 }
 
 // LastUsedProfileFallbackToLastOpenedProfiles : If the last used profile is
 // missing, it should fall back to any last opened profiles.
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        PRE_LastUsedProfileFallbackToLastOpenedProfiles) {
   CreateAndSwitchToProfile("Profile 1");
   CreateAndSwitchToProfile("Profile 2");
@@ -257,7 +272,7 @@ bool StartupBrowserCreatorCorruptProfileTest::
          RemoveCreateDirectoryPermissionForUserDataDirectory();
 }
 
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        LastUsedProfileFallbackToLastOpenedProfiles) {
   CheckBrowserWindows({"Default", "Profile 1"});
 }
@@ -265,7 +280,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
 // LastUsedProfileFallbackToUserManager : If all last opened profiles are
 // missing, it should fall back to user manager. To open the user manager, both
 // the guest profile and the system profile must be creatable.
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        PRE_LastUsedProfileFallbackToUserManager) {
   CreateAndSwitchToProfile("Profile 1");
   CloseBrowsersSynchronouslyForProfileBasePath("Profile 1");
@@ -283,16 +298,23 @@ bool StartupBrowserCreatorCorruptProfileTest::
          RemoveCreateDirectoryPermissionForUserDataDirectory();
 }
 
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        LastUsedProfileFallbackToUserManager) {
+  // TODO(https://crbug.com/1125474): Update the test to cover Ephemeral Guest
+  // profiles.
+  // The current test logic is not suitable when ephemeral test profiles are
+  // enabled. Ephemeral Guest profiles do not have a fixed directory and
+  // removing create-directory permission from user data directory will prevent
+  // creation of the Guest profile.
+  if (GetParam())
+    return;
   CheckBrowserWindows({});
   ExpectUserManagerToShow();
 }
 
-
 // CannotCreateSystemProfile : If the system profile cannot be created, the user
 // manager should not be shown. Fallback to any other profile.
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        PRE_CannotCreateSystemProfile) {
   CreateAndSwitchToProfile("Profile 1");
   CloseBrowsersSynchronouslyForProfileBasePath("Profile 1");
@@ -312,14 +334,14 @@ bool StartupBrowserCreatorCorruptProfileTest::
          RemoveCreateDirectoryPermissionForUserDataDirectory();
 }
 
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        CannotCreateSystemProfile) {
   CheckBrowserWindows({"Profile 1"});
 }
 
 // LastUsedProfileFallbackToAnyProfile : If all the last opened profiles and the
 // guest profile cannot be opened, fall back to any profile that is not locked.
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        PRE_LastUsedProfileFallbackToAnyProfile) {
   CreateAndSwitchToProfile("Profile 1");
   CloseBrowsersSynchronouslyForProfileBasePath("Profile 1");
@@ -333,7 +355,7 @@ bool StartupBrowserCreatorCorruptProfileTest::
          RemoveCreateDirectoryPermissionForUserDataDirectory();
 }
 
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        LastUsedProfileFallbackToAnyProfile) {
   CheckBrowserWindows({"Profile 1"});
 }
@@ -346,7 +368,7 @@ bool StartupBrowserCreatorCorruptProfileTest::
   return RemoveCreateDirectoryPermissionForUserDataDirectory();
 }
 
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        LastUsedProfileFallbackFail) {
   ADD_FAILURE() << "Test body is not expected to run.";
 }
@@ -354,7 +376,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
 // DoNotStartLockedProfile : Profiles that are locked should never be
 // initialized. Since there are no unlocked profiles, the browser should not
 // start.
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        PRE_DoNotStartLockedProfile) {
   // Lock the default profile. The user manager is shown after the profile is
   // locked.
@@ -370,7 +392,7 @@ bool StartupBrowserCreatorCorruptProfileTest::
   return RemoveCreateDirectoryPermissionForUserDataDirectory();
 }
 
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        DoNotStartLockedProfile) {
   ADD_FAILURE() << "Test body is not expected to run.";
 }
@@ -378,7 +400,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
 // NoFallbackForUserSelectedProfile : No fallback should be attempted if the
 // profile is selected by the --profile-directory switch. The browser should not
 // start if the specified profile could not be initialized.
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        PRE_NoFallbackForUserSelectedProfile) {
   CreateAndSwitchToProfile("Profile 1");
   CreateAndSwitchToProfile("Profile 2");
@@ -393,7 +415,7 @@ bool StartupBrowserCreatorCorruptProfileTest::
          RemoveCreateDirectoryPermissionForUserDataDirectory();
 }
 
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        NoFallbackForUserSelectedProfile) {
   ADD_FAILURE() << "Test body is not expected to run.";
 }
@@ -402,7 +424,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
 // ProfileAttributesStorage is missing, it means the profile is deleted. The
 // browser should not attempt to open the profile, but should show the user
 // manager instead.
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        PRE_DeletedProfileFallbackToUserManager) {
   base::ScopedAllowBlockingForTesting allow_blocking;
   ASSERT_TRUE(base::CreateDirectory(ProfileManager::GetGuestProfilePath()));
@@ -418,8 +440,12 @@ bool StartupBrowserCreatorCorruptProfileTest::
 }
 
 // Flaky: https://crbug.com/951787
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorCorruptProfileTest,
                        DISABLED_DeletedProfileFallbackToUserManager) {
   CheckBrowserWindows({});
   ExpectUserManagerToShow();
 }
+
+INSTANTIATE_TEST_SUITE_P(AllGuestTypes,
+                         StartupBrowserCreatorCorruptProfileTest,
+                         /*is_ephemeral=*/testing::Bool());

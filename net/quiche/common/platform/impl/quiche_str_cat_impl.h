@@ -9,21 +9,36 @@
 #include <string>
 #include <utility>
 
+#include "base/strings/abseil_string_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "third_party/abseil-cpp/absl/strings/str_cat.h"
+#include "third_party/abseil-cpp/absl/strings/str_format.h"
 
 namespace quiche {
 
-template <typename... Args>
-inline std::string QuicheStrCatImpl(const Args&... args) {
-  std::ostringstream oss;
-  int dummy[] = {1, (oss << args, 0)...};
-  static_cast<void>(dummy);
-  return oss.str();
+inline absl::string_view MaybeStringPieceToStringView(base::StringPiece arg) {
+  return base::StringPieceToStringView(arg);
+}
+
+template <typename T>
+inline T MaybeStringPieceToStringView(const T& arg) {
+  return arg;
 }
 
 template <typename... Args>
-inline std::string QuicheStringPrintfImpl(const Args&... args) {
-  return base::StringPrintf(std::forward<const Args&>(args)...);
+inline std::string QuicheStrCatImpl(const Args&... args) {
+  return absl::StrCat(MaybeStringPieceToStringView(args)...);
+}
+
+template <typename... Args>
+inline std::string QuicheStringPrintfImpl(const char* format,
+                                          const Args&... args) {
+  std::string out;
+  std::vector<absl::FormatArg> args_converted{absl::FormatArg(args)...};
+  bool success = absl::FormatUntyped(&out, absl::UntypedFormatSpec(format),
+                                     args_converted);
+  DCHECK(success);
+  return out;
 }
 
 }  // namespace quiche

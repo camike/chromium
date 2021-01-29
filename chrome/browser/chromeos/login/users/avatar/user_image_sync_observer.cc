@@ -12,6 +12,7 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/sync_preferences/pref_service_syncable.h"
@@ -74,9 +75,12 @@ void UserImageSyncObserver::OnProfileGained(Profile* profile) {
   pref_change_registrar_.reset(new PrefChangeRegistrar);
   pref_change_registrar_->Init(prefs_);
   pref_change_registrar_->Add(
-      kUserImageInfo, base::Bind(&UserImageSyncObserver::OnPreferenceChanged,
-                                 base::Unretained(this)));
-  is_synced_ = prefs_->IsPrioritySyncing();
+      kUserImageInfo,
+      base::BindRepeating(&UserImageSyncObserver::OnPreferenceChanged,
+                          base::Unretained(this)));
+  is_synced_ = chromeos::features::IsSplitSettingsSyncEnabled()
+                   ? prefs_->AreOsPriorityPrefsSyncing()
+                   : prefs_->IsPrioritySyncing();
   if (!is_synced_) {
     prefs_->AddObserver(this);
   } else {
@@ -128,7 +132,9 @@ void UserImageSyncObserver::OnUserImageChanged(const user_manager::User& user) {
 }
 
 void UserImageSyncObserver::OnIsSyncingChanged() {
-  is_synced_ = prefs_->IsPrioritySyncing();
+  is_synced_ = chromeos::features::IsSplitSettingsSyncEnabled()
+                   ? prefs_->AreOsPriorityPrefsSyncing()
+                   : prefs_->IsPrioritySyncing();
   if (is_synced_) {
     prefs_->RemoveObserver(this);
     OnInitialSync();

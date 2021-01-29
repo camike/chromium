@@ -15,6 +15,7 @@
 #include "base/macros.h"
 #include "base/optional.h"
 
+#include "device/vr/openxr/openxr_anchor_manager.h"
 #include "device/vr/openxr/openxr_util.h"
 #include "device/vr/public/mojom/vr_service.mojom.h"
 #include "device/vr/vr_export.h"
@@ -40,18 +41,22 @@ class OpenXrApiWrapper {
   ~OpenXrApiWrapper();
   bool IsInitialized() const;
 
-  static std::unique_ptr<OpenXrApiWrapper> Create();
+  static std::unique_ptr<OpenXrApiWrapper> Create(XrInstance instance);
 
   static VRTestHook* GetTestHook();
 
   bool UpdateAndGetSessionEnded();
 
   XrResult InitSession(const Microsoft::WRL::ComPtr<ID3D11Device>& d3d_device,
-                       std::unique_ptr<OpenXRInputHelper>* input_helper);
+                       std::unique_ptr<OpenXRInputHelper>* input_helper,
+                       const OpenXrExtensionHelper& extension_helper);
+
+  XrSpace GetReferenceSpace(device::mojom::XRReferenceSpaceType type) const;
 
   XrResult BeginFrame(Microsoft::WRL::ComPtr<ID3D11Texture2D>* texture);
   XrResult EndFrame();
   bool HasPendingFrame() const;
+  bool HasFrameState() const;
 
   XrResult GetHeadPose(base::Optional<gfx::Quaternion>* orientation,
                        base::Optional<gfx::Point3F>* position,
@@ -60,7 +65,8 @@ class OpenXrApiWrapper {
 
   gfx::Size GetViewSize() const;
   XrTime GetPredictedDisplayTime() const;
-  XrResult GetLuid(LUID* luid) const;
+  XrResult GetLuid(LUID* luid,
+                   const OpenXrExtensionHelper& extension_helper) const;
   bool GetStageParameters(XrExtent2Df* stage_bounds,
                           gfx::Transform* local_from_stage);
   void RegisterInteractionProfileChangeCallback(
@@ -69,16 +75,26 @@ class OpenXrApiWrapper {
   void RegisterVisibilityChangeCallback(
       const base::RepeatingCallback<void(mojom::XRVisibilityState)>&
           visibility_changed_callback);
+  void RegisterOnSessionEndedCallback(
+      const base::RepeatingCallback<void()>& on_session_ended_callback);
+
+  device::mojom::XREnvironmentBlendMode PickEnvironmentBlendModeForSession(
+      device::mojom::XRSessionMode session_mode);
+
+  OpenXrAnchorManager* GetOrCreateAnchorManager(
+      const OpenXrExtensionHelper& extension_helper);
+
+  bool CanEnableAntiAliasing() const;
 
   static void DEVICE_VR_EXPORT SetTestHook(VRTestHook* hook);
 
  private:
   void Reset();
-  bool Initialize();
+  bool Initialize(XrInstance instance);
   void Uninitialize();
 
   XrResult InitializeSystem();
-  XrResult PickEnvironmentBlendMode(XrSystemId system);
+  XrResult InitializeEnvironmentBlendMode(XrSystemId system);
   XrResult ProcessEvents();
   void EnsureEventPolling();
 
@@ -86,8 +102,8 @@ class OpenXrApiWrapper {
       const Microsoft::WRL::ComPtr<ID3D11Device>& d3d_device);
   XrResult CreateSwapchain();
   XrResult CreateSpace(XrReferenceSpaceType type, XrSpace* space);
-  XrResult CreateGamepadHelper(
-      std::unique_ptr<OpenXRInputHelper>* input_helper);
+  XrResult CreateGamepadHelper(std::unique_ptr<OpenXRInputHelper>* input_helper,
+                               const OpenXrExtensionHelper& extension_helper);
 
   XrResult BeginSession();
   XrResult UpdateProjectionLayers();
@@ -100,12 +116,16 @@ class OpenXrApiWrapper {
   bool HasSession() const;
   bool HasColorSwapChain() const;
   bool HasSpace(XrReferenceSpaceType type) const;
-  bool HasFrameState() const;
 
   uint32_t GetRecommendedSwapchainSampleCount() const;
   XrResult UpdateStageBounds();
 
-  bool session_ended_;
+  device::mojom::XREnvironmentBlendMode GetMojoBlendMode(
+      XrEnvironmentBlendMode xr_blend_mode);
+
+  // The session is running only after xrBeginSession and before xrEndSession.
+  // It is not considered running after creation but before xrBeginSession.
+  bool session_running_;
   bool pending_frame_;
   base::TimeTicks last_process_events_time_;
 
@@ -113,6 +133,7 @@ class OpenXrApiWrapper {
       interaction_profile_changed_callback_;
   base::RepeatingCallback<void(mojom::XRVisibilityState)>
       visibility_changed_callback_;
+  base::RepeatingCallback<void()> on_session_ended_callback_;
 
   // Testing objects
   static VRTestHook* test_hook_;
@@ -122,7 +143,6 @@ class OpenXrApiWrapper {
 
   // These objects are valid on successful initialization.
   XrInstance instance_;
-  OpenXRInstanceMetadata instance_metadata_;
   XrSystemId system_;
   std::vector<XrViewConfigurationView> view_configs_;
   XrEnvironmentBlendMode blend_mode_;
@@ -144,6 +164,8 @@ class OpenXrApiWrapper {
   std::vector<XrView> origin_from_eye_views_;
   std::vector<XrView> head_from_eye_views_;
   std::vector<XrCompositionLayerProjectionView> layer_projection_views_;
+
+  std::unique_ptr<OpenXrAnchorManager> anchor_manager_;
 
   base::WeakPtrFactory<OpenXrApiWrapper> weak_ptr_factory_{this};
 

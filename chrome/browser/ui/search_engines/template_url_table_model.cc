@@ -7,9 +7,9 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
-#include "base/stl_util.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
@@ -18,7 +18,7 @@
 
 TemplateURLTableModel::TemplateURLTableModel(
     TemplateURLService* template_url_service)
-    : observer_(NULL), template_url_service_(template_url_service) {
+    : observer_(nullptr), template_url_service_(template_url_service) {
   DCHECK(template_url_service);
   template_url_service_->AddObserver(this);
   template_url_service_->Load();

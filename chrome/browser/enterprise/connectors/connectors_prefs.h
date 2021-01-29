@@ -15,7 +15,25 @@ extern const char kOnFileAttachedPref[];
 // Pref that maps to the "OnFileDownloadedEnterpriseConnector" policy.
 extern const char kOnFileDownloadedPref[];
 
-void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
+// Pref that maps to the "OnBulkDataEntryEnterpriseConnector" policy.
+extern const char kOnBulkDataEntryPref[];
+
+// Pref that maps to the "OnSecurityEventEnterpriseConnector" policy.
+extern const char kOnSecurityEventPref[];
+
+// Prefs that map to the scope of each policy using a
+// EnterpriseConnectorsPolicyHandler.
+extern const char kOnFileAttachedScopePref[];
+extern const char kOnFileDownloadedScopePref[];
+extern const char kOnBulkDataEntryScopePref[];
+extern const char kOnSecurityEventScopePref[];
+
+// Prefs used by the FileSystem Connector to store OAuth2 Tokens for accessing
+// the APIs the connector talks to.
+extern const char kFileSystemBoxAccessTokenPref[];
+extern const char kFileSystemBoxRefreshTokenPref[];
+
+void RegisterProfilePrefs(PrefRegistrySimple* registry);
 
 }  // namespace enterprise_connectors
 

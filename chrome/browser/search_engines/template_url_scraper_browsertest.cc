@@ -11,7 +11,7 @@
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -21,6 +21,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/search_engines/template_url_service.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "net/dns/mock_host_resolver.h"
@@ -44,7 +45,7 @@ class TemplateURLServiceLoader {
 
     scoped_refptr<content::MessageLoopRunner> message_loop_runner =
         new content::MessageLoopRunner;
-    std::unique_ptr<TemplateURLService::Subscription> subscription =
+    base::CallbackListSubscription subscription =
         model_->RegisterOnLoadedCallback(
             base::BindLambdaForTesting([&]() { message_loop_runner->Quit(); }));
     model_->Load();

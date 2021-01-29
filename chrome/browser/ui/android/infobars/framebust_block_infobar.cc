@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/android/jni_string.h"
+#include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "chrome/android/chrome_jni_headers/FramebustBlockInfoBar_jni.h"
 #include "chrome/browser/android/tab_android.h"
@@ -20,7 +21,7 @@
 
 FramebustBlockInfoBar::FramebustBlockInfoBar(
     std::unique_ptr<FramebustBlockMessageDelegate> message_delegate)
-    : InfoBarAndroid(std::make_unique<InterventionInfoBarDelegate>(
+    : infobars::InfoBarAndroid(std::make_unique<InterventionInfoBarDelegate>(
           infobars::InfoBarDelegate::InfoBarIdentifier::
               FRAMEBUST_BLOCK_INFOBAR_ANDROID,
           message_delegate.get())),
@@ -36,7 +37,7 @@ void FramebustBlockInfoBar::ProcessButton(int action) {
 
   // Tapping the button means that the user wants to bypass the intervention in
   // a sticky way, e.g. via content settings.
-  DCHECK_EQ(action, InfoBarAndroid::ACTION_OK);
+  DCHECK_EQ(action, infobars::InfoBarAndroid::ACTION_OK);
   delegate_->DeclineInterventionSticky();
   RemoveSelf();
 }
@@ -54,7 +55,9 @@ void FramebustBlockInfoBar::OnLinkClicked(
 }
 
 base::android::ScopedJavaLocalRef<jobject>
-FramebustBlockInfoBar::CreateRenderInfoBar(JNIEnv* env) {
+FramebustBlockInfoBar::CreateRenderInfoBar(
+    JNIEnv* env,
+    const ResourceIdMapper& resource_id_mapper) {
   return Java_FramebustBlockInfoBar_create(
       env, base::android::ConvertUTF8ToJavaString(
                env, delegate_->GetBlockedUrl().spec()));

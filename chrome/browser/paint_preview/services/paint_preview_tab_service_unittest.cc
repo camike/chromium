@@ -12,8 +12,10 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/test/task_environment.h"
+#include "chrome/browser/paint_preview/services/paint_preview_tab_service_file_mixin.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/paint_preview/common/mojom/paint_preview_recorder.mojom.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_utils.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
@@ -83,12 +85,19 @@ class PaintPreviewTabServiceTest : public ChromeRenderViewHostTestHarness {
  protected:
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
+    NavigateAndCommit(GURL("https://www.example.com/"),
+                      ui::PageTransition::PAGE_TRANSITION_FIRST);
+    task_environment()->RunUntilIdle();
     EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
     service_ = std::make_unique<PaintPreviewTabService>(
-        temp_dir_.GetPath(), kFeatureName, nullptr, false);
+        std::make_unique<PaintPreviewTabServiceFileMixin>(temp_dir_.GetPath(),
+                                                          kFeatureName),
+        nullptr, false);
     task_environment()->RunUntilIdle();
     EXPECT_TRUE(service_->CacheInitialized());
   }
+
+  void TearDown() override { ChromeRenderViewHostTestHarness::TearDown(); }
 
   PaintPreviewTabService* GetService() { return service_.get(); }
 
@@ -118,8 +127,10 @@ class PaintPreviewTabServiceTest : public ChromeRenderViewHostTestHarness {
                 fake_content.size());
     }
 
-    return std::make_unique<PaintPreviewTabService>(GetPath(), kFeatureName,
-                                                    nullptr, false);
+    return std::make_unique<PaintPreviewTabService>(
+        std::make_unique<PaintPreviewTabServiceFileMixin>(GetPath(),
+                                                          kFeatureName),
+        nullptr, false);
   }
 
  private:
@@ -128,8 +139,6 @@ class PaintPreviewTabServiceTest : public ChromeRenderViewHostTestHarness {
 };
 
 TEST_F(PaintPreviewTabServiceTest, CaptureTab) {
-  content::NavigationSimulator::NavigateAndCommitFromBrowser(
-      web_contents(), GURL("http://www.example.com"));
   const int kTabId = 1U;
 
   MockPaintPreviewRecorder recorder;
@@ -144,9 +153,9 @@ TEST_F(PaintPreviewTabServiceTest, CaptureTab) {
   task_environment()->RunUntilIdle();
   EXPECT_TRUE(service->HasCaptureForTab(kTabId));
 
-  auto file_manager = service->GetFileManager();
+  auto file_manager = service->GetFileMixin()->GetFileManager();
   auto key = file_manager->CreateKey(kTabId);
-  service->GetTaskRunner()->PostTaskAndReplyWithResult(
+  service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
       FROM_HERE,
       base::BindOnce(&FileManager::DirectoryExists, file_manager, key),
       base::BindOnce([](bool exists) { EXPECT_TRUE(exists); }));
@@ -155,7 +164,7 @@ TEST_F(PaintPreviewTabServiceTest, CaptureTab) {
   service->TabClosed(kTabId);
   EXPECT_FALSE(service->HasCaptureForTab(kTabId));
   task_environment()->RunUntilIdle();
-  service->GetTaskRunner()->PostTaskAndReplyWithResult(
+  service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
       FROM_HERE,
       base::BindOnce(&FileManager::DirectoryExists, file_manager, key),
       base::BindOnce([](bool exists) { EXPECT_FALSE(exists); }));
@@ -163,8 +172,6 @@ TEST_F(PaintPreviewTabServiceTest, CaptureTab) {
 }
 
 TEST_F(PaintPreviewTabServiceTest, CaptureTabFailed) {
-  content::NavigationSimulator::NavigateAndCommitFromBrowser(
-      web_contents(), GURL("http://www.example.com"));
   const int kTabId = 1U;
 
   MockPaintPreviewRecorder recorder;
@@ -179,9 +186,9 @@ TEST_F(PaintPreviewTabServiceTest, CaptureTabFailed) {
       }));
   task_environment()->RunUntilIdle();
 
-  auto file_manager = service->GetFileManager();
+  auto file_manager = service->GetFileMixin()->GetFileManager();
   auto key = file_manager->CreateKey(kTabId);
-  service->GetTaskRunner()->PostTaskAndReplyWithResult(
+  service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
       FROM_HERE,
       base::BindOnce(&FileManager::DirectoryExists, file_manager, key),
       base::BindOnce([](bool exists) { EXPECT_TRUE(exists); }));
@@ -190,7 +197,7 @@ TEST_F(PaintPreviewTabServiceTest, CaptureTabFailed) {
 
   service->TabClosed(kTabId);
   task_environment()->RunUntilIdle();
-  service->GetTaskRunner()->PostTaskAndReplyWithResult(
+  service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
       FROM_HERE,
       base::BindOnce(&FileManager::DirectoryExists, file_manager, key),
       base::BindOnce([](bool exists) { EXPECT_FALSE(exists); }));
@@ -199,8 +206,6 @@ TEST_F(PaintPreviewTabServiceTest, CaptureTabFailed) {
 }
 
 TEST_F(PaintPreviewTabServiceTest, CaptureTabTwice) {
-  content::NavigationSimulator::NavigateAndCommitFromBrowser(
-      web_contents(), GURL("http://www.example.com"));
   const int kTabId = 1U;
 
   MockPaintPreviewRecorder recorder;
@@ -213,15 +218,15 @@ TEST_F(PaintPreviewTabServiceTest, CaptureTabTwice) {
                         EXPECT_EQ(status, PaintPreviewTabService::Status::kOk);
                       }));
   task_environment()->RunUntilIdle();
-  auto file_manager = service->GetFileManager();
+  auto file_manager = service->GetFileMixin()->GetFileManager();
   auto key = file_manager->CreateKey(kTabId);
-  service->GetTaskRunner()->PostTaskAndReplyWithResult(
+  service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
       FROM_HERE,
       base::BindOnce(&FileManager::DirectoryExists, file_manager, key),
       base::BindOnce([](bool exists) { EXPECT_TRUE(exists); }));
   task_environment()->RunUntilIdle();
   base::FilePath path_1;
-  service->GetTaskRunner()->PostTaskAndReplyWithResult(
+  service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
       FROM_HERE,
       base::BindOnce(&FileManager::CreateOrGetDirectory, file_manager, key,
                      false),
@@ -241,12 +246,12 @@ TEST_F(PaintPreviewTabServiceTest, CaptureTabTwice) {
                       }));
   task_environment()->RunUntilIdle();
 
-  service->GetTaskRunner()->PostTaskAndReplyWithResult(
+  service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
       FROM_HERE,
       base::BindOnce(&FileManager::DirectoryExists, file_manager, key),
       base::BindOnce([](bool exists) { EXPECT_TRUE(exists); }));
   base::FilePath path_2;
-  service->GetTaskRunner()->PostTaskAndReplyWithResult(
+  service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
       FROM_HERE,
       base::BindOnce(&FileManager::CreateOrGetDirectory, file_manager, key,
                      false),
@@ -260,11 +265,14 @@ TEST_F(PaintPreviewTabServiceTest, CaptureTabTwice) {
   EXPECT_EQ(path_2, path_1);
   auto files_2 = ListDir(path_2);
   ASSERT_EQ(1U, files_2.size());
-  EXPECT_NE(files_1, files_2);
+  // The embedding token is used in the filename of the captured SkPicture.
+  // Since the embedding token is the same the filenames should also be the
+  // same.
+  EXPECT_EQ(files_1, files_2);
   EXPECT_TRUE(service->HasCaptureForTab(kTabId));
 
   service->TabClosed(kTabId);
-  service->GetTaskRunner()->PostTaskAndReplyWithResult(
+  service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
       FROM_HERE,
       base::BindOnce(&FileManager::DirectoryExists, file_manager, key),
       base::BindOnce([](bool exists) { EXPECT_FALSE(exists); }));
@@ -275,7 +283,7 @@ TEST_F(PaintPreviewTabServiceTest, CaptureTabTwice) {
 TEST_F(PaintPreviewTabServiceTest, TestUnityAudit) {
   std::vector<int> tab_ids = {1, 2, 3};
   auto service = BuildServiceWithCache(tab_ids);
-  auto file_manager = service->GetFileManager();
+  auto file_manager = service->GetFileMixin()->GetFileManager();
   task_environment()->RunUntilIdle();
 
   service->AuditArtifacts(tab_ids);
@@ -284,7 +292,7 @@ TEST_F(PaintPreviewTabServiceTest, TestUnityAudit) {
   for (const auto& id : tab_ids) {
     EXPECT_TRUE(service->HasCaptureForTab(id));
     auto key = file_manager->CreateKey(id);
-    service->GetTaskRunner()->PostTaskAndReplyWithResult(
+    service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
         FROM_HERE,
         base::BindOnce(&FileManager::DirectoryExists, file_manager, key),
         base::BindOnce([](bool exists) { EXPECT_TRUE(exists); }));
@@ -295,7 +303,7 @@ TEST_F(PaintPreviewTabServiceTest, TestUnityAudit) {
 TEST_F(PaintPreviewTabServiceTest, TestDisjointAudit) {
   std::vector<int> tab_ids = {1, 2, 3};
   auto service = BuildServiceWithCache(tab_ids);
-  auto file_manager = service->GetFileManager();
+  auto file_manager = service->GetFileMixin()->GetFileManager();
   task_environment()->RunUntilIdle();
 
   service->AuditArtifacts({4});
@@ -304,7 +312,7 @@ TEST_F(PaintPreviewTabServiceTest, TestDisjointAudit) {
   for (const auto& id : tab_ids) {
     EXPECT_FALSE(service->HasCaptureForTab(id));
     auto key = file_manager->CreateKey(id);
-    service->GetTaskRunner()->PostTaskAndReplyWithResult(
+    service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
         FROM_HERE,
         base::BindOnce(&FileManager::DirectoryExists, file_manager, key),
         base::BindOnce([](bool exists) { EXPECT_FALSE(exists); }));
@@ -314,7 +322,7 @@ TEST_F(PaintPreviewTabServiceTest, TestDisjointAudit) {
 
 TEST_F(PaintPreviewTabServiceTest, TestPartialAudit) {
   auto service = BuildServiceWithCache({1, 2, 3});
-  auto file_manager = service->GetFileManager();
+  auto file_manager = service->GetFileMixin()->GetFileManager();
   task_environment()->RunUntilIdle();
 
   std::vector<int> kept_tab_ids = {1, 3};
@@ -324,14 +332,14 @@ TEST_F(PaintPreviewTabServiceTest, TestPartialAudit) {
   for (const auto& id : kept_tab_ids) {
     EXPECT_TRUE(service->HasCaptureForTab(id));
     auto key = file_manager->CreateKey(id);
-    service->GetTaskRunner()->PostTaskAndReplyWithResult(
+    service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
         FROM_HERE,
         base::BindOnce(&FileManager::DirectoryExists, file_manager, key),
         base::BindOnce([](bool exists) { EXPECT_TRUE(exists); }));
   }
   EXPECT_FALSE(service->HasCaptureForTab(2));
   auto key = file_manager->CreateKey(2);
-  service->GetTaskRunner()->PostTaskAndReplyWithResult(
+  service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
       FROM_HERE,
       base::BindOnce(&FileManager::DirectoryExists, file_manager, key),
       base::BindOnce([](bool exists) { EXPECT_FALSE(exists); }));
@@ -384,8 +392,6 @@ TEST_F(PaintPreviewTabServiceTest, EarlyAudit) {
 }
 
 TEST_F(PaintPreviewTabServiceTest, EarlyCapture) {
-  content::NavigationSimulator::NavigateAndCommitFromBrowser(
-      web_contents(), GURL("http://www.example.com"));
   const int kTabId = 1U;
 
   MockPaintPreviewRecorder recorder;
@@ -402,9 +408,9 @@ TEST_F(PaintPreviewTabServiceTest, EarlyCapture) {
 
   EXPECT_TRUE(service->HasCaptureForTab(kTabId));
 
-  auto file_manager = service->GetFileManager();
+  auto file_manager = service->GetFileMixin()->GetFileManager();
   auto key = file_manager->CreateKey(kTabId);
-  service->GetTaskRunner()->PostTaskAndReplyWithResult(
+  service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
       FROM_HERE,
       base::BindOnce(&FileManager::DirectoryExists, file_manager, key),
       base::BindOnce([](bool exists) { EXPECT_TRUE(exists); }));
@@ -412,7 +418,56 @@ TEST_F(PaintPreviewTabServiceTest, EarlyCapture) {
 
   service->TabClosed(kTabId);
   EXPECT_FALSE(service->HasCaptureForTab(kTabId));
-  service->GetTaskRunner()->PostTaskAndReplyWithResult(
+  service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
+      FROM_HERE,
+      base::BindOnce(&FileManager::DirectoryExists, file_manager, key),
+      base::BindOnce([](bool exists) { EXPECT_FALSE(exists); }));
+  task_environment()->RunUntilIdle();
+}
+
+TEST_F(PaintPreviewTabServiceTest, CaptureTabAndCleanup) {
+  const int kTabId = 1U;
+
+  MockPaintPreviewRecorder recorder;
+  recorder.SetResponse(mojom::PaintPreviewStatus::kOk);
+  OverrideInterface(&recorder);
+
+  auto service = BuildServiceWithCache({kTabId + 1});
+  task_environment()->RunUntilIdle();
+  EXPECT_TRUE(service->CacheInitialized());
+  base::FilePath old_path = GetPath()
+                                .AppendASCII("paint_preview")
+                                .AppendASCII(kFeatureName)
+                                .AppendASCII(base::NumberToString(kTabId + 1));
+  // The threshold for cleanup is 25 MB.
+  std::string data(25 * 1000 * 1000, 'x');
+  EXPECT_TRUE(base::WriteFile(old_path.AppendASCII("foo.txt"), data.data(),
+                              data.size()));
+  EXPECT_TRUE(base::PathExists(old_path));
+  EXPECT_TRUE(service->HasCaptureForTab(kTabId + 1));
+
+  service->CaptureTab(kTabId, web_contents(),
+                      base::BindOnce([](PaintPreviewTabService::Status status) {
+                        EXPECT_EQ(status, PaintPreviewTabService::Status::kOk);
+                      }));
+  task_environment()->RunUntilIdle();
+  EXPECT_TRUE(service->HasCaptureForTab(kTabId));
+
+  auto file_manager = service->GetFileMixin()->GetFileManager();
+  auto key = file_manager->CreateKey(kTabId);
+  service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
+      FROM_HERE,
+      base::BindOnce(&FileManager::DirectoryExists, file_manager, key),
+      base::BindOnce([](bool exists) { EXPECT_TRUE(exists); }));
+  task_environment()->RunUntilIdle();
+  EXPECT_FALSE(base::PathExists(old_path));
+  EXPECT_FALSE(service->HasCaptureForTab(kTabId + 1));
+  EXPECT_TRUE(service->HasCaptureForTab(kTabId));
+
+  service->TabClosed(kTabId);
+  EXPECT_FALSE(service->HasCaptureForTab(kTabId));
+  task_environment()->RunUntilIdle();
+  service->GetFileMixin()->GetTaskRunner()->PostTaskAndReplyWithResult(
       FROM_HERE,
       base::BindOnce(&FileManager::DirectoryExists, file_manager, key),
       base::BindOnce([](bool exists) { EXPECT_FALSE(exists); }));

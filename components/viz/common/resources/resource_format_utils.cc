@@ -4,6 +4,8 @@
 
 #include "components/viz/common/resources/resource_format_utils.h"
 
+#include <ostream>
+
 #include "base/check_op.h"
 #include "base/notreached.h"
 #include "base/stl_util.h"
@@ -40,10 +42,11 @@ SkColorType ResourceFormatToClosestSkColorType(bool gpu_compositing,
     case RGBX_8888:
     case ETC1:
       return kRGB_888x_SkColorType;
+    case P010:
     case RGBA_1010102:
-      return kBGRA_1010102_SkColorType;
-    case BGRA_1010102:
       return kRGBA_1010102_SkColorType;
+    case BGRA_1010102:
+      return kBGRA_1010102_SkColorType;
 
     // YUV images are sampled as RGB.
     case YVU_420:
@@ -55,11 +58,12 @@ SkColorType ResourceFormatToClosestSkColorType(bool gpu_compositing,
       return kGray_8_SkColorType;
     case LUMINANCE_F16:
     case R16_EXT:
+    case RG16_EXT:
     case BGR_565:
-    case RG_88:
-    case BGRX_8888:
-    case P010:
       return kN32_SkColorType;
+    case RG_88:
+      return kR8G8_unorm_SkColorType;
+    case BGRX_8888:
 
     case RGBA_F16:
       return kRGBA_F16_SkColorType;
@@ -79,6 +83,7 @@ int BitsPerPixel(ResourceFormat format) {
     case RGBA_1010102:
     case BGRA_1010102:
     case P010:
+    case RG16_EXT:
       return 32;
     case RGBA_4444:
     case RGB_565:
@@ -117,6 +122,7 @@ bool HasAlpha(ResourceFormat format) {
     case RG_88:
     case LUMINANCE_F16:
     case R16_EXT:
+    case RG16_EXT:
     case RGBX_8888:
     case BGRX_8888:
     case RGBA_1010102:
@@ -146,6 +152,7 @@ unsigned int GLDataType(ResourceFormat format) {
       GL_HALF_FLOAT_OES,                   // LUMINANCE_F16
       GL_HALF_FLOAT_OES,                   // RGBA_F16
       GL_UNSIGNED_SHORT,                   // R16_EXT
+      GL_UNSIGNED_SHORT,                   // RG16_EXT
       GL_UNSIGNED_BYTE,                    // RGBX_8888
       GL_ZERO,                             // BGRX_8888
       GL_UNSIGNED_INT_2_10_10_10_REV_EXT,  // RGBA_1010102
@@ -176,6 +183,7 @@ unsigned int GLDataFormat(ResourceFormat format) {
       GL_LUMINANCE,  // LUMINANCE_F16
       GL_RGBA,       // RGBA_F16
       GL_RED_EXT,    // R16_EXT
+      GL_RG_EXT,     // RG16_EXT
       GL_RGB,        // RGBX_8888
       GL_ZERO,       // BGRX_8888
       GL_RGBA,       // RGBA_1010102
@@ -195,16 +203,19 @@ unsigned int GLInternalFormat(ResourceFormat format) {
   // is true in GLES3, however it still holds for the BGRA extension.)
   // GL_EXT_texture_norm16 follows GLES3 semantics and only exposes a sized
   // internal format (GL_R16_EXT).
-  if (format == R16_EXT)
-    return GL_R16_EXT;
-  else if (format == RG_88)
-    return GL_RG8_EXT;
-  else if (format == ETC1)
-    return GL_ETC1_RGB8_OES;
-  else if (format == RGBA_1010102 || format == BGRA_1010102)
-    return GL_RGB10_A2_EXT;
-
-  return GLDataFormat(format);
+  switch (format) {
+    case R16_EXT:
+      return GL_R16_EXT;
+    case RG16_EXT:
+      return GL_RG16_EXT;
+    case ETC1:
+      return GL_ETC1_RGB8_OES;
+    case RGBA_1010102:
+    case BGRA_1010102:
+      return GL_RGB10_A2_EXT;
+    default:
+      return GLDataFormat(format);
+  }
 }
 
 unsigned int GLCopyTextureInternalFormat(ResourceFormat format) {
@@ -229,6 +240,7 @@ unsigned int GLCopyTextureInternalFormat(ResourceFormat format) {
       GL_LUMINANCE,  // LUMINANCE_F16
       GL_RGBA,       // RGBA_F16
       GL_LUMINANCE,  // R16_EXT
+      GL_RGBA,       // RG16_EXT
       GL_RGB,        // RGBX_8888
       GL_RGB,        // BGRX_8888
       GL_ZERO,       // RGBA_1010102
@@ -281,6 +293,7 @@ gfx::BufferFormat BufferFormat(ResourceFormat format) {
     case LUMINANCE_8:
     case RGB_565:
     case LUMINANCE_F16:
+    case RG16_EXT:
       // These types not allowed by IsGpuMemoryBufferFormatSupported(), so
       // give a default value that will not be used.
       break;
@@ -316,17 +329,20 @@ unsigned int TextureStorageFormat(ResourceFormat format) {
       return GL_LUMINANCE16F_EXT;
     case R16_EXT:
       return GL_R16_EXT;
+    case RG16_EXT:
+      return GL_RG16_EXT;
     case RGBX_8888:
     case ETC1:
       return GL_RGB8_OES;
+    case P010:
     case RGBA_1010102:
     case BGRA_1010102:
       return GL_RGB10_A2_EXT;
-    case BGR_565:
-    case BGRX_8888:
     case YVU_420:
     case YUV_420_BIPLANAR:
-    case P010:
+      return GL_RGB8_OES;
+    case BGR_565:
+    case BGRX_8888:
       break;
   }
   NOTREACHED();
@@ -353,6 +369,7 @@ bool IsGpuMemoryBufferFormatSupported(ResourceFormat format) {
     case LUMINANCE_F16:
     case BGR_565:
     case RG_88:
+    case RG16_EXT:
     case RGBX_8888:
     case BGRX_8888:
     case YVU_420:
@@ -378,6 +395,7 @@ bool IsBitmapFormatSupported(ResourceFormat format) {
     case LUMINANCE_F16:
     case RGBA_F16:
     case R16_EXT:
+    case RG16_EXT:
     case BGR_565:
     case RG_88:
     case RGBX_8888:
@@ -455,6 +473,7 @@ bool HasVkFormat(ResourceFormat format) {
     case RG_88:
     case RGBA_F16:
     case R16_EXT:
+    case RG16_EXT:
     case RGBX_8888:
     case BGRX_8888:
     case RGBA_1010102:
@@ -490,6 +509,8 @@ VkFormat ToVkFormat(ResourceFormat format) {
       return VK_FORMAT_R16G16B16A16_SFLOAT;
     case R16_EXT:
       return VK_FORMAT_R16_UNORM;
+    case RG16_EXT:
+      return VK_FORMAT_R16G16_UNORM;
     case RGBX_8888:
       return VK_FORMAT_R8G8B8A8_UNORM;
     case BGRX_8888:
@@ -539,6 +560,7 @@ wgpu::TextureFormat ToDawnFormat(ResourceFormat format) {
     case RGB_565:
     case BGR_565:
     case R16_EXT:
+    case RG16_EXT:
     case BGRA_1010102:
     case YVU_420:
     case YUV_420_BIPLANAR:

@@ -133,8 +133,10 @@ class NetworkPolicyApplicationTest : public LoginManagerTest {
  protected:
   // InProcessBrowserTest:
   void SetUp() override {
-    EXPECT_CALL(policy_provider_, IsInitializationComplete(testing::_))
-        .WillRepeatedly(testing::Return(true));
+    ON_CALL(policy_provider_, IsInitializationComplete(testing::_))
+        .WillByDefault(testing::Return(true));
+    ON_CALL(policy_provider_, IsFirstPolicyLoadComplete(testing::_))
+        .WillByDefault(testing::Return(true));
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(
         &policy_provider_);
 
@@ -174,20 +176,20 @@ class NetworkPolicyApplicationTest : public LoginManagerTest {
 
   void SetDeviceOpenNetworkConfiguration(
       const std::string& device_onc_policy_blob) {
-    current_policy_.Set(
-        policy::key::kDeviceOpenNetworkConfiguration,
-        policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_MACHINE,
-        policy::POLICY_SOURCE_CLOUD,
-        std::make_unique<base::Value>(device_onc_policy_blob), nullptr);
+    current_policy_.Set(policy::key::kDeviceOpenNetworkConfiguration,
+                        policy::POLICY_LEVEL_MANDATORY,
+                        policy::POLICY_SCOPE_MACHINE,
+                        policy::POLICY_SOURCE_CLOUD,
+                        base::Value(device_onc_policy_blob), nullptr);
     policy_provider_.UpdateChromePolicy(current_policy_);
   }
 
   void SetUserOpenNetworkConfiguration(
       const std::string& user_onc_policy_blob) {
-    current_policy_.Set(
-        policy::key::kOpenNetworkConfiguration, policy::POLICY_LEVEL_MANDATORY,
-        policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
-        std::make_unique<base::Value>(user_onc_policy_blob), nullptr);
+    current_policy_.Set(policy::key::kOpenNetworkConfiguration,
+                        policy::POLICY_LEVEL_MANDATORY,
+                        policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
+                        base::Value(user_onc_policy_blob), nullptr);
     policy_provider_.UpdateChromePolicy(current_policy_);
   }
 
@@ -218,7 +220,7 @@ class NetworkPolicyApplicationTest : public LoginManagerTest {
   AccountId test_account_id_;
 
  private:
-  policy::MockConfigurationPolicyProvider policy_provider_;
+  testing::NiceMock<policy::MockConfigurationPolicyProvider> policy_provider_;
   policy::PolicyMap current_policy_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkPolicyApplicationTest);

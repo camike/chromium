@@ -13,6 +13,7 @@
 #include "base/callback_forward.h"
 #include "base/files/file_path.h"
 #include "base/time/time.h"
+#include "components/services/storage/public/mojom/cache_storage_control.mojom-forward.h"
 #include "components/services/storage/public/mojom/indexed_db_control.mojom-forward.h"
 #include "content/common/content_export.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -61,8 +62,9 @@ class ContentIndexContext;
 class DedicatedWorkerService;
 class DevToolsBackgroundServicesContext;
 class DOMStorageContext;
+class FontAccessContext;
 class GeneratedCodeCacheContext;
-class NativeFileSystemEntryFactory;
+class FileSystemAccessEntryFactory;
 class PlatformNotificationContext;
 class ServiceWorkerContext;
 class SharedWorkerService;
@@ -97,6 +99,12 @@ class CONTENT_EXPORT StoragePartition {
   // use after StoragePartition has gone.
   // The returned SharedURLLoaderFactory can be held on and will work across
   // network process restarts.
+  //
+  // SECURITY NOTE: This browser-process factory relaxes many security features
+  // (e.g. may disable CORB, won't set |request_initiator_origin_lock| or
+  // IsolationInfo, etc.).  Network requests that may be initiated or influenced
+  // by a web origin should typically use a different factory (e.g.  the one
+  // from RenderFrameHost::CreateNetworkServiceDefaultFactory).
   virtual scoped_refptr<network::SharedURLLoaderFactory>
   GetURLLoaderFactoryForBrowserProcess() = 0;
   virtual scoped_refptr<network::SharedURLLoaderFactory>
@@ -106,21 +114,6 @@ class CONTENT_EXPORT StoragePartition {
   virtual network::mojom::CookieManager*
   GetCookieManagerForBrowserProcess() = 0;
 
-  // See documentation for
-  // ContentBrowserClient::WillCreateRestrictedCookieManager for description of
-  // the parameters. The method here is expected pass things through that hook
-  // and then go to the NetworkContext if needed.
-  virtual void CreateRestrictedCookieManager(
-      network::mojom::RestrictedCookieManagerRole role,
-      const url::Origin& origin,
-      const net::SiteForCookies& site_for_cookies,
-      const url::Origin& top_frame_origin,
-      bool is_service_worker,
-      int process_id,
-      int routing_id,
-      mojo::PendingReceiver<network::mojom::RestrictedCookieManager>
-          receiver) = 0;
-
   virtual void CreateHasTrustTokensAnswerer(
       mojo::PendingReceiver<network::mojom::HasTrustTokensAnswerer> receiver,
       const url::Origin& top_frame_origin) = 0;
@@ -129,13 +122,15 @@ class CONTENT_EXPORT StoragePartition {
   virtual AppCacheService* GetAppCacheService() = 0;
   virtual BackgroundSyncContext* GetBackgroundSyncContext() = 0;
   virtual storage::FileSystemContext* GetFileSystemContext() = 0;
+  virtual FontAccessContext* GetFontAccessContext() = 0;
   virtual storage::DatabaseTracker* GetDatabaseTracker() = 0;
   virtual DOMStorageContext* GetDOMStorageContext() = 0;
   virtual storage::mojom::IndexedDBControl& GetIndexedDBControl() = 0;
-  virtual NativeFileSystemEntryFactory* GetNativeFileSystemEntryFactory() = 0;
+  virtual FileSystemAccessEntryFactory* GetFileSystemAccessEntryFactory() = 0;
   virtual ServiceWorkerContext* GetServiceWorkerContext() = 0;
   virtual DedicatedWorkerService* GetDedicatedWorkerService() = 0;
   virtual SharedWorkerService* GetSharedWorkerService() = 0;
+  virtual storage::mojom::CacheStorageControl* GetCacheStorageControl() = 0;
   virtual CacheStorageContext* GetCacheStorageContext() = 0;
   virtual GeneratedCodeCacheContext* GetGeneratedCodeCacheContext() = 0;
   virtual DevToolsBackgroundServicesContext*
@@ -202,6 +197,19 @@ class CONTENT_EXPORT StoragePartition {
       base::RepeatingCallback<bool(const url::Origin&,
                                    storage::SpecialStoragePolicy*)>;
 
+  // Observer interface that is notified of specific data clearing events which
+  // which were facilitated by the StoragePartition. Notification occurs on the
+  // UI thread, observer life time is not managed by the StoragePartition.
+  class DataRemovalObserver : public base::CheckedObserver {
+   public:
+    // Called on a deletion event for origin keyed storage APIs.
+    virtual void OnOriginDataCleared(
+        uint32_t remove_mask,
+        base::RepeatingCallback<bool(const url::Origin&)> origin_matcher,
+        const base::Time begin,
+        const base::Time end) = 0;
+  };
+
   // Similar to ClearDataForOrigin().
   // Deletes all data out for the StoragePartition if |storage_origin| is empty.
   // |callback| is called when data deletion is done or at least the deletion is
@@ -260,6 +268,10 @@ class CONTENT_EXPORT StoragePartition {
   // Resets all URLLoaderFactories bound to this partition's network context.
   virtual void ResetURLLoaderFactories() = 0;
 
+  virtual void AddObserver(DataRemovalObserver* observer) = 0;
+
+  virtual void RemoveObserver(DataRemovalObserver* observer) = 0;
+
   // Clear the bluetooth allowed devices map. For test use only.
   virtual void ClearBluetoothAllowedDevicesMapForTesting() = 0;
 
@@ -272,6 +284,15 @@ class CONTENT_EXPORT StoragePartition {
 
   // Wait until code cache's shutdown is complete. For test use only.
   virtual void WaitForCodeCacheShutdownForTesting() = 0;
+
+  virtual void SetNetworkContextForTesting(
+      mojo::PendingRemote<network::mojom::NetworkContext>
+          network_context_remote) = 0;
+
+  // Returns the same provider as GetProtoDatabaseProvider() but doesn't create
+  // a new instance and returns nullptr instead.
+  virtual leveldb_proto::ProtoDatabaseProvider*
+  GetProtoDatabaseProviderForTesting() = 0;
 
   // The value pointed to by |settings| should remain valid until the
   // the function is called again with a new value or a nullptr.

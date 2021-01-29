@@ -14,6 +14,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
+#include "build/chromeos_buildflags.h"
 #include "ui/base/ime/composition_text.h"
 #include "ui/gfx/render_text.h"
 #include "ui/gfx/text_constants.h"
@@ -39,6 +40,7 @@ enum class MergeType {
 
 namespace test {
 class BridgedNativeWidgetTest;
+class TextfieldTest;
 }  // namespace test
 
 // A model that represents text content for a views::Textfield.
@@ -233,14 +235,25 @@ class VIEWS_EXPORT TextfieldModel {
   // composition text.
   void SetCompositionText(const ui::CompositionText& composition);
 
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // Return the text range corresponding to the autocorrected text.
+  const gfx::Range& autocorrect_range() const { return autocorrect_range_; }
+
+  // Sets the autocorrect range to |range|. If |range| is empty, then the
+  // autocorrect range is cleared. Returns true if the range was set or cleared
+  // successfully.
+  bool SetAutocorrectRange(const gfx::Range& range);
+#endif
+
   // Puts the text in the specified range into composition mode.
   // This method should not be called with composition text or an invalid range.
   // The provided range is checked against the string's length, if |range| is
   // out of bounds, the composition will be cleared.
   void SetCompositionFromExistingText(const gfx::Range& range);
 
-  // Converts current composition text into final content.
-  void ConfirmCompositionText();
+  // Converts current composition text into final content and returns the
+  // length of the text committed.
+  uint32_t ConfirmCompositionText();
 
   // Removes current composition text.
   void CancelCompositionText();
@@ -258,7 +271,7 @@ class VIEWS_EXPORT TextfieldModel {
   friend class internal::Edit;
   friend class test::BridgedNativeWidgetTest;
   friend class TextfieldModelTest;
-  friend class TextfieldTest;
+  friend class test::TextfieldTest;
 
   FRIEND_TEST_ALL_PREFIXES(TextfieldModelTest, UndoRedo_BasicTest);
   FRIEND_TEST_ALL_PREFIXES(TextfieldModelTest, UndoRedo_CutCopyPasteTest);
@@ -321,8 +334,11 @@ class VIEWS_EXPORT TextfieldModel {
   // The stylized text, cursor, selection, and the visual layout model.
   std::unique_ptr<gfx::RenderText> render_text_;
 
-  // The composition range.
   gfx::Range composition_range_;
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  gfx::Range autocorrect_range_;
+#endif
 
   // The list of Edits. The oldest Edits are at the front of the list, and the
   // newest ones are at the back of the list.

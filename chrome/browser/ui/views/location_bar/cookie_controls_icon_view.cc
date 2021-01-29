@@ -5,15 +5,20 @@
 #include "chrome/browser/ui/views/location_bar/cookie_controls_icon_view.h"
 
 #include <memory>
+
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/vector_icons/vector_icons.h"
-#include "chrome/browser/ui/cookie_controls/cookie_controls_controller.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/location_bar/cookie_controls_bubble_view.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/content_settings/browser/ui/cookie_controls_controller.h"
+#include "content/public/browser/browser_context.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/views/metadata/metadata_impl_macros.h"
 
 CookieControlsIconView::CookieControlsIconView(
     IconLabelBubbleView::Delegate* icon_label_bubble_delegate,
@@ -31,8 +36,15 @@ void CookieControlsIconView::UpdateImpl() {
   auto* web_contents = delegate()->GetWebContentsForPageActionIconView();
   if (web_contents) {
     if (!controller_) {
-      controller_ = std::make_unique<CookieControlsController>(web_contents);
-      observer_.Add(controller_.get());
+      Profile* profile =
+          Profile::FromBrowserContext(web_contents->GetBrowserContext());
+      controller_ =
+          std::make_unique<content_settings::CookieControlsController>(
+              CookieSettingsFactory::GetForProfile(profile),
+              profile->IsOffTheRecord() ? CookieSettingsFactory::GetForProfile(
+                                              profile->GetOriginalProfile())
+                                        : nullptr);
+      observation_.Observe(controller_.get());
     }
     controller_->Update(web_contents);
   }
@@ -42,16 +54,18 @@ void CookieControlsIconView::UpdateImpl() {
 void CookieControlsIconView::OnStatusChanged(
     CookieControlsStatus status,
     CookieControlsEnforcement enforcement,
+    int allowed_cookies,
     int blocked_cookies) {
   if (status_ != status) {
     status_ = status;
     SetVisible(ShouldBeVisible());
     UpdateIconImage();
   }
-  OnBlockedCookiesCountChanged(blocked_cookies);
+  OnCookiesCountChanged(allowed_cookies, blocked_cookies);
 }
 
-void CookieControlsIconView::OnBlockedCookiesCountChanged(int blocked_cookies) {
+void CookieControlsIconView::OnCookiesCountChanged(int allowed_cookies,
+                                                   int blocked_cookies) {
   // The blocked cookie count changes quite frequently, so avoid unnecessary
   // UI updates.
   if (has_blocked_cookies_ != blocked_cookies > 0) {
@@ -64,7 +78,7 @@ bool CookieControlsIconView::ShouldBeVisible() const {
   if (delegate()->ShouldHidePageActionIcons())
     return false;
 
-  if (HasAssociatedBubble())
+  if (GetAssociatedBubble())
     return true;
 
   if (!delegate()->GetWebContentsForPageActionIconView())
@@ -81,15 +95,11 @@ bool CookieControlsIconView::ShouldBeVisible() const {
   }
 }
 
-bool CookieControlsIconView::HasAssociatedBubble() const {
-  if (!GetBubble())
-    return false;
-
+bool CookieControlsIconView::GetAssociatedBubble() const {
   // There may be multiple icons but only a single bubble can be displayed
   // at a time. Check if the bubble belongs to this icon.
-  if (!GetBubble()->GetAnchorView())
-    return false;
-  return GetBubble()->GetAnchorView()->GetWidget() == GetWidget();
+  return GetBubble() && GetBubble()->GetAnchorView() &&
+         GetBubble()->GetAnchorView()->GetWidget() == GetWidget();
 }
 
 void CookieControlsIconView::OnExecuting(
@@ -99,7 +109,7 @@ void CookieControlsIconView::OnExecuting(
       controller_.get(), status_);
 }
 
-views::BubbleDialogDelegateView* CookieControlsIconView::GetBubble() const {
+views::BubbleDialogDelegate* CookieControlsIconView::GetBubble() const {
   return CookieControlsBubbleView::GetCookieBubble();
 }
 
@@ -109,11 +119,11 @@ const gfx::VectorIcon& CookieControlsIconView::GetVectorIcon() const {
   return kEyeCrossedIcon;
 }
 
-const char* CookieControlsIconView::GetClassName() const {
-  return "CookieControlsIconView";
-}
-
 base::string16 CookieControlsIconView::GetTextForTooltipAndAccessibleName()
     const {
   return l10n_util::GetStringUTF16(IDS_COOKIE_CONTROLS_TOOLTIP);
 }
+
+BEGIN_METADATA(CookieControlsIconView, PageActionIconView)
+ADD_READONLY_PROPERTY_METADATA(bool, AssociatedBubble)
+END_METADATA

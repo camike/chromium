@@ -5,22 +5,23 @@ Initial tree...
 Application
  Manifest
  Service Workers
- Clear storage
+ Storage
 Storage
  Local Storage
   http://127.0.0.1:8000
-  http://localhost:8000
+  http://devtools.oopif.test:8000
  Session Storage
   http://127.0.0.1:8000
-  http://localhost:8000
+  http://devtools.oopif.test:8000
  IndexedDB
-  Database-iframe - http://localhost:8000
+  Database-iframe - http://devtools.oopif.test:8000
    Database-iframe
   Database-main-frame - http://127.0.0.1:8000
  Web SQL
  Cookies
   http://127.0.0.1:8000
-  http://localhost:8000
+  http://devtools.oopif.test:8000
+ Trust Tokens
 Cache
  Cache Storage
  Application Cache
@@ -33,13 +34,16 @@ Background Services
  Push Messaging
 Frames
  top
+  indexeddb-in-iframe.html
+   indexeddb-in-iframe.html
+  inspected-page.html
 
 Remove iframe from page...
 
 Application
  Manifest
  Service Workers
- Clear storage
+ Storage
 Storage
  Local Storage
   http://127.0.0.1:8000
@@ -50,7 +54,8 @@ Storage
  Web SQL
  Cookies
   http://127.0.0.1:8000
-  http://localhost:8000
+  http://devtools.oopif.test:8000
+ Trust Tokens
 Cache
  Cache Storage
  Application Cache
@@ -63,28 +68,30 @@ Background Services
  Push Messaging
 Frames
  top
+  inspected-page.html
 
 Add iframe to page again...
 
 Application
  Manifest
  Service Workers
- Clear storage
+ Storage
 Storage
  Local Storage
   http://127.0.0.1:8000
-  http://localhost:8000
+  http://devtools.oopif.test:8000
  Session Storage
   http://127.0.0.1:8000
-  http://localhost:8000
+  http://devtools.oopif.test:8000
  IndexedDB
   Database-main-frame - http://127.0.0.1:8000
-  Database-iframe - http://localhost:8000
+  Database-iframe - http://devtools.oopif.test:8000
    Database-iframe
  Web SQL
  Cookies
   http://127.0.0.1:8000
-  http://localhost:8000
+  http://devtools.oopif.test:8000
+ Trust Tokens
 Cache
  Cache Storage
  Application Cache
@@ -97,4 +104,7 @@ Background Services
  Push Messaging
 Frames
  top
+  indexeddb-in-iframe.html
+   indexeddb-in-iframe.html
+  inspected-page.html
 

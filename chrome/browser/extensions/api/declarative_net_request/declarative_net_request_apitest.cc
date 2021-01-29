@@ -9,13 +9,22 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/threading/thread_restrictions.h"
+#include "build/build_config.h"
+#include "components/version_info/version_info.h"
+#include "content/public/test/browser_test.h"
+#include "extensions/common/features/feature_channel.h"
 #include "net/dns/mock_host_resolver.h"
 
 namespace {
 
-class DeclarativeNetRequestAPItest : public extensions::ExtensionApiTest {
+using ContextType = extensions::ExtensionApiTest::ContextType;
+using extensions::ScopedCurrentChannel;
+
+class DeclarativeNetRequestAPItest
+    : public extensions::ExtensionApiTest,
+      public testing::WithParamInterface<ContextType> {
  public:
-  DeclarativeNetRequestAPItest() {}
+  DeclarativeNetRequestAPItest() = default;
 
  protected:
   // ExtensionApiTest override.
@@ -41,30 +50,60 @@ class DeclarativeNetRequestAPItest : public extensions::ExtensionApiTest {
     test_data_dir_ = temp_dir_.GetPath().AppendASCII("declarative_net_request");
   }
 
+  bool RunTest(const std::string& extension_path) {
+    if (GetParam() != ContextType::kServiceWorker) {
+      return RunExtensionTest(extension_path);
+    }
+    return RunExtensionTestWithFlags(
+        extension_path, kFlagRunAsServiceWorkerBasedExtension, kFlagNone);
+  }
+
  private:
   base::ScopedTempDir temp_dir_;
-
-  DISALLOW_COPY_AND_ASSIGN(DeclarativeNetRequestAPItest);
 };
 
-IN_PROC_BROWSER_TEST_F(DeclarativeNetRequestAPItest, DynamicRules) {
-  ASSERT_TRUE(RunExtensionTest("dynamic_rules")) << message_;
+using DeclarativeNetRequestLazyAPItest = DeclarativeNetRequestAPItest;
+
+INSTANTIATE_TEST_SUITE_P(PersistentBackground,
+                         DeclarativeNetRequestAPItest,
+                         ::testing::Values(ContextType::kPersistentBackground));
+INSTANTIATE_TEST_SUITE_P(EventPage,
+                         DeclarativeNetRequestLazyAPItest,
+                         ::testing::Values(ContextType::kEventPage));
+INSTANTIATE_TEST_SUITE_P(ServiceWorker,
+                         DeclarativeNetRequestLazyAPItest,
+                         ::testing::Values(ContextType::kServiceWorker));
+
+// Flaky on MSAN: https://crbug.com/1167168
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_DynamicRules DISABLED_DynamicRules
+#else
+#define MAYBE_DynamicRules DynamicRules
+#endif
+IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestLazyAPItest, MAYBE_DynamicRules) {
+  ASSERT_TRUE(RunTest("dynamic_rules")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(DeclarativeNetRequestAPItest, HeaderRemoval) {
-  ASSERT_TRUE(RunExtensionTest("header_removal")) << message_;
+IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestLazyAPItest, OnRulesMatchedDebug) {
+  ASSERT_TRUE(RunTest("on_rules_matched_debug")) << message_;
 }
 
-// TODO(crbug.com/1029233) Restore this test. This is disabled due to
-// flakiness.
-IN_PROC_BROWSER_TEST_F(DeclarativeNetRequestAPItest,
-                       DISABLED_OnRulesMatchedDebug) {
-  ASSERT_TRUE(RunExtensionTest("on_rules_matched_debug")) << message_;
+// This test uses webRequest/webRequestBlocking, so it's not currently
+// supported for service workers.
+IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestAPItest, ModifyHeaders) {
+  ASSERT_TRUE(RunTest("modify_headers")) << message_;
 }
 
-// TODO(crbug.com/1070344): Disabled due to flakiness.
-IN_PROC_BROWSER_TEST_F(DeclarativeNetRequestAPItest, DISABLED_GetMatchedRules) {
-  ASSERT_TRUE(RunExtensionTest("get_matched_rules")) << message_;
+IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestLazyAPItest, GetMatchedRules) {
+  // TODO(crbug.com/1043200): This test uses
+  // chrome.declarativeNetRequest.updateSessionRules, which is only available
+  // in the TRUNK channel.
+  ScopedCurrentChannel channel_override(version_info::Channel::UNKNOWN);
+  ASSERT_TRUE(RunTest("get_matched_rules")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestLazyAPItest, IsRegexSupported) {
+  ASSERT_TRUE(RunTest("is_regex_supported")) << message_;
 }
 
 }  // namespace

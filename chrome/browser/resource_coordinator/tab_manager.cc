@@ -11,14 +11,14 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/memory/memory_pressure_monitor.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/process/process.h"
 #include "base/rand_util.h"
-#include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -28,14 +28,14 @@
 #include "base/threading/thread.h"
 #include "base/trace_event/traced_value.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/media/webrtc/media_stream_capture_indicator.h"
 #include "chrome/browser/memory/oom_memory_details.h"
-#include "chrome/browser/performance_manager/graph/policies/policy_features.h"
+#include "chrome/browser/performance_manager/policies/policy_features.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/resource_coordinator/background_tab_navigation_throttle.h"
-#include "chrome/browser/resource_coordinator/local_site_characteristics_webcontents_observer.h"
 #include "chrome/browser/resource_coordinator/resource_coordinator_parts.h"
 #include "chrome/browser/resource_coordinator/tab_lifecycle_unit_external.h"
 #include "chrome/browser/resource_coordinator/tab_manager.h"
@@ -69,7 +69,7 @@
 #include "content/public/common/content_features.h"
 #include "net/base/network_change_notifier.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/resource_coordinator/tab_manager_delegate_chromeos.h"
 #endif
 
@@ -138,48 +138,36 @@ class TabManager::TabManagerSessionRestoreObserver final
 };
 
 TabManager::TabManager(TabLoadTracker* tab_load_tracker)
-    : state_transitions_callback_(
-          base::BindRepeating(&TabManager::PerformStateTransitions,
-                              base::Unretained(this))),
-      browser_tab_strip_tracker_(this, nullptr),
+    : browser_tab_strip_tracker_(this, nullptr),
       is_session_restore_loading_tabs_(false),
       restored_tab_count_(0u),
       background_tab_loading_mode_(BackgroundTabLoadingMode::kStaggered),
       loading_slots_(kNumOfLoadingSlots),
       tab_load_tracker_(tab_load_tracker) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   delegate_.reset(new TabManagerDelegate(weak_ptr_factory_.GetWeakPtr()));
 #endif
   browser_tab_strip_tracker_.Init();
   session_restore_observer_.reset(new TabManagerSessionRestoreObserver(this));
 
   stats_collector_.reset(new TabManagerStatsCollector());
-  freeze_params_ = GetTabFreezeParams();
   tab_load_tracker_->AddObserver(this);
-  intervention_policy_database_.reset(new InterventionPolicyDatabase());
-
-  // TabManager works in the absence of DesktopSessionDurationTracker for tests.
-  if (metrics::DesktopSessionDurationTracker::IsInitialized())
-    metrics::DesktopSessionDurationTracker::Get()->AddObserver(this);
 }
 
 TabManager::~TabManager() {
   tab_load_tracker_->RemoveObserver(this);
-
-  if (metrics::DesktopSessionDurationTracker::IsInitialized())
-    metrics::DesktopSessionDurationTracker::Get()->RemoveObserver(this);
 }
 
 void TabManager::Start() {
   background_tab_loading_mode_ = BackgroundTabLoadingMode::kStaggered;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   delegate_->StartPeriodicOOMScoreUpdate();
 #endif
 
 // MemoryPressureMonitor is not implemented on Linux so far and tabs are never
 // discarded.
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+#if defined(OS_WIN) || defined(OS_MAC) || BUILDFLAG(IS_CHROMEOS_ASH)
   // Don't handle memory pressure events here if this is done by
   // PerformanceManager.
   if (!base::FeatureList::IsEnabled(
@@ -235,12 +223,12 @@ LifecycleUnitVector TabManager::GetSortedLifecycleUnits() {
 
 void TabManager::DiscardTab(LifecycleUnitDiscardReason reason,
                             TabDiscardDoneCB tab_discard_done) {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Call Chrome OS specific low memory handling process.
   delegate_->LowMemoryKill(reason, std::move(tab_discard_done));
 #else
   DiscardTabImpl(reason, std::move(tab_discard_done));
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
 WebContents* TabManager::DiscardTabByExtension(content::WebContents* contents) {
@@ -262,7 +250,7 @@ void TabManager::DiscardTabFromMemoryPressure() {
   DCHECK(!base::FeatureList::IsEnabled(
       performance_manager::features::kUrgentDiscardingFromPerformanceManager));
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Output a log with per-process memory usage and number of file descriptors,
   // as well as GPU memory details. Discard happens without waiting for the log
   // (https://crbug.com/850545) Per comment at
@@ -271,7 +259,7 @@ void TabManager::DiscardTabFromMemoryPressure() {
   // platforms since it is not used and data shows it can create IO thread hangs
   // (https://crbug.com/1040522).
   memory::OomMemoryDetails::Log("Tab Discards Memory details");
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   // Start handling memory pressure. Suppress further notifications before
   // completion in case a slow handler queues up multiple dispatches of this
@@ -399,9 +387,9 @@ void TabManager::OnTabDiscardDone() {
 void TabManager::RegisterMemoryPressureListener() {
   DCHECK(!memory_pressure_listener_);
   // Use sync memory pressure listener.
-  memory_pressure_listener_ =
-      std::make_unique<base::MemoryPressureListener>(base::BindRepeating(
-          &TabManager::OnMemoryPressure, weak_ptr_factory_.GetWeakPtr()));
+  memory_pressure_listener_ = std::make_unique<base::MemoryPressureListener>(
+      FROM_HERE, base::BindRepeating(&TabManager::OnMemoryPressure,
+                                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void TabManager::UnregisterMemoryPressureListener() {
@@ -457,21 +445,12 @@ void TabManager::OnLoadingStateChange(content::WebContents* web_contents,
         !IsInBackgroundTabOpeningSession()) {
       stats_collector_->OnBackgroundTabOpeningSessionEnded();
     }
-
-    // Once a tab is loaded, it might be eligible for freezing.
-    SchedulePerformStateTransitions(base::TimeDelta());
   }
 }
 
 void TabManager::OnStopTracking(content::WebContents* web_contents,
                                 LoadingState loading_state) {
   GetWebContentsData(web_contents)->SetTabLoadingState(loading_state);
-}
-
-void TabManager::OnSessionStarted(base::TimeTicks session_start) {
-  // LifecycleUnits might become eligible for freezing when Chrome starts being
-  // used.
-  SchedulePerformStateTransitions(base::TimeDelta());
 }
 
 // static
@@ -740,118 +719,15 @@ bool TabManager::IsForceLoadTimerRunning() const {
   return force_load_timer_ && force_load_timer_->IsRunning();
 }
 
-void TabManager::SchedulePerformStateTransitions(base::TimeDelta delay) {
-  if (!state_transitions_timer_) {
-    state_transitions_timer_ =
-        std::make_unique<base::OneShotTimer>(GetTickClock());
-  }
-
-  state_transitions_timer_->Start(FROM_HERE, delay,
-                                  state_transitions_callback_);
-}
-
-void TabManager::PerformStateTransitions() {
-  if (!base::FeatureList::IsEnabled(features::kTabFreeze))
-    return;
-
-  if (base::FeatureList::IsEnabled(
-          performance_manager::features::kPageFreezingFromPerformanceManager)) {
-    return;
-  }
-
-  base::TimeTicks next_state_transition_time = base::TimeTicks::Max();
-  const base::TimeTicks now = NowTicks();
-  LifecycleUnit* oldest_frozen_lifecycle_unit = nullptr;
-
-  for (LifecycleUnit* lifecycle_unit : lifecycle_units_) {
-    // Maybe freeze the LifecycleUnit.
-    next_state_transition_time =
-        std::min(MaybeFreezeLifecycleUnit(lifecycle_unit, now),
-                 next_state_transition_time);
-
-    // Keep track of the LifecycleUnit that has been frozen for the longest
-    // time. It might be unfrozen below.
-    if (lifecycle_unit->GetState() == LifecycleUnitState::FROZEN &&
-        (!oldest_frozen_lifecycle_unit ||
-         lifecycle_unit->GetWallTimeWhenHidden() <
-             oldest_frozen_lifecycle_unit->GetWallTimeWhenHidden())) {
-      oldest_frozen_lifecycle_unit = lifecycle_unit;
-    }
-  }
-
-  // Unfreeze the LifecycleUnit that has been frozen for the longest time if it
-  // has been frozen long enough and a sufficient amount of time elapsed since
-  // the last unfreeze.
-  if (freeze_params_.should_periodically_unfreeze &&
-      oldest_frozen_lifecycle_unit) {
-    next_state_transition_time =
-        std::min(MaybeUnfreezeLifecycleUnit(oldest_frozen_lifecycle_unit, now),
-                 next_state_transition_time);
-  }
-
-  // Schedule the next call to PerformStateTransitions().
-  DCHECK(!state_transitions_timer_->IsRunning());
-  if (!next_state_transition_time.is_max())
-    SchedulePerformStateTransitions(next_state_transition_time - now);
-}
-
-base::TimeTicks TabManager::MaybeFreezeLifecycleUnit(
-    LifecycleUnit* lifecycle_unit,
-    base::TimeTicks now) {
-  DecisionDetails freeze_details;
-  if (!lifecycle_unit->CanFreeze(&freeze_details))
-    return base::TimeTicks::Max();
-
-  const base::TimeTicks freeze_time = std::max(
-      lifecycle_unit->GetWallTimeWhenHidden() + freeze_params_.freeze_timeout,
-      // Do not refreeze a tab before the refreeze timeout has expired.
-      lifecycle_unit->GetStateChangeTime() + freeze_params_.refreeze_timeout);
-
-  if (now >= freeze_time) {
-    lifecycle_unit->Freeze();
-    return base::TimeTicks::Max();
-  }
-
-  return freeze_time;
-}
-
-base::TimeTicks TabManager::MaybeUnfreezeLifecycleUnit(
-    LifecycleUnit* lifecycle_unit,
-    base::TimeTicks now) {
-  DCHECK_EQ(lifecycle_unit->GetState(), LifecycleUnitState::FROZEN);
-
-  const base::TimeTicks unfreeze_time = std::max(
-      lifecycle_unit->GetStateChangeTime() + freeze_params_.unfreeze_timeout,
-      last_unfreeze_time_ + freeze_params_.refreeze_timeout);
-
-  if (now >= unfreeze_time) {
-    last_unfreeze_time_ = now;
-    lifecycle_unit->Unfreeze();
-    return now + freeze_params_.refreeze_timeout;
-  }
-
-  return unfreeze_time;
-}
-
-void TabManager::OnLifecycleUnitVisibilityChanged(
-    LifecycleUnit* lifecycle_unit,
-    content::Visibility visibility) {
-  SchedulePerformStateTransitions(base::TimeDelta());
-}
-
 void TabManager::OnLifecycleUnitDestroyed(LifecycleUnit* lifecycle_unit) {
   lifecycle_units_.erase(lifecycle_unit);
-
-  SchedulePerformStateTransitions(base::TimeDelta());
 }
 
 void TabManager::OnLifecycleUnitCreated(LifecycleUnit* lifecycle_unit) {
-  lifecycle_units_.insert(lifecycle_unit);
-
   // Add an observer to be notified of destruction.
   lifecycle_unit->AddObserver(this);
 
-  SchedulePerformStateTransitions(base::TimeDelta());
+  lifecycle_units_.insert(lifecycle_unit);
 }
 
 }  // namespace resource_coordinator

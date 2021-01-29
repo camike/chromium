@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <map>
 #include <string>
 
 #include "base/trace_event/trace_event.h"
@@ -17,6 +18,7 @@
 #include "third_party/skia/include/core/SkPictureRecorder.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/skia_util.h"
 
 namespace cc {
@@ -32,38 +34,39 @@ bool GetCanvasClipBounds(SkCanvas* canvas, gfx::Rect* clip_bounds) {
 }
 
 template <typename Function>
-void IterateTextContent(const PaintOpBuffer* buffer, const Function& yield) {
-  for (auto* op : PaintOpBuffer::Iterator(buffer)) {
+void IterateTextContent(const PaintOpBuffer& buffer,
+                        const Function& yield,
+                        const gfx::Rect& rect) {
+  if (!buffer.has_draw_text_ops())
+    return;
+  for (auto* op : PaintOpBuffer::Iterator(&buffer)) {
     if (op->GetType() == PaintOpType::DrawTextBlob) {
-      yield(static_cast<DrawTextBlobOp*>(op));
+      yield(static_cast<DrawTextBlobOp*>(op), rect);
     } else if (op->GetType() == PaintOpType::DrawRecord) {
-      IterateTextContent(static_cast<DrawRecordOp*>(op)->record.get(), yield);
+      IterateTextContent(*static_cast<DrawRecordOp*>(op)->record.get(), yield,
+                         rect);
     }
   }
 }
 
 template <typename Function>
-void IterateTextContentByOffsets(const PaintOpBuffer* buffer,
+void IterateTextContentByOffsets(const PaintOpBuffer& buffer,
                                  const std::vector<size_t>& offsets,
+                                 const std::vector<gfx::Rect>& rects,
                                  const Function& yield) {
-  if (!buffer)
-    return;
-  for (auto* op : PaintOpBuffer::OffsetIterator(buffer, &offsets)) {
+  DCHECK(buffer.has_draw_text_ops());
+  DCHECK_EQ(rects.size(), offsets.size());
+  size_t index = 0;
+  for (auto* op : PaintOpBuffer::OffsetIterator(&buffer, &offsets)) {
     if (op->GetType() == PaintOpType::DrawTextBlob) {
-      yield(static_cast<DrawTextBlobOp*>(op));
+      yield(static_cast<DrawTextBlobOp*>(op), rects[index]);
     } else if (op->GetType() == PaintOpType::DrawRecord) {
-      IterateTextContent(static_cast<DrawRecordOp*>(op)->record.get(), yield);
+      IterateTextContent(*static_cast<DrawRecordOp*>(op)->record.get(), yield,
+                         rects[index]);
     }
+    ++index;
   }
 }
-
-bool RotationEquivalentToAxisFlip(const SkMatrix& matrix) {
-  float skew_x = matrix.getSkewX();
-  float skew_y = matrix.getSkewY();
-  return ((skew_x == 1.f || skew_x == -1.f) &&
-          (skew_y == 1.f || skew_y == -1.f));
-}
-
 }  // namespace
 
 DisplayItemList::DisplayItemList(UsageHint usage_hint)
@@ -71,7 +74,7 @@ DisplayItemList::DisplayItemList(UsageHint usage_hint)
   if (usage_hint_ == kTopLevelDisplayItemList) {
     visual_rects_.reserve(1024);
     offsets_.reserve(1024);
-    begin_paired_indices_.reserve(32);
+    paired_begin_stack_.reserve(32);
   }
 }
 
@@ -90,26 +93,76 @@ void DisplayItemList::Raster(SkCanvas* canvas,
 }
 
 void DisplayItemList::CaptureContent(const gfx::Rect& rect,
-                                     std::vector<NodeId>* content) const {
+                                     std::vector<NodeInfo>* content) const {
+  if (!paint_op_buffer_.has_draw_text_ops())
+    return;
   std::vector<size_t> offsets;
-  rtree_.Search(rect, &offsets);
+  std::vector<gfx::Rect> rects;
+  rtree_.Search(rect, &offsets, &rects);
   IterateTextContentByOffsets(
-      &paint_op_buffer_, offsets,
-      [content](const DrawTextBlobOp* op) { content->push_back(op->node_id); });
+      paint_op_buffer_, offsets, rects,
+      [content](const DrawTextBlobOp* op, const gfx::Rect& rect) {
+        // Only union the rect if the current is the same as the last one.
+        if (!content->empty() && content->back().node_id == op->node_id)
+          content->back().visual_rect.Union(rect);
+        else
+          content->emplace_back(op->node_id, rect);
+      });
 }
 
 double DisplayItemList::AreaOfDrawText(const gfx::Rect& rect) const {
+  if (!paint_op_buffer_.has_draw_text_ops())
+    return 0;
   std::vector<size_t> offsets;
-  rtree_.Search(rect, &offsets);
+  std::vector<gfx::Rect> rects;
+  rtree_.Search(rect, &offsets, &rects);
+  DCHECK_EQ(offsets.size(), rects.size());
+
   double area = 0;
-  IterateTextContentByOffsets(
-      &paint_op_buffer_, offsets, [&area](const DrawTextBlobOp* op) {
-        // This is not fully accurate, e.g. when there is transform operations,
-        // but is good for statistics purpose.
-        SkRect bounds = op->blob->bounds();
-        area += static_cast<double>(bounds.width()) * bounds.height();
-      });
+  size_t index = 0;
+  for (auto* op : PaintOpBuffer::OffsetIterator(&paint_op_buffer_, &offsets)) {
+    if (op->GetType() == PaintOpType::DrawTextBlob ||
+        // Don't walk into the record because the visual rect is already the
+        // bounding box of the sub paint operations. This works for most paint
+        // results for text generated by blink.
+        (op->GetType() == PaintOpType::DrawRecord &&
+         static_cast<DrawRecordOp*>(op)->record->has_draw_text_ops())) {
+      area += static_cast<double>(rects[index].width()) * rects[index].height();
+    }
+    ++index;
+  }
   return area;
+}
+
+void DisplayItemList::EndPaintOfPairedEnd() {
+#if DCHECK_IS_ON()
+  DCHECK(IsPainting());
+  DCHECK_LT(current_range_start_, paint_op_buffer_.size());
+  current_range_start_ = kNotPainting;
+#endif
+  if (usage_hint_ == kToBeReleasedAsPaintOpBuffer)
+    return;
+
+  DCHECK(paired_begin_stack_.size());
+  size_t last_begin_index = paired_begin_stack_.back().first_index;
+  size_t last_begin_count = paired_begin_stack_.back().count;
+  DCHECK_GT(last_begin_count, 0u);
+
+  // Copy the visual rect at |last_begin_index| to all indices that constitute
+  // the begin item. Note that because we possibly reallocate the
+  // |visual_rects_| buffer below, we need an actual copy instead of a const
+  // reference which can become dangling.
+  auto visual_rect = visual_rects_[last_begin_index];
+  for (size_t i = 1; i < last_begin_count; ++i)
+    visual_rects_[i + last_begin_index] = visual_rect;
+  paired_begin_stack_.pop_back();
+
+  // Copy the visual rect of the matching begin item to the end item(s).
+  visual_rects_.resize(paint_op_buffer_.size(), visual_rect);
+
+  // The block that ended needs to be included in the bounds of the enclosing
+  // block.
+  GrowCurrentBeginItemVisualRect(visual_rect);
 }
 
 void DisplayItemList::Finalize() {
@@ -120,7 +173,7 @@ void DisplayItemList::Finalize() {
   DCHECK(!IsPainting());
   // If this fails we had more calls to EndPaintOfPairedBegin() than
   // to EndPaintOfPairedEnd().
-  DCHECK(begin_paired_indices_.empty());
+  DCHECK(paired_begin_stack_.empty());
   DCHECK_EQ(visual_rects_.size(), offsets_.size());
 #endif
 
@@ -141,7 +194,7 @@ void DisplayItemList::Finalize() {
   visual_rects_.shrink_to_fit();
   offsets_.clear();
   offsets_.shrink_to_fit();
-  begin_paired_indices_.shrink_to_fit();
+  paired_begin_stack_.shrink_to_fit();
 }
 
 size_t DisplayItemList::BytesUsed() const {
@@ -192,7 +245,7 @@ void DisplayItemList::AddToValue(base::trace_event::TracedValue* state,
   if (include_items) {
     state->BeginArray("items");
 
-    PlaybackParams params(nullptr, SkMatrix::I());
+    PlaybackParams params(nullptr, SkM44());
     std::map<size_t, gfx::Rect> visual_rects = rtree_.GetAllBoundsForTracing();
     for (const PaintOp* op : PaintOpBuffer::Iterator(&paint_op_buffer_)) {
       state->BeginDictionary();
@@ -253,7 +306,7 @@ void DisplayItemList::GenerateDiscardableImagesMetadata() {
 void DisplayItemList::Reset() {
 #if DCHECK_IS_ON()
   DCHECK(!IsPainting());
-  DCHECK(begin_paired_indices_.empty());
+  DCHECK(paired_begin_stack_.empty());
 #endif
 
   rtree_.Reset();
@@ -263,9 +316,8 @@ void DisplayItemList::Reset() {
   visual_rects_.shrink_to_fit();
   offsets_.clear();
   offsets_.shrink_to_fit();
-  begin_paired_indices_.clear();
-  begin_paired_indices_.shrink_to_fit();
-  has_draw_ops_ = false;
+  paired_begin_stack_.clear();
+  paired_begin_stack_.shrink_to_fit();
 }
 
 sk_sp<PaintRecord> DisplayItemList::ReleaseAsRecord() {
@@ -326,7 +378,7 @@ DisplayItemList::GetDirectlyCompositedImageResult(
     // Images that respect orientation will have 5 paint operations:
     //  (1) Save
     //  (2) Translate
-    //  (3) Concat (rotation matrix)
+    //  (3) Concat (with a transformation that preserves axis alignment)
     //  (4) DrawImageRect
     //  (5) Restore
     // Detect these the paint op buffer and disqualify the layer as a directly
@@ -343,21 +395,21 @@ DisplayItemList::GetDirectlyCompositedImageResult(
           break;
         }
         case PaintOpType::Concat: {
-          // We only expect a single rotation. If we see another one, then this
-          // image won't be eligible for directly compositing.
+          // We only expect a single transformation. If we see another one, then
+          // this image won't be eligible for directly compositing.
           if (transpose_image_size)
             return base::nullopt;
 
           const ConcatOp* concat_op = static_cast<const ConcatOp*>(op);
-          if (concat_op->matrix.hasPerspective() ||
-              !concat_op->matrix.preservesAxisAlignment())
+          if (!MathUtil::SkM44Preserves2DAxisAlignment(concat_op->matrix))
             return base::nullopt;
 
-          // If the rotation is not an axis flip, we'll need to transpose the
-          // width and height dimensions to account for the same transform
-          // applying when the layer bounds were calculated.
-          transpose_image_size =
-              RotationEquivalentToAxisFlip(concat_op->matrix);
+          // If the image has been rotated +/-90 degrees we'll need to transpose
+          // the width and height dimensions to account for the same transform
+          // applying when the layer bounds were calculated. Since we already
+          // know that the transformation preserves axis alignment, we only
+          // need to confirm that this is not a scaling operation.
+          transpose_image_size = (concat_op->matrix.rc(0, 0) == 0);
           break;
         }
         case PaintOpType::DrawImageRect:

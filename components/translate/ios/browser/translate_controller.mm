@@ -7,12 +7,9 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
 #include "base/json/string_escape.h"
-#include "base/logging.h"
-#include "base/strings/string16.h"
-#include "base/strings/stringprintf.h"
-#include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "components/translate/core/common/translate_util.h"
@@ -22,6 +19,7 @@
 #include "ios/web/public/navigation/navigation_context.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
@@ -69,8 +67,7 @@ TranslateController::~TranslateController() {
 
 void TranslateController::InjectTranslateScript(
     const std::string& translate_script) {
-  [js_manager_ setScript:base::SysUTF8ToNSString(translate_script)];
-  [js_manager_ inject];
+  [js_manager_ injectWithTranslateScript:translate_script];
 }
 
 void TranslateController::RevertTranslation() {
@@ -255,15 +252,20 @@ void TranslateController::OnRequestFetchComplete(
     std::unique_ptr<std::string> response_body) {
   const std::unique_ptr<network::SimpleURLLoader>& url_loader = *it;
 
-  // |ResponseInfo()| may be a nullptr if response is incomplete.
   int response_code = 0;
   std::string status_text;
   const network::mojom::URLResponseHead* response_head =
       url_loader->ResponseInfo();
-  if (response_head && response_head->headers) {
+  int net_error_code = url_loader->NetError();
+
+  // |ResponseInfo()| may be a nullptr if response is incomplete.
+  if (net_error_code == net::Error::OK && response_head &&
+      response_head->headers) {
     net::HttpResponseHeaders* headers = response_head->headers.get();
     response_code = headers->response_code();
     status_text = headers->GetStatusText();
+  } else {
+    response_code = net::HttpStatusCode::HTTP_BAD_REQUEST;
   }
 
   // Escape the returned string so it can be parsed by JSON.parse.
@@ -272,12 +274,13 @@ void TranslateController::OnRequestFetchComplete(
   base::EscapeJSONString(response_text, /*put_in_quotes=*/false,
                          &escaped_response_text);
 
-  // Return the response details to function defined in translate_ios.js.
-  std::string script = base::StringPrintf(
-      "__gCrWeb.translate.handleResponse('%s', %d, %d, '%s', '%s', '%s')",
-      url.c_str(), request_id, response_code, status_text.c_str(),
-      url_loader->GetFinalURL().spec().c_str(), escaped_response_text.c_str());
-  web_state_->ExecuteJavaScript(base::UTF8ToUTF16(script));
+  std::string final_url = url_loader->GetFinalURL().spec();
+  [js_manager_ handleTranslateResponseWithURL:url
+                                    requestID:request_id
+                                 responseCode:response_code
+                                   statusText:status_text
+                                  responseURL:final_url
+                                 responseText:escaped_response_text];
 
   request_fetchers_.erase(it);
 }

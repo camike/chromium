@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
 #include "base/optional.h"
@@ -38,13 +38,6 @@ void InitOnBackendSequence(const base::FilePath& level_db_path,
     LOG(ERROR) << "Failed to initialize ModelTypeStore backend: "
                << error->ToString();
     return;
-  }
-
-  // TODO(crbug.com/978775): Remove the cleanup logic after a year (in 2020-12).
-  // Clean up local data from deprecated datatypes.
-  for (ModelType type :
-       {DEPRECATED_FAVICON_IMAGES, DEPRECATED_FAVICON_TRACKING}) {
-    BlockingModelTypeStoreImpl(type, store_backend).DeleteAllDataAndMetadata();
   }
 }
 
@@ -116,6 +109,7 @@ ModelTypeStoreServiceImpl::ModelTypeStoreServiceImpl(
 
 ModelTypeStoreServiceImpl::~ModelTypeStoreServiceImpl() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(ui_sequence_checker_);
+  backend_task_runner_->ReleaseSoon(FROM_HERE, std::move(store_backend_));
 }
 
 const base::FilePath& ModelTypeStoreServiceImpl::GetSyncDataPath() const {

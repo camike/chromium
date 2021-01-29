@@ -3,11 +3,13 @@
 // found in the LICENSE file.
 
 #include "base/strings/stringprintf.h"
+#include "build/build_config.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/ui/extensions/extension_action_test_helper.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/test/result_catcher.h"
@@ -28,6 +30,13 @@ IN_PROC_BROWSER_TEST_F(AutoplayExtensionBrowserTest, AutoplayAllowed) {
   ASSERT_TRUE(RunExtensionTest("autoplay")) << message_;
 }
 
+// TODO(crbug.com/1166927): AutoplayAllowedInIframe sporadically (~10%?) times
+// out on Linux.
+#if defined(OS_LINUX)
+#define MAYBE_AutoplayAllowedInIframe DISABLED_AutoplayAllowedInIframe
+#else
+#define MAYBE_AutoplayAllowedInIframe AutoplayAllowedInIframe
+#endif  // defined(OS_LINUX)
 IN_PROC_BROWSER_TEST_F(AutoplayExtensionBrowserTest, AutoplayAllowedInIframe) {
   ASSERT_TRUE(StartEmbeddedTestServer());
 

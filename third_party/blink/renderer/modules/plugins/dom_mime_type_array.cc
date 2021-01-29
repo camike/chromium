@@ -20,6 +20,7 @@
 
 #include "third_party/blink/renderer/modules/plugins/dom_mime_type_array.h"
 
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/page/page.h"
@@ -29,13 +30,13 @@
 
 namespace blink {
 
-DOMMimeTypeArray::DOMMimeTypeArray(LocalFrame* frame)
-    : ExecutionContextLifecycleObserver(frame ? frame->DomWindow() : nullptr),
-      PluginsChangedObserver(frame ? frame->GetPage() : nullptr) {
+DOMMimeTypeArray::DOMMimeTypeArray(LocalDOMWindow* window)
+    : ExecutionContextLifecycleObserver(window),
+      PluginsChangedObserver(window ? window->GetFrame()->GetPage() : nullptr) {
   UpdatePluginData();
 }
 
-void DOMMimeTypeArray::Trace(Visitor* visitor) {
+void DOMMimeTypeArray::Trace(Visitor* visitor) const {
   visitor->Trace(dom_mime_types_);
   ScriptWrappable::Trace(visitor);
   ExecutionContextLifecycleObserver::Trace(visitor);
@@ -50,13 +51,15 @@ DOMMimeType* DOMMimeTypeArray::item(unsigned index) {
     return nullptr;
   if (!dom_mime_types_[index]) {
     dom_mime_types_[index] = MakeGarbageCollected<DOMMimeType>(
-        GetFrame(), *GetPluginData()->Mimes()[index]);
+        DomWindow(), *GetPluginData()->Mimes()[index]);
   }
 
   return dom_mime_types_[index];
 }
 
 DOMMimeType* DOMMimeTypeArray::namedItem(const AtomicString& property_name) {
+  if (base::FeatureList::IsEnabled(features::kNavigatorPluginsEmpty))
+    return nullptr;
   PluginData* data = GetPluginData();
   if (!data)
     return nullptr;
@@ -72,6 +75,8 @@ DOMMimeType* DOMMimeTypeArray::namedItem(const AtomicString& property_name) {
 
 void DOMMimeTypeArray::NamedPropertyEnumerator(Vector<String>& property_names,
                                                ExceptionState&) const {
+  if (base::FeatureList::IsEnabled(features::kNavigatorPluginsEmpty))
+    return;
   PluginData* data = GetPluginData();
   if (!data)
     return;
@@ -90,12 +95,16 @@ bool DOMMimeTypeArray::NamedPropertyQuery(const AtomicString& property_name,
 }
 
 PluginData* DOMMimeTypeArray::GetPluginData() const {
-  if (!GetFrame())
+  if (!DomWindow())
     return nullptr;
-  return GetFrame()->GetPluginData();
+  return DomWindow()->GetFrame()->GetPluginData();
 }
 
 void DOMMimeTypeArray::UpdatePluginData() {
+  if (base::FeatureList::IsEnabled(features::kNavigatorPluginsEmpty)) {
+    dom_mime_types_.clear();
+    return;
+  }
   PluginData* data = GetPluginData();
   if (!data) {
     dom_mime_types_.clear();

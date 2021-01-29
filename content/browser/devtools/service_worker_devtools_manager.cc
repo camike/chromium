@@ -200,8 +200,7 @@ ServiceWorkerDevToolsManager::ServiceWorkerDevToolsManager()
     : debug_service_worker_on_start_(false) {
 }
 
-ServiceWorkerDevToolsManager::~ServiceWorkerDevToolsManager() {
-}
+ServiceWorkerDevToolsManager::~ServiceWorkerDevToolsManager() = default;
 
 void ServiceWorkerDevToolsManager::NavigationPreloadRequestSent(
     int worker_process_id,
@@ -217,7 +216,8 @@ void ServiceWorkerDevToolsManager::NavigationPreloadRequestSent(
        protocol::NetworkHandler::ForAgentHost(it->second.get())) {
     network->RequestSent(request_id, std::string(), request,
                          protocol::Network::Initiator::TypeEnum::Preload,
-                         base::nullopt /* initiator_url */, timestamp);
+                         /*initiator_url=*/base::nullopt,
+                         /*initiator_devtools_request_id=*/"", timestamp);
   }
 }
 

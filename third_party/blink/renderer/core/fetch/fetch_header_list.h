@@ -19,7 +19,7 @@ class CORE_EXPORT FetchHeaderList final
  public:
   struct ByteCaseInsensitiveCompare {
     bool operator()(const String& lhs, const String& rhs) const {
-      return CodeUnitCompareLessThan(lhs.LowerASCII(), rhs.LowerASCII());
+      return CodeUnitCompareIgnoringASCIICaseLessThan(lhs, rhs);
     }
   };
 
@@ -51,7 +51,7 @@ class CORE_EXPORT FetchHeaderList final
   static bool IsValidHeaderName(const String&);
   static bool IsValidHeaderValue(const String&);
 
-  void Trace(Visitor* visitor) {}
+  void Trace(Visitor* visitor) const {}
 
  private:
   // While using STL data structures in Blink is not very common or

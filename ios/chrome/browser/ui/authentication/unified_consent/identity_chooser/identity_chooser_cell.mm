@@ -9,6 +9,7 @@
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
+#import "ios/chrome/common/ui/util/pointer_interaction_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -44,6 +45,9 @@ const CGFloat kCheckmarkMagin = 26.;
         ChromeDirectionalEdgeInsetsMake(0, kLeadingMargin, 0, 0);
     AddSameConstraintsToSidesWithInsets(_identityView, self.contentView,
                                         sideFlags, insets);
+    if (@available(iOS 13.4, *)) {
+        [self addInteraction:[[ViewPointerInteraction alloc] init]];
+    }
   }
   return self;
 }

@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "build/build_config.h"
@@ -73,7 +73,6 @@ class FakeInstanceID : public instance_id::InstanceID {
   void GetToken(const std::string& authorized_entity,
                 const std::string& scope,
                 base::TimeDelta time_to_live,
-                const std::map<std::string, std::string>& options,
                 std::set<Flags> flags,
                 GetTokenCallback callback) override {
     if (authorized_entity == kSharingSenderID)
@@ -195,26 +194,24 @@ class SharingDeviceRegistrationTest : public testing::Test {
 
   std::set<sync_pb::SharingSpecificFields::EnabledFeatures>
   GetExpectedEnabledFeatures(bool supports_vapid) {
+    std::set<sync_pb::SharingSpecificFields::EnabledFeatures> features;
+
     // IsClickToCallSupported() involves JNI call which is hard to test.
     if (sharing_device_registration_.IsClickToCallSupported()) {
-      if (supports_vapid) {
-        return {sync_pb::SharingSpecificFields::CLICK_TO_CALL_V2,
-                sync_pb::SharingSpecificFields::CLICK_TO_CALL_VAPID,
-                sync_pb::SharingSpecificFields::SHARED_CLIPBOARD_V2,
-                sync_pb::SharingSpecificFields::SHARED_CLIPBOARD_VAPID};
-      } else {
-        return {sync_pb::SharingSpecificFields::CLICK_TO_CALL_V2,
-                sync_pb::SharingSpecificFields::SHARED_CLIPBOARD_V2};
-      }
+      features.insert(sync_pb::SharingSpecificFields::CLICK_TO_CALL_V2);
+      if (supports_vapid)
+        features.insert(sync_pb::SharingSpecificFields::CLICK_TO_CALL_VAPID);
     }
 
     // Shared clipboard should always be supported.
-    if (supports_vapid) {
-      return {sync_pb::SharingSpecificFields::SHARED_CLIPBOARD_V2,
-              sync_pb::SharingSpecificFields::SHARED_CLIPBOARD_VAPID};
-    } else {
-      return {sync_pb::SharingSpecificFields::SHARED_CLIPBOARD_V2};
-    }
+    features.insert(sync_pb::SharingSpecificFields::SHARED_CLIPBOARD_V2);
+    if (supports_vapid)
+      features.insert(sync_pb::SharingSpecificFields::SHARED_CLIPBOARD_VAPID);
+
+    if (sharing_device_registration_.IsRemoteCopySupported())
+      features.insert(sync_pb::SharingSpecificFields::REMOTE_COPY);
+
+    return features;
   }
 
  protected:
@@ -255,7 +252,6 @@ TEST_F(SharingDeviceRegistrationTest, IsSharedClipboardSupported_False) {
 }
 
 TEST_F(SharingDeviceRegistrationTest, RegisterDeviceTest_Success) {
-  scoped_feature_list_.InitAndEnableFeature(kSharingSendViaSync);
   test_sync_service_.SetActiveDataTypes(
       {syncer::DEVICE_INFO, syncer::PREFERENCES, syncer::SHARING_MESSAGE});
   SetInstanceIDFCMResult(instance_id::InstanceID::Result::SUCCESS);
@@ -314,9 +310,6 @@ TEST_F(SharingDeviceRegistrationTest, RegisterDeviceTest_Vapid_Only) {
 }
 
 TEST_F(SharingDeviceRegistrationTest, RegisterDeviceTest_SenderIDOnly) {
-  scoped_feature_list_.InitWithFeatures(
-      /*enabled_feautres=*/{kSharingSendViaSync},
-      /*disabled_features=*/{});
   test_sync_service_.SetActiveDataTypes(
       {syncer::DEVICE_INFO, syncer::SHARING_MESSAGE});
   SetInstanceIDFCMResult(instance_id::InstanceID::Result::SUCCESS);
@@ -376,7 +369,6 @@ TEST_F(SharingDeviceRegistrationTest, RegisterDeviceTest_FatalError) {
 }
 
 TEST_F(SharingDeviceRegistrationTest, UnregisterDeviceTest_Success) {
-  scoped_feature_list_.InitAndEnableFeature(kSharingSendViaSync);
   SetInstanceIDFCMResult(instance_id::InstanceID::Result::SUCCESS);
   fake_device_info_sync_service_.GetDeviceInfoTracker()->Add(
       fake_device_info_sync_service_.GetLocalDeviceInfoProvider()
@@ -417,9 +409,6 @@ TEST_F(SharingDeviceRegistrationTest, UnregisterDeviceTest_Success) {
 }
 
 TEST_F(SharingDeviceRegistrationTest, UnregisterDeviceTest_SenderIDonly) {
-  scoped_feature_list_.InitWithFeatures(
-      /*enabled_features=*/{kSharingSendViaSync},
-      /*disabled_features=*/{});
   test_sync_service_.SetActiveDataTypes(
       {syncer::DEVICE_INFO, syncer::SHARING_MESSAGE});
   SetInstanceIDFCMResult(instance_id::InstanceID::Result::SUCCESS);

@@ -32,7 +32,7 @@
 
 #include "third_party/blink/renderer/core/css/css_numeric_literal_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value_mappings.h"
-#include "third_party/blink/renderer/core/css/parser/css_property_parser_helpers.h"
+#include "third_party/blink/renderer/core/css/properties/css_parsing_utils.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/platform/geometry/calculation_expression_node.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
@@ -138,7 +138,8 @@ CSSMathExpressionNumericLiteral* CSSMathExpressionNumericLiteral::Create(
     double value,
     CSSPrimitiveValue::UnitType type,
     bool is_integer) {
-  if (std::isnan(value) || std::isinf(value))
+  if (!RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled() &&
+      (std::isnan(value) || std::isinf(value)))
     return nullptr;
   return MakeGarbageCollected<CSSMathExpressionNumericLiteral>(
       CSSNumericLiteralValue::Create(value, type), is_integer);
@@ -268,7 +269,7 @@ bool CSSMathExpressionNumericLiteral::IsComputationallyIndependent() const {
   return value_->IsComputationallyIndependent();
 }
 
-void CSSMathExpressionNumericLiteral::Trace(Visitor* visitor) {
+void CSSMathExpressionNumericLiteral::Trace(Visitor* visitor) const {
   visitor->Trace(value_);
   CSSMathExpressionNode::Trace(visitor);
 }
@@ -434,10 +435,13 @@ CSSMathExpressionNode* CSSMathExpressionBinaryOperation::CreateSimplified(
         left_side == number_side ? right_side : left_side;
 
     double number = number_side->DoubleValue();
-    if (std::isnan(number) || std::isinf(number))
-      return nullptr;
-    if (op == CSSMathOperator::kDivide && !number)
-      return nullptr;
+
+    if (!RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled()) {
+      if (std::isnan(number) || std::isinf(number))
+        return nullptr;
+      if (op == CSSMathOperator::kDivide && !number)
+        return nullptr;
+    }
 
     CSSPrimitiveValue::UnitType other_type = other_side->ResolvedUnitType();
     if (HasDoubleValue(other_type)) {
@@ -716,10 +720,19 @@ CSSPrimitiveValue::UnitType CSSMathExpressionBinaryOperation::ResolvedUnitType()
   return CSSPrimitiveValue::UnitType::kUnknown;
 }
 
-void CSSMathExpressionBinaryOperation::Trace(Visitor* visitor) {
+void CSSMathExpressionBinaryOperation::Trace(Visitor* visitor) const {
   visitor->Trace(left_side_);
   visitor->Trace(right_side_);
   CSSMathExpressionNode::Trace(visitor);
+}
+
+// static
+bool CheckSameSign(double left_value, double right_value) {
+  if (left_value >= 0 && right_value >= 0)
+    return true;
+  if (left_value <= 0 && right_value <= 0)
+    return true;
+  return false;
 }
 
 // static
@@ -737,14 +750,23 @@ const CSSMathExpressionNode* CSSMathExpressionBinaryOperation::GetNumberSide(
 double CSSMathExpressionBinaryOperation::EvaluateOperator(double left_value,
                                                           double right_value,
                                                           CSSMathOperator op) {
+  // Design doc for infinity and NaN: https://bit.ly/349gXjq
   switch (op) {
     case CSSMathOperator::kAdd:
+      if (RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled())
+        return left_value + right_value;
       return clampTo<double>(left_value + right_value);
     case CSSMathOperator::kSubtract:
+      if (RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled())
+        return left_value - right_value;
       return clampTo<double>(left_value - right_value);
     case CSSMathOperator::kMultiply:
+      if (RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled())
+        return left_value * right_value;
       return clampTo<double>(left_value * right_value);
     case CSSMathOperator::kDivide:
+      if (RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled())
+        return left_value / right_value;
       if (right_value)
         return clampTo<double>(left_value / right_value);
       return std::numeric_limits<double>::quiet_NaN();
@@ -803,7 +825,7 @@ CSSMathExpressionVariadicOperation::CSSMathExpressionVariadicOperation(
       operands_(std::move(operands)),
       operator_(op) {}
 
-void CSSMathExpressionVariadicOperation::Trace(Visitor* visitor) {
+void CSSMathExpressionVariadicOperation::Trace(Visitor* visitor) const {
   visitor->Trace(operands_);
   CSSMathExpressionNode::Trace(visitor);
 }
@@ -1029,7 +1051,7 @@ class CSSMathExpressionNodeParser {
       last_token_is_comma = false;
       operands.push_back(operand);
 
-      if (!css_property_parser_helpers::ConsumeCommaIncludingWhitespace(tokens))
+      if (!css_parsing_utils::ConsumeCommaIncludingWhitespace(tokens))
         break;
       last_token_is_comma = true;
     }
@@ -1048,14 +1070,14 @@ class CSSMathExpressionNodeParser {
     if (!min_operand)
       return nullptr;
 
-    if (!css_property_parser_helpers::ConsumeCommaIncludingWhitespace(tokens))
+    if (!css_parsing_utils::ConsumeCommaIncludingWhitespace(tokens))
       return nullptr;
 
     CSSMathExpressionNode* val_operand = ParseValueExpression(tokens, depth);
     if (!val_operand)
       return nullptr;
 
-    if (!css_property_parser_helpers::ConsumeCommaIncludingWhitespace(tokens))
+    if (!css_parsing_utils::ConsumeCommaIncludingWhitespace(tokens))
       return nullptr;
 
     CSSMathExpressionNode* max_operand = ParseValueExpression(tokens, depth);
@@ -1084,6 +1106,23 @@ class CSSMathExpressionNodeParser {
  private:
   CSSMathExpressionNode* ParseValue(CSSParserTokenRange& tokens) {
     CSSParserToken token = tokens.ConsumeIncludingWhitespace();
+    if (RuntimeEnabledFeatures::CSSCalcInfinityAndNaNEnabled()) {
+      if (token.Id() == CSSValueID::kInfinity) {
+        return CSSMathExpressionNumericLiteral::Create(
+            std::numeric_limits<double>::infinity(),
+            CSSPrimitiveValue::UnitType::kNumber, false);
+      }
+      if (token.Id() == CSSValueID::kNegativeInfinity) {
+        return CSSMathExpressionNumericLiteral::Create(
+            -std::numeric_limits<double>::infinity(),
+            CSSPrimitiveValue::UnitType::kNumber, false);
+      }
+      if (token.Id() == CSSValueID::kNan) {
+        return CSSMathExpressionNumericLiteral::Create(
+            std::numeric_limits<double>::quiet_NaN(),
+            CSSPrimitiveValue::UnitType::kNumber, false);
+      }
+    }
     if (!(token.GetType() == kNumberToken ||
           token.GetType() == kPercentageToken ||
           token.GetType() == kDimensionToken))

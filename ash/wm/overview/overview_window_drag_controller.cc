@@ -30,6 +30,8 @@
 #include "ash/wm/window_util.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/numerics/ranges.h"
+#include "base/numerics/safe_conversions.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
 #include "ui/display/display.h"
@@ -76,6 +78,13 @@ void UnpauseOcclusionTracker() {
 bool GetVirtualDesksBarEnabled(OverviewItem* item) {
   return desks_util::ShouldDesksBarBeCreated() &&
          item->overview_grid()->IsDesksBarViewActive();
+}
+
+// Returns whether |item|'s window is visible on all desks.
+bool DraggedItemIsVisibleOnAllDesks(OverviewItem* item) {
+  aura::Window* const dragged_window = item->GetWindow();
+  return dragged_window &&
+         dragged_window->GetProperty(aura::client::kVisibleOnAllWorkspacesKey);
 }
 
 // Returns the scaled-down size of the dragged item that should be used when
@@ -162,17 +171,17 @@ class OverviewItemMoveHelper : public aura::WindowObserver {
     OverviewController* overview_controller =
         Shell::Get()->overview_controller();
     if (overview_controller->InOverviewSession()) {
-      OverviewGrid* target_grid =
-          overview_controller->overview_session()->GetGridWithRootWindow(
-              window->GetRootWindow());
-      // Add |window| to |target_grid| with reposition=false and restack=false,
-      // because soon we will handle both repositioning and restacking anyway.
-      target_grid->AddItemInMruOrder(window, /*reposition=*/false,
-                                     /*animate=*/false, /*restack=*/false);
-      OverviewItem* item = target_grid->GetOverviewItemContaining(window);
+      // OverviewSession::AddItemInMruOrder() will add |window| to the grid
+      // associated with |window|'s root. Do not reposition or restack as we
+      // will soon handle them both anyway.
+      OverviewSession* session = overview_controller->overview_session();
+      session->AddItemInMruOrder(window, /*reposition=*/false,
+                                 /*animate=*/false, /*restack=*/false);
+      OverviewItem* item = session->GetOverviewItemForWindow(window);
+      DCHECK(item);
       item->SetBounds(target_item_bounds_, OVERVIEW_ANIMATION_NONE);
       item->set_should_restack_on_animation_end(true);
-      // The destructor will call |OverviewSession::PositionWindows|.
+      // The destructor will call OverviewSession::PositionWindows().
     }
     delete this;
   }
@@ -193,9 +202,7 @@ OverviewWindowDragController::OverviewWindowDragController(
       display_count_(Shell::GetAllRootWindows().size()),
       is_touch_dragging_(is_touch_dragging),
       should_allow_split_view_(ShouldAllowSplitView()),
-      virtual_desks_bar_enabled_(GetVirtualDesksBarEnabled(item)),
-      are_multi_display_overview_and_splitview_enabled_(
-          AreMultiDisplayOverviewAndSplitViewEnabled()) {
+      virtual_desks_bar_enabled_(GetVirtualDesksBarEnabled(item)) {
   DCHECK(!Shell::Get()->overview_controller()->IsInStartAnimation());
   DCHECK(!SplitViewController::Get(Shell::GetPrimaryRootWindow())
               ->IsDividerAnimating());
@@ -281,10 +288,8 @@ void OverviewWindowDragController::StartNormalDragMode(
 
   did_move_ = true;
   current_drag_behavior_ = DragBehavior::kNormalDrag;
-  if (are_multi_display_overview_and_splitview_enabled_) {
-    Shell::Get()->mouse_cursor_filter()->ShowSharedEdgeIndicator(
-        item_->root_window());
-  }
+  Shell::Get()->mouse_cursor_filter()->ShowSharedEdgeIndicator(
+      item_->root_window());
   const gfx::SizeF window_original_size(item_->GetWindow()->bounds().size());
   item_->ScaleUpSelectedItem(
       OVERVIEW_ANIMATION_LAYOUT_OVERVIEW_ITEMS_IN_OVERVIEW);
@@ -398,10 +403,8 @@ void OverviewWindowDragController::ResetGesture() {
   if (current_drag_behavior_ == DragBehavior::kNormalDrag) {
     DCHECK(item_->overview_grid()->drop_target_widget());
 
-    if (are_multi_display_overview_and_splitview_enabled_) {
-      Shell::Get()->mouse_cursor_filter()->HideSharedEdgeIndicator();
-      item_->DestroyPhantomsForDragging();
-    }
+    Shell::Get()->mouse_cursor_filter()->HideSharedEdgeIndicator();
+    item_->DestroyPhantomsForDragging();
     overview_session_->RemoveDropTargets();
     if (should_allow_split_view_) {
       SplitViewController::Get(Shell::GetPrimaryRootWindow())
@@ -525,10 +528,12 @@ void OverviewWindowDragController::ContinueNormalDrag(
 
     if (desks_bar_data.shrink_bounds.Contains(location_in_screen)) {
       // Update the mini views borders by checking if |location_in_screen|
-      // intersects.
+      // intersects. Only update the borders if the dragged item is not visible
+      // on all desks.
       overview_grid->IntersectsWithDesksBar(
           gfx::ToRoundedPoint(location_in_screen),
-          /*update_desks_bar_drag_details=*/true, /*for_drop=*/false);
+          /*update_desks_bar_drag_details=*/
+          !DraggedItemIsVisibleOnAllDesks(item_), /*for_drop=*/false);
 
       float value = 0.f;
       if (centerpoint.y() < desks_bar_data.desks_bar_bounds.y() ||
@@ -565,18 +570,15 @@ void OverviewWindowDragController::ContinueNormalDrag(
     // portrait orientation in tablet mode.
     overview_grid->MaybeUpdateDesksWidgetBounds();
   }
-  if (are_multi_display_overview_and_splitview_enabled_) {
-    OverviewGrid* overview_grid =
-        overview_session_->GetGridWithRootWindow(GetRootWindowBeingDraggedIn());
-    if (!overview_grid->GetDropTarget() &&
-        (!should_allow_split_view_ ||
-         SplitViewDragIndicators::GetSnapPosition(
-             overview_grid->split_view_drag_indicators()
-                 ->current_window_dragging_state()) ==
-             SplitViewController::NONE)) {
-      overview_grid->AddDropTargetNotForDraggingFromThisGrid(item_->GetWindow(),
-                                                             /*animate=*/true);
-    }
+
+  if (!overview_grid->GetDropTarget() &&
+      (!should_allow_split_view_ ||
+       SplitViewDragIndicators::GetSnapPosition(
+           overview_grid->split_view_drag_indicators()
+               ->current_window_dragging_state()) ==
+           SplitViewController::NONE)) {
+    overview_grid->AddDropTargetNotForDraggingFromThisGrid(item_->GetWindow(),
+                                                           /*animate=*/true);
   }
   overview_session_->UpdateDropTargetsBackgroundVisibilities(
       item_, location_in_screen);
@@ -584,7 +586,7 @@ void OverviewWindowDragController::ContinueNormalDrag(
   bounds.set_x(centerpoint.x() - bounds.width() / 2.f);
   bounds.set_y(centerpoint.y() - bounds.height() / 2.f);
   item_->SetBounds(bounds, OVERVIEW_ANIMATION_NONE);
-  if (are_multi_display_overview_and_splitview_enabled_ && display_count_ > 1u)
+  if (display_count_ > 1u)
     item_->UpdatePhantomsForDragging(is_touch_dragging_);
 }
 
@@ -594,10 +596,8 @@ OverviewWindowDragController::CompleteNormalDrag(
   DCHECK_EQ(current_drag_behavior_, DragBehavior::kNormalDrag);
   auto* item_overview_grid = item_->overview_grid();
   DCHECK(item_overview_grid->drop_target_widget());
-  if (are_multi_display_overview_and_splitview_enabled_) {
-    Shell::Get()->mouse_cursor_filter()->HideSharedEdgeIndicator();
-    item_->DestroyPhantomsForDragging();
-  }
+  Shell::Get()->mouse_cursor_filter()->HideSharedEdgeIndicator();
+  item_->DestroyPhantomsForDragging();
   overview_session_->RemoveDropTargets();
 
   const gfx::Point rounded_screen_point =
@@ -633,9 +633,7 @@ OverviewWindowDragController::CompleteNormalDrag(
   })};
 
   aura::Window* target_root = GetRootWindowBeingDraggedIn();
-  const bool is_dragged_to_other_display =
-      AreMultiDisplayOverviewAndSplitViewEnabled() &&
-      target_root != item_->root_window();
+  const bool is_dragged_to_other_display = target_root != item_->root_window();
   if (virtual_desks_bar_enabled_) {
     item_->SetOpacity(original_opacity_);
 
@@ -665,10 +663,10 @@ OverviewWindowDragController::CompleteNormalDrag(
     // Get the window and bounds from |item_| before removing it from its grid.
     aura::Window* window = item_->GetWindow();
     const gfx::RectF target_item_bounds = item_->target_bounds();
-    // Remove |item_| from its grid. Leave the repositioning to the
+    // Remove |item_| from overview. Leave the repositioning to the
     // |OverviewItemMoveHelper|.
-    item_overview_grid->RemoveItem(item_, /*item_destroying=*/false,
-                                   /*reposition=*/false);
+    overview_session_->RemoveItem(item_, /*item_destroying=*/false,
+                                  /*reposition=*/false);
     item_ = nullptr;
     // The |OverviewItemMoveHelper| will self destruct when we move |window| to
     // |target_root|.
@@ -726,9 +724,9 @@ SplitViewController::SnapPosition OverviewWindowDragController::GetSnapPosition(
     return SplitViewController::NONE;
   if (split_view_controller->InSplitViewMode()) {
     const int position =
-        gfx::ToRoundedInt(SplitViewController::IsLayoutHorizontal()
-                              ? location_in_screen.x() - area.x()
-                              : location_in_screen.y() - area.y());
+        base::ClampRound(SplitViewController::IsLayoutHorizontal()
+                             ? location_in_screen.x() - area.x()
+                             : location_in_screen.y() - area.y());
     SplitViewController::SnapPosition default_snap_position =
         split_view_controller->default_snap_position();
     // If we're trying to snap to a position that already has a snapped window:
@@ -769,10 +767,8 @@ void OverviewWindowDragController::SnapWindow(
 }
 
 OverviewGrid* OverviewWindowDragController::GetCurrentGrid() const {
-  return are_multi_display_overview_and_splitview_enabled_
-             ? overview_session_->GetGridWithRootWindow(
-                   GetRootWindowBeingDraggedIn())
-             : item_->overview_grid();
+  return overview_session_->GetGridWithRootWindow(
+      GetRootWindowBeingDraggedIn());
 }
 
 void OverviewWindowDragController::RecordNormalDrag(

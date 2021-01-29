@@ -17,6 +17,7 @@
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/load_error_reporter.h"
@@ -28,12 +29,14 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/url_constants.h"
+#include "extensions/browser/allowlist_state.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/management_policy.h"
+#include "extensions/browser/pref_types.h"
 #include "extensions/browser/ui_util.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_l10n_util.h"
@@ -43,7 +46,6 @@
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/background_info.h"
-#include "extensions/common/manifest_url_handlers.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permissions_data.h"
 
@@ -338,9 +340,11 @@ void InstalledLoader::RecordExtensionsMetricsForTesting() {
   RecordExtensionsMetrics();
 }
 
+// TODO(crbug.com/1163038): Separate out Webstore/Offstore metrics.
 void InstalledLoader::RecordExtensionsMetrics() {
   Profile* profile = extension_service_->profile();
-
+  ExtensionManagement* extension_management =
+      ExtensionManagementFactory::GetForBrowserContext(profile);
   int app_user_count = 0;
   int app_external_count = 0;
   int hosted_app_count = 0;
@@ -367,6 +371,8 @@ void InstalledLoader::RecordExtensionsMetrics() {
   int off_store_item_count = 0;
   int web_request_blocking_count = 0;
   int web_request_count = 0;
+  int enabled_not_allowlisted_count = 0;
+  int disabled_not_allowlisted_count = 0;
 
   const ExtensionSet& extensions = extension_registry_->enabled_extensions();
   for (ExtensionSet::const_iterator iter = extensions.begin();
@@ -387,7 +393,7 @@ void InstalledLoader::RecordExtensionsMetrics() {
       UMA_HISTOGRAM_ENUMERATION(
           "Extensions.ExtensionLocation", location, Manifest::NUM_LOCATIONS);
 
-    if (!ManifestURL::UpdatesFromGallery(extension)) {
+    if (!extension_management->UpdatesFromWebstore(*extension)) {
       UMA_HISTOGRAM_ENUMERATION(
           "Extensions.NonWebstoreLocation", location, Manifest::NUM_LOCATIONS);
 
@@ -407,7 +413,7 @@ void InstalledLoader::RecordExtensionsMetrics() {
 
     if (Manifest::IsExternalLocation(location)) {
       // See loop below for DISABLED.
-      if (ManifestURL::UpdatesFromGallery(extension)) {
+      if (extension_management->UpdatesFromWebstore(*extension)) {
         UMA_HISTOGRAM_ENUMERATION("Extensions.ExternalItemState",
                                   EXTERNAL_ITEM_WEBSTORE_ENABLED,
                                   EXTERNAL_ITEM_MAX_ITEMS);
@@ -563,7 +569,7 @@ void InstalledLoader::RecordExtensionsMetrics() {
       }
     }
 
-    if (!ManifestURL::UpdatesFromGallery(extension))
+    if (!extension_management->UpdatesFromWebstore(*extension))
       ++off_store_item_count;
 
     ScriptingPermissionsModifier scripting_modifier(profile, extension);
@@ -597,6 +603,12 @@ void InstalledLoader::RecordExtensionsMetrics() {
             num_granted_hosts);
       }
     }
+
+    if (extension_prefs_->GetExtensionAllowlistState(extension->id()) ==
+        ALLOWLIST_NOT_ALLOWLISTED) {
+      // Record the number of not allowlisted enabled extensions.
+      ++enabled_not_allowlisted_count;
+    }
   }
 
   const ExtensionSet& disabled_extensions =
@@ -611,7 +623,7 @@ void InstalledLoader::RecordExtensionsMetrics() {
     RecordDisableReasons(extension_prefs_->GetDisableReasons((*ex)->id()));
     if (Manifest::IsExternalLocation((*ex)->location())) {
       // See loop above for ENABLED.
-      if (ManifestURL::UpdatesFromGallery(ex->get())) {
+      if (extension_management->UpdatesFromWebstore(**ex)) {
         UMA_HISTOGRAM_ENUMERATION("Extensions.ExternalItemState",
                                   EXTERNAL_ITEM_WEBSTORE_DISABLED,
                                   EXTERNAL_ITEM_MAX_ITEMS);
@@ -620,6 +632,12 @@ void InstalledLoader::RecordExtensionsMetrics() {
                                   EXTERNAL_ITEM_NONWEBSTORE_DISABLED,
                                   EXTERNAL_ITEM_MAX_ITEMS);
       }
+    }
+
+    if (extension_prefs_->GetExtensionAllowlistState((*ex)->id()) ==
+        ALLOWLIST_NOT_ALLOWLISTED) {
+      // Record the number of not allowlisted disabled extensions.
+      ++disabled_not_allowlisted_count;
     }
   }
 
@@ -671,8 +689,9 @@ void InstalledLoader::RecordExtensionsMetrics() {
     base::UmaHistogramCounts100("Extensions.FileAccessNotAllowed",
                                 file_access_not_allowed_count);
   }
-  base::UmaHistogramCounts100("Extensions.CorruptExtensionTotalDisables",
-                              extension_prefs_->GetCorruptedDisableCount());
+  base::UmaHistogramCounts100(
+      "Extensions.CorruptExtensionTotalDisables",
+      extension_prefs_->GetPrefAsInteger(kCorruptedDisableCount));
   base::UmaHistogramCounts100("Extensions.EventlessEventPages",
                               eventless_event_pages_count);
   base::UmaHistogramCounts100("Extensions.LoadOffStoreItems",
@@ -680,6 +699,16 @@ void InstalledLoader::RecordExtensionsMetrics() {
   base::UmaHistogramCounts100("Extensions.WebRequestBlockingCount",
                               web_request_blocking_count);
   base::UmaHistogramCounts100("Extensions.WebRequestCount", web_request_count);
+  base::UmaHistogramCounts100("Extensions.NotAllowlistedEnabled",
+                              enabled_not_allowlisted_count);
+  base::UmaHistogramCounts100("Extensions.NotAllowlistedDisabled",
+                              disabled_not_allowlisted_count);
+  if (safe_browsing::IsEnhancedProtectionEnabled(*profile->GetPrefs())) {
+    base::UmaHistogramCounts100("Extensions.NotAllowlistedEnabledAndEsbUser",
+                                enabled_not_allowlisted_count);
+    base::UmaHistogramCounts100("Extensions.NotAllowlistedDisabledAndEsbUser",
+                                disabled_not_allowlisted_count);
+  }
 }
 
 int InstalledLoader::GetCreationFlags(const ExtensionInfo* info) {

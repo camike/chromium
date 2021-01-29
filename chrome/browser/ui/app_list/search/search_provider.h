@@ -6,8 +6,10 @@
 #define CHROME_BROWSER_UI_APP_LIST_SEARCH_SEARCH_PROVIDER_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
+#include "ash/public/cpp/app_list/app_list_types.h"
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
@@ -21,7 +23,7 @@ enum class RankingItemType;
 class SearchProvider {
  public:
   using Results = std::vector<std::unique_ptr<ChromeSearchResult>>;
-  using ResultChangedCallback = base::Closure;
+  using ResultChangedCallback = base::RepeatingClosure;
 
   SearchProvider();
   virtual ~SearchProvider();
@@ -38,9 +40,11 @@ class SearchProvider {
   // Invoked when the app list is shown. This can optionally be used by a
   // provider to eg. warm up a cache of results.
   virtual void AppListShown() {}
+  // Returns the main result type created by this provider.
+  virtual ash::AppListSearchResultType ResultType() = 0;
 
-  void set_result_changed_callback(const ResultChangedCallback& callback) {
-    result_changed_callback_ = callback;
+  void set_result_changed_callback(ResultChangedCallback callback) {
+    result_changed_callback_ = std::move(callback);
   }
 
   const Results& results() const { return results_; }

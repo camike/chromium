@@ -11,15 +11,8 @@
 #include "components/query_tiles/internal/tile_group.h"
 #include "components/query_tiles/tile.h"
 
-namespace upboarding {
+namespace query_tiles {
 namespace test {
-
-// Print data in Tile, also with tree represent by adjacent nodes
-// key-value[parent id: {children id}] pairs.
-std::string DebugString(const Tile* entry);
-
-// Print data in TileGroup.
-std::string DebugString(const TileGroup* group);
 
 // Build and reset the TileGroup for test usage.
 void ResetTestGroup(TileGroup* group);
@@ -28,6 +21,9 @@ void ResetTestGroup(TileGroup* group);
 // of tree.
 // Build and reset the Tile for test usage.
 void ResetTestEntry(Tile* entry);
+
+// Return a list of trending tiles for test.
+std::vector<std::unique_ptr<Tile>> GetTestTrendingTileList();
 
 // Returns true if all data in two TileGroups are identical.
 bool AreTileGroupsIdentical(const TileGroup& lhs, const TileGroup& rhs);
@@ -42,6 +38,6 @@ bool AreTilesIdentical(std::vector<Tile*> lhs, std::vector<Tile*> rhs);
 bool AreTilesIdentical(std::vector<Tile> lhs, std::vector<Tile> rhs);
 
 }  // namespace test
-}  // namespace upboarding
+}  // namespace query_tiles
 
 #endif  // COMPONENTS_QUERY_TILES_TEST_TEST_UTILS_H_

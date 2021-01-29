@@ -33,10 +33,10 @@ import {getImage} from 'chrome://resources/js/icon.m.js';
 import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {loadTimeData} from '../i18n_setup.m.js';
-import {OpenWindowProxyImpl} from '../open_window_proxy.m.js';
-import {PageVisibility} from '../page_visibility.m.js';
-import {routes} from '../route.m.js';
+import {loadTimeData} from '../i18n_setup.js';
+import {OpenWindowProxyImpl} from '../open_window_proxy.js';
+import {PageVisibility} from '../page_visibility.js';
+import {routes} from '../route.js';
 import {RouteObserverBehavior, Router} from '../router.m.js';
 
 // <if expr="chromeos">
@@ -169,7 +169,7 @@ Polymer({
         if (routes.MANAGE_PROFILE) {
           map.set(
               routes.MANAGE_PROFILE.path,
-              this.signinAllowed_ ? '#edit-profile .subpage-arrow' :
+              this.signinAllowed_ ? '#edit-profile' :
                                     '#profile-row .subpage-arrow');
         }
         // </if>
@@ -225,9 +225,9 @@ Polymer({
   /** @protected */
   currentRouteChanged() {
     this.showImportDataDialog_ =
-        Router.getInstance().getCurrentRoute() == routes.IMPORT_DATA;
+        Router.getInstance().getCurrentRoute() === routes.IMPORT_DATA;
 
-    if (Router.getInstance().getCurrentRoute() == routes.SIGN_OUT) {
+    if (Router.getInstance().getCurrentRoute() === routes.SIGN_OUT) {
       // If the sync status has not been fetched yet, optimistically display
       // the sign-out dialog. There is another check when the sync status is
       // fetched. The dialog will be closed when the user is not signed in.
@@ -290,10 +290,10 @@ Polymer({
   updateAccounts_: async function() {
     const /** @type {!Array<{Account}>} */ accounts =
         await AccountManagerBrowserProxyImpl.getInstance().getAccounts();
-    // The user might not have any GAIA accounts (e.g. guest mode, Kerberos,
-    // Active Directory). In these cases the profile row is hidden, so there's
-    // nothing to do.
-    if (accounts.length == 0) {
+    // The user might not have any GAIA accounts (e.g. guest mode or Active
+    // Directory). In these cases the profile row is hidden, so there's nothing
+    // to do.
+    if (accounts.length === 0) {
       return;
     }
     this.profileName_ = accounts[0].fullName;
@@ -354,7 +354,7 @@ Polymer({
   onDisconnectDialogClosed_(e) {
     this.showSignoutDialog_ = false;
 
-    if (Router.getInstance().getCurrentRoute() == routes.SIGN_OUT) {
+    if (Router.getInstance().getCurrentRoute() === routes.SIGN_OUT) {
       Router.getInstance().navigateToPreviousRoute();
     }
   },
@@ -393,11 +393,11 @@ Polymer({
    * @private
    */
   shouldShowSyncAccountControl_() {
-    if (this.syncStatus == undefined) {
+    if (this.syncStatus === undefined) {
       return false;
     }
     // <if expr="chromeos">
-    if (!loadTimeData.getBoolean('splitSyncConsent')) {
+    if (!loadTimeData.getBoolean('useBrowserSyncConsent')) {
       return false;
     }
     // </if>

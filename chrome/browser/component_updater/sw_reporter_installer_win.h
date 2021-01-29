@@ -46,12 +46,12 @@ enum SoftwareReporterConfigurationError {
 };
 
 // Callback for running the software reporter after it is downloaded.
-using OnComponentReadyCallback = base::Callback<void(
+using OnComponentReadyCallback = base::RepeatingCallback<void(
     safe_browsing::SwReporterInvocationSequence&& invocations)>;
 
 class SwReporterInstallerPolicy : public ComponentInstallerPolicy {
  public:
-  explicit SwReporterInstallerPolicy(const OnComponentReadyCallback& callback);
+  explicit SwReporterInstallerPolicy(OnComponentReadyCallback callback);
   ~SwReporterInstallerPolicy() override;
 
   // ComponentInstallerPolicy implementation.
@@ -70,7 +70,6 @@ class SwReporterInstallerPolicy : public ComponentInstallerPolicy {
   void GetHash(std::vector<uint8_t>* hash) const override;
   std::string GetName() const override;
   update_client::InstallerAttributes GetInstallerAttributes() const override;
-  std::vector<std::string> GetMimeTypes() const override;
 
  private:
   friend class SwReporterInstallerTest;

@@ -83,7 +83,7 @@ base::Optional<webrtc::SdpVideoFormat> VEAToWebRTCFormat(
         h264_profile = webrtc::H264::kProfileConstrainedBaseline;
 #else
         h264_profile = webrtc::H264::kProfileBaseline;
-#endif
+#endif  // defined(OS_ANDROID)
         break;
       case media::H264PROFILE_MAIN:
         h264_profile = webrtc::H264::kProfileMain;
@@ -151,36 +151,6 @@ struct SupportedFormats {
   std::vector<webrtc::SdpVideoFormat> sdp_formats;
 };
 
-// Due to https://crbug.com/345569, HW encoders do not distinguish between
-// Constrained Baseline(CBP) and Baseline(BP) profiles. Since CBP is a subset of
-// BP, we can report support for both. It is safe to do so when SW fallback is
-// available.
-// TODO(chunbo): Remove this when the bug referred above is fixed.
-void AddConstrainedBaselineProfile(SupportedFormats* supported_formats) {
-  if (supported_formats->unknown)
-    return;
-
-  for (size_t i = 0; i < supported_formats->profiles.size(); ++i) {
-    if (media::H264PROFILE_BASELINE != supported_formats->profiles[i])
-      continue;
-
-    webrtc::SdpVideoFormat cbp_format = supported_formats->sdp_formats[i];
-    const absl::optional<webrtc::H264::ProfileLevelId> profile_level_id =
-        webrtc::H264::ParseSdpProfileLevelId(
-            supported_formats->sdp_formats[i].parameters);
-    if (!profile_level_id)
-      continue;
-
-    webrtc::H264::ProfileLevelId cbp_profile = *profile_level_id;
-    cbp_profile.profile = webrtc::H264::kProfileConstrainedBaseline;
-    cbp_format.parameters[cricket::kH264FmtpProfileLevelId] =
-        *webrtc::H264::ProfileLevelIdToString(cbp_profile);
-    supported_formats->sdp_formats.push_back(cbp_format);
-    supported_formats->profiles.push_back(media::H264PROFILE_BASELINE);
-    return;
-  }
-}
-
 SupportedFormats GetSupportedFormatsInternal(
     media::GpuVideoAcceleratorFactories* gpu_factories) {
   SupportedFormats supported_formats;
@@ -199,51 +169,74 @@ SupportedFormats GetSupportedFormatsInternal(
     }
   }
 
-  AddConstrainedBaselineProfile(&supported_formats);
   return supported_formats;
+}
+
+bool IsConstrainedH264(const webrtc::SdpVideoFormat& format) {
+  bool is_constrained_h264 = false;
+
+  if (format.name == cricket::kH264CodecName) {
+    const absl::optional<webrtc::H264::ProfileLevelId> profile_level_id =
+        webrtc::H264::ParseSdpProfileLevelId(format.parameters);
+    if (profile_level_id && profile_level_id->profile ==
+                                webrtc::H264::kProfileConstrainedBaseline) {
+      is_constrained_h264 = true;
+    }
+  }
+
+  return is_constrained_h264;
 }
 
 }  // anonymous namespace
 
 RTCVideoEncoderFactory::RTCVideoEncoderFactory(
     media::GpuVideoAcceleratorFactories* gpu_factories)
-    : gpu_factories_(gpu_factories) {}
+    : gpu_factories_(gpu_factories), gpu_codec_support_waiter_(gpu_factories) {}
 
 RTCVideoEncoderFactory::~RTCVideoEncoderFactory() {}
+
+void RTCVideoEncoderFactory::CheckAndWaitEncoderSupportStatusIfNeeded() const {
+  if (!gpu_codec_support_waiter_.IsEncoderSupportKnown()) {
+    DLOG(WARNING) << "Encoder support is unknown. Timeout "
+                  << gpu_codec_support_waiter_.wait_timeout_ms()
+                         .value_or(base::TimeDelta())
+                         .InMilliseconds()
+                  << "ms. Encoders might not be available.";
+  }
+}
 
 std::unique_ptr<webrtc::VideoEncoder>
 RTCVideoEncoderFactory::CreateVideoEncoder(
     const webrtc::SdpVideoFormat& format) {
+  CheckAndWaitEncoderSupportStatusIfNeeded();
+
   std::unique_ptr<webrtc::VideoEncoder> encoder;
+  bool is_constrained_h264 = IsConstrainedH264(format);
   auto supported_formats = GetSupportedFormatsInternal(gpu_factories_);
   if (!supported_formats.unknown) {
     for (size_t i = 0; i < supported_formats.sdp_formats.size(); ++i) {
       if (IsSameFormat(format, supported_formats.sdp_formats[i])) {
         encoder = std::make_unique<RTCVideoEncoder>(
-            supported_formats.profiles[i], gpu_factories_);
+            supported_formats.profiles[i], is_constrained_h264, gpu_factories_);
         break;
       }
     }
   } else {
     auto profile = WebRTCFormatToCodecProfile(format);
-    if (profile)
-      encoder = std::make_unique<RTCVideoEncoder>(*profile, gpu_factories_);
+    if (profile) {
+      encoder = std::make_unique<RTCVideoEncoder>(*profile, is_constrained_h264,
+                                                  gpu_factories_);
+    }
   }
+
   return encoder;
 }
 
 std::vector<webrtc::SdpVideoFormat>
 RTCVideoEncoderFactory::GetSupportedFormats() const {
-  return GetSupportedFormatsInternal(gpu_factories_).sdp_formats;
-}
+  CheckAndWaitEncoderSupportStatusIfNeeded();
 
-webrtc::VideoEncoderFactory::CodecInfo
-RTCVideoEncoderFactory::QueryVideoEncoder(
-    const webrtc::SdpVideoFormat& format) const {
-  CodecInfo info;
-  info.has_internal_source = false;
-  info.is_hardware_accelerated = true;
-  return info;
+  return GetSupportedFormatsInternal(gpu_factories_).sdp_formats;
 }
 
 }  // namespace blink

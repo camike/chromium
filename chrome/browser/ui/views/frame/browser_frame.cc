@@ -11,6 +11,7 @@
 #include "base/debug/leak_annotations.h"
 #include "base/i18n/rtl.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
@@ -34,18 +35,25 @@
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/widget/native_widget.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/public/cpp/ash_features.h"
+#include "ash/public/cpp/desks_helper.h"
+#include "components/full_restore/full_restore_utils.h"
 #include "components/user_manager/user_manager.h"
 #endif
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
 #include "ui/display/screen.h"
 #endif
 
 namespace {
 
 bool IsUsingGtkTheme(Profile* profile) {
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
   return ThemeServiceFactory::GetForProfile(profile)->UsingSystemTheme();
 #else
   return false;
@@ -76,8 +84,16 @@ void BrowserFrame::InitBrowserFrame() {
   views::Widget::InitParams params = native_browser_frame_->GetWidgetParams();
   params.name = "BrowserFrame";
   params.delegate = browser_view_;
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  params.init_properties_container.SetProperty(
+      full_restore::kWindowIdKey, browser_view_->browser()->session_id().id());
+  params.init_properties_container.SetProperty(
+      full_restore::kRestoreWindowIdKey,
+      browser_view_->browser()->create_params().restore_id);
+#endif
   if (browser_view_->browser()->is_type_normal() ||
-      browser_view_->browser()->is_type_devtools()) {
+      browser_view_->browser()->is_type_devtools() ||
+      browser_view_->browser()->is_type_app()) {
     // Typed panel/popup can only return a size once the widget has been
     // created.
     // DevTools counts as a popup, but DevToolsWindow::CreateDevToolsBrowser
@@ -111,11 +127,11 @@ int BrowserFrame::GetMinimizeButtonOffset() const {
 }
 
 gfx::Rect BrowserFrame::GetBoundsForTabStripRegion(
-    const views::View* tabstrip) const {
+    const gfx::Size& tabstrip_minimum_size) const {
   // This can be invoked before |browser_frame_view_| has been set.
-  return browser_frame_view_
-             ? browser_frame_view_->GetBoundsForTabStripRegion(tabstrip)
-             : gfx::Rect();
+  return browser_frame_view_ ? browser_frame_view_->GetBoundsForTabStripRegion(
+                                   tabstrip_minimum_size)
+                             : gfx::Rect();
 }
 
 int BrowserFrame::GetTopInset() const {
@@ -165,22 +181,6 @@ void BrowserFrame::OnBrowserViewInitViewsComplete() {
   browser_frame_view_->OnBrowserViewInitViewsComplete();
 }
 
-bool BrowserFrame::ShouldUseTheme() const {
-  // Browser windows are always themed (including popups).
-  if (!web_app::AppBrowserController::IsForWebAppBrowser(
-          browser_view_->browser())) {
-    return true;
-  }
-
-  // The system GTK theme should always be respected if the user has opted to
-  // use it.
-  if (IsUsingGtkTheme(browser_view_->browser()->profile()))
-    return true;
-
-  // Hosted apps on non-GTK use default colors.
-  return false;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserFrame, views::Widget overrides:
 
@@ -189,10 +189,12 @@ views::internal::RootView* BrowserFrame::CreateRootView() {
   return root_view_;
 }
 
-views::NonClientFrameView* BrowserFrame::CreateNonClientFrameView() {
-  browser_frame_view_ =
+std::unique_ptr<views::NonClientFrameView>
+BrowserFrame::CreateNonClientFrameView() {
+  auto browser_frame_view =
       chrome::CreateBrowserNonClientFrameView(this, browser_view_);
-  return browser_frame_view_;
+  browser_frame_view_ = browser_frame_view.get();
+  return browser_frame_view;
 }
 
 bool BrowserFrame::GetAccelerator(int command_id,
@@ -202,7 +204,7 @@ bool BrowserFrame::GetAccelerator(int command_id,
 
 const ui::ThemeProvider* BrowserFrame::GetThemeProvider() const {
   Browser* browser = browser_view_->browser();
-  if (browser->app_controller())
+  if (browser->app_controller() && !IsUsingGtkTheme(browser->profile()))
     return browser->app_controller()->GetThemeProvider();
   return &ThemeService::GetThemeProviderForProfile(browser->profile());
 }
@@ -218,10 +220,17 @@ const ui::NativeTheme* BrowserFrame::GetNativeTheme() const {
 
 void BrowserFrame::OnNativeWidgetWorkspaceChanged() {
   chrome::SaveWindowWorkspace(browser_view_->browser(), GetWorkspace());
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  // If the window was sent to a different workspace, prioritize it if
+  // it was sent to the current workspace and deprioritize it
+  // otherwise.  This is done by MoveBrowsersInWorkspaceToFront()
+  // which reorders the browsers such that the ones in the current
+  // workspace appear before ones in other workspaces.
   auto workspace = display::Screen::GetScreen()->GetCurrentWorkspace();
-  BrowserList::MoveBrowsersInWorkspaceToFront(workspace.empty() ? GetWorkspace()
-                                                                : workspace);
+  if (!workspace.empty())
+    BrowserList::MoveBrowsersInWorkspaceToFront(workspace);
 #endif
   Widget::OnNativeWidgetWorkspaceChanged();
 }
@@ -259,7 +268,7 @@ void BrowserFrame::ShowContextMenuForViewImpl(views::View* source,
 }
 
 ui::MenuModel* BrowserFrame::GetSystemMenuModel() {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   if (user_manager::UserManager::IsInitialized() &&
       user_manager::UserManager::Get()->GetLoggedInUsers().size() > 1) {
     // In Multi user mode, the number of users as well as the order of users
@@ -267,6 +276,17 @@ ui::MenuModel* BrowserFrame::GetSystemMenuModel() {
     // model contains the user information, it must get updated to show any
     // changes happened since the last invocation.
     menu_model_builder_.reset();
+  }
+  if (ash::features::IsBentoEnabled()) {
+    auto* desks_helper = ash::DesksHelper::Get();
+    int current_num_desks =
+        desks_helper ? desks_helper->GetNumberOfDesks() : -1;
+    if (current_num_desks != num_desks_) {
+      // Since the number of desks can change, the model must update to show any
+      // changes happened since the last invocation.
+      menu_model_builder_.reset();
+      num_desks_ = current_num_desks;
+    }
   }
 #endif
   if (!menu_model_builder_.get()) {
@@ -281,10 +301,8 @@ void BrowserFrame::SetTabDragKind(TabDragKind tab_drag_kind) {
   if (tab_drag_kind_ == tab_drag_kind)
     return;
 
-  bool was_dragging_window = tab_drag_kind_ == TabDragKind::kAllTabs;
-  bool is_dragging_window = tab_drag_kind == TabDragKind::kAllTabs;
-  if (was_dragging_window != is_dragging_window && native_browser_frame_)
-    native_browser_frame_->TabDraggingStatusChanged(is_dragging_window);
+  if (native_browser_frame_)
+    native_browser_frame_->TabDraggingKindChanged(tab_drag_kind);
 
   bool was_dragging_any = tab_drag_kind_ != TabDragKind::kNone;
   bool is_dragging_any = tab_drag_kind != TabDragKind::kNone;
@@ -300,6 +318,16 @@ void BrowserFrame::OnMenuClosed() {
 
 void BrowserFrame::OnTouchUiChanged() {
   client_view()->InvalidateLayout();
-  non_client_view()->InvalidateLayout();
+
+  // For standard browser frame, if we do not invalidate the NonClientFrameView
+  // the client window bounds will not be properly updated which could cause
+  // visual artifacts. See crbug.com/1035959 for details.
+  if (non_client_view()->frame_view()) {
+    // Note that invalidating a view invalidates all of its ancestors, so it is
+    // not necessary to also invalidate the NonClientView or RootView here.
+    non_client_view()->frame_view()->InvalidateLayout();
+  } else {
+    non_client_view()->InvalidateLayout();
+  }
   GetRootView()->Layout();
 }

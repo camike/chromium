@@ -38,6 +38,9 @@ public interface Tab extends TabLifecycle {
      */
     void removeObserver(TabObserver observer);
 
+    /** Returns if the given {@link TabObserver} is present. */
+    boolean hasObserver(TabObserver observer);
+
     /**
      * @return {@link UserDataHost} that manages {@link UserData} objects attached to.
      *         This is used for managing Tab-specific attributes/objects without Tab
@@ -65,6 +68,17 @@ public interface Tab extends TabLifecycle {
     WindowAndroid getWindowAndroid();
 
     /**
+     * Update the attachment state to Window(Activity).
+     * @param window A new {@link WindowAndroid} to attach the tab to. If {@code null},
+     *        the tab is being detached. See {@link ReparentingTask#detach()} for details.
+     * @param tabDelegateFactory The new delegate factory this tab should be using. Can be
+     *        {@code null} even when {@code window} is not, meaning we simply want to swap out
+     *        {@link WindowAndroid} for this tab and keep using the current delegate factory.
+     */
+    void updateAttachment(
+            @Nullable WindowAndroid window, @Nullable TabDelegateFactory tabDelegateFactory);
+
+    /**
      * @return Content view used for rendered web contents. Can be null
      *    if web contents is null.
      */
@@ -77,14 +91,15 @@ public interface Tab extends TabLifecycle {
     View getView();
 
     /**
+     * @return The {@link TabViewManager} that is responsible for managing custom {@link View}s
+     * shown on top of content in this Tab.
+     */
+    TabViewManager getTabViewManager();
+
+    /**
      * @return The id representing this tab.
      */
     int getId();
-
-    /**
-     * @return The id of the tab that caused this tab to be opened.
-     */
-    int getParentId();
 
     /**
      * @return The URL that is loaded in the current tab. This may not be the same as
@@ -96,6 +111,11 @@ public interface Tab extends TabLifecycle {
     String getUrlString();
 
     /**
+     * @return Parameters that should be used for a lazily loaded Tab.  May be null.
+     */
+    LoadUrlParams getPendingLoadParams();
+
+    /**
      * @return The URL that is loaded in the current tab. This may not be the same as
      *         the last committed URL if a new navigation is in progress.
      */
@@ -105,7 +125,7 @@ public interface Tab extends TabLifecycle {
      * @return Original url of the tab without any Chrome feature modifications applied
      *         (e.g. reader mode).
      */
-    String getOriginalUrl();
+    GURL getOriginalUrl();
 
     /**
      * @return The tab title.
@@ -125,6 +145,12 @@ public interface Tab extends TabLifecycle {
     boolean isNativePage();
 
     /**
+     * @return Whether a custom view shown through {@link TabViewManager} is being displayed instead
+     * of the current WebContents.
+     */
+    boolean isShowingCustomView();
+
+    /**
      * Replaces the current NativePage with a empty stand-in for a NativePage. This can be used
      * to reduce memory pressure.
      */
@@ -139,18 +165,14 @@ public interface Tab extends TabLifecycle {
     int getLaunchType();
 
     /**
-     * @return The reason the Tab was launched. This remains unchanged, while {@link
-     *         #getLaunchType()} can change over time.
+     * @return The theme color for this tab.
      */
-    @Nullable
-    @TabLaunchType
-    Integer getLaunchTypeAtInitialTabCreation();
+    int getThemeColor();
 
     /**
-     * @return the last time this tab was shown or the time of its initialization if it wasn't yet
-     *         shown.
+     * @return {@code true} if the theme color from contents is valid and can be used for theming.
      */
-    long getTimestampMillis();
+    boolean isThemingAllowed();
 
     /**
      * @return {@code true} if the Tab is in incognito mode.
@@ -248,4 +270,39 @@ public interface Tab extends TabLifecycle {
      * Goes to the navigation entry after the current one.
      */
     void goForward();
+
+    /**
+     * Set whether the TabState representing this Tab has been updated.
+     * This method will ultimately be deprecated when the migration
+     * to CriticalPersistedTabData is complete.
+     * @param isDirty Whether the Tab's state has changed.
+     */
+    void setIsTabStateDirty(boolean isTabStateDirty);
+
+    /**
+     * If set to true, any future navigations in the tab automatically get
+     * PageTransition.FROM_API_2 applied.
+     */
+    void setAddApi2TransitionToFutureNavigations(boolean shouldAdd);
+    boolean getAddApi2TransitionToFutureNavigations();
+
+    /**
+     * If true, all future navigations are hidden. See |HistoryTabHelper::hide_navigations_|
+     * for the specifics on this.
+     */
+    public void setHideFutureNavigations(boolean hide);
+    public boolean getHideFutureNavigations();
+
+    /**
+     * If true, new notification requests are blocked.
+     */
+    public void setShouldBlockNewNotificationRequests(boolean value);
+    public boolean getShouldBlockNewNotificationRequests();
+
+    /**
+     * Set whether {@link Tab} metadata (specifically all {@link PersistedTabData})
+     * will be saved. Not all Tabs need to be persisted across restarts.
+     * The default value when a Tab is initialized is false.
+     */
+    void setIsTabSaveEnabled(boolean isSaveEnabled);
 }

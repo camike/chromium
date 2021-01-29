@@ -5,26 +5,20 @@
 
 #import "ios/chrome/browser/ui/tabs/tab_view.h"
 
-#include "base/i18n/rtl.h"
-#include "base/logging.h"
+#import <MaterialComponents/MaterialActivityIndicator.h>
 
-#include "base/feature_list.h"
+#include "base/i18n/rtl.h"
 #include "base/ios/ios_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "ios/chrome/browser/drag_and_drop/drag_and_drop_flag.h"
-#include "ios/chrome/browser/drag_and_drop/drop_and_navigate_delegate.h"
-#include "ios/chrome/browser/drag_and_drop/drop_and_navigate_interaction.h"
 #include "ios/chrome/browser/system_flags.h"
 #import "ios/chrome/browser/ui/elements/fade_truncating_label.h"
 #import "ios/chrome/browser/ui/image_util/image_util.h"
-#include "ios/chrome/browser/ui/ui_feature_flags.h"
 #include "ios/chrome/browser/ui/util/rtl_geometry.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui/elements/highlight_button.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
-#import "ios/third_party/material_components_ios/src/components/ActivityIndicator/src/MaterialActivityIndicator.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -64,12 +58,7 @@ UIImage* DefaultFaviconImage() {
 }
 }
 
-#if defined(__IPHONE_13_4)
-@interface TabView (PointerInteraction) <UIPointerInteractionDelegate>
-@end
-#endif  // defined(__IPHONE_13_4)
-
-@interface TabView ()<DropAndNavigateDelegate> {
+@interface TabView () <UIPointerInteractionDelegate> {
   __weak id<TabViewDelegate> _delegate;
 
   // Close button for this tab.
@@ -93,12 +82,8 @@ UIImage* DefaultFaviconImage() {
 
   MDCActivityIndicator* _activityIndicator;
 
-  API_AVAILABLE(ios(11.0)) DropAndNavigateInteraction* _dropInteraction;
-
-#if defined(__IPHONE_13_4)
   // Adds hover interaction to background tabs.
   API_AVAILABLE(ios(13.4)) UIPointerInteraction* _pointerInteraction;
-#endif  // defined(__IPHONE_13_4)
 }
 @end
 
@@ -138,12 +123,6 @@ UIImage* DefaultFaviconImage() {
     [self addTarget:self
                   action:@selector(tabWasTapped)
         forControlEvents:UIControlEventTouchUpInside];
-
-    if (DragAndDropIsEnabled()) {
-      _dropInteraction =
-          [[DropAndNavigateInteraction alloc] initWithDelegate:self];
-      [self addInteraction:_dropInteraction];
-    }
   }
   return self;
 }
@@ -208,6 +187,7 @@ UIImage* DefaultFaviconImage() {
   [_activityIndicator startAnimating];
   [_activityIndicator setHidden:NO];
   [_faviconView setHidden:YES];
+  [_faviconView setImage:DefaultFaviconImage()];
 }
 
 - (void)stopProgressSpinner {
@@ -309,13 +289,9 @@ UIImage* DefaultFaviconImage() {
                    action:@selector(closeButtonPressed)
          forControlEvents:UIControlEventTouchUpInside];
 
-#if defined(__IPHONE_13_4)
   if (@available(iOS 13.4, *)) {
-    if (base::FeatureList::IsEnabled(kPointerSupport)) {
       _closeButton.pointerInteractionEnabled = YES;
-    }
   }
-#endif  // defined(__IPHONE_13_4)
 
   [self addSubview:_closeButton];
 
@@ -396,10 +372,7 @@ UIImage* DefaultFaviconImage() {
       StretchableImageFromUIImage(resolvedImage, leftInset, 0);
   _backgroundImageView.image = backgroundImage;
 
-#if defined(__IPHONE_13_4)
   if (@available(iOS 13.4, *)) {
-    if (!base::FeatureList::IsEnabled(kPointerSupport))
-      return;
     if (selected) {
       if (_pointerInteraction)
         [self removeInteraction:_pointerInteraction];
@@ -410,7 +383,6 @@ UIImage* DefaultFaviconImage() {
       [self addInteraction:_pointerInteraction];
     }
   }
-#endif  // defined(__IPHONE_13_4)
 
   // Style the close button tint color.
   NSString* closeButtonColorName;
@@ -498,14 +470,8 @@ UIImage* DefaultFaviconImage() {
   return path;
 }
 
-#pragma mark - DropAndNavigateDelegate
-
-- (void)URLWasDropped:(GURL const&)url {
-  [_delegate tabView:self receivedDroppedURL:url];
-}
-
 #pragma mark UIPointerInteractionDelegate
-#if defined(__IPHONE_13_4)
+
 - (UIPointerRegion*)pointerInteraction:(UIPointerInteraction*)interaction
                       regionForRequest:(UIPointerRegionRequest*)request
                          defaultRegion:(UIPointerRegion*)defaultRegion
@@ -516,6 +482,17 @@ UIImage* DefaultFaviconImage() {
 - (UIPointerStyle*)pointerInteraction:(UIPointerInteraction*)interaction
                        styleForRegion:(UIPointerRegion*)region
     API_AVAILABLE(ios(13.4)) {
+  // Hovering over this tab view and closing the tab simultaneously could result
+  // in this tab view having been removed from the window at the beginning of
+  // this method. If this tab view has already been removed from the view
+  // hierarchy, a nil pointer style should be returned so that the pointer
+  // remains with a default style. Attempting to construct a UITargetedPreview
+  // with a tab view that has already been removed from the hierarchy will
+  // result in a crash with an exception stating that the view has no window.
+  if (!_backgroundImageView.window) {
+    return nil;
+  }
+
   UIPreviewParameters* parameters = [[UIPreviewParameters alloc] init];
   parameters.visiblePath = [self borderPath];
 
@@ -529,12 +506,11 @@ UIImage* DefaultFaviconImage() {
   effect.prefersShadow = NO;
   return [UIPointerStyle styleWithEffect:effect shape:nil];
 }
-#endif  // defined(__IPHONE_13_4)
 
 #pragma mark - Touch events
 
 - (void)closeButtonPressed {
-  [_delegate tabViewcloseButtonPressed:self];
+  [_delegate tabViewCloseButtonPressed:self];
 }
 
 - (void)tabWasTapped {

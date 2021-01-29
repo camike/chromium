@@ -22,8 +22,7 @@
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task/post_task.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -31,6 +30,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "components/crash/core/common/crash_key.h"
 #include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -184,10 +184,10 @@ class CustomThreadWatcher : public ThreadWatcher {
             quit_closure.Run();
         },
         base::Unretained(this), quit_closure, expected_state);
-    base::CancelableClosure timeout_closure(base::BindRepeating(
-        [](base::RepeatingClosure quit_closure) {
+    base::CancelableOnceClosure timeout_closure(base::BindOnce(
+        [](base::OnceClosure quit_closure) {
           ADD_FAILURE() << "WaitForWaitStateChange timed out";
-          quit_closure.Run();
+          std::move(quit_closure).Run();
         },
         quit_closure));
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
@@ -237,8 +237,8 @@ class CustomThreadWatcher : public ThreadWatcher {
         },
         base::Unretained(this), quit_closure, expected_state,
         base::Unretained(&exit_state));
-    base::CancelableClosure timeout_closure(base::BindRepeating(
-        [](base::RepeatingClosure quit_closure) { quit_closure.Run(); },
+    base::CancelableOnceClosure timeout_closure(base::BindOnce(
+        [](base::OnceClosure quit_closure) { std::move(quit_closure).Run(); },
         quit_closure));
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, timeout_closure.callback(),
@@ -270,8 +270,8 @@ class CustomThreadWatcher : public ThreadWatcher {
         },
         base::Unretained(this), quit_closure, expected_state,
         base::Unretained(&exit_state));
-    base::CancelableClosure timeout_closure(base::BindRepeating(
-        [](base::RepeatingClosure quit_closure) { quit_closure.Run(); },
+    base::CancelableOnceClosure timeout_closure(base::BindOnce(
+        [](base::OnceClosure quit_closure) { std::move(quit_closure).Run(); },
         quit_closure));
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, timeout_closure.callback(),
@@ -619,8 +619,8 @@ class ThreadWatcherTestThreadNotResponding
     // a very long time by posting a task on watched thread that keeps it busy.
     // It is safe to use base::Unretained because test is waiting for the method
     // to finish.
-    base::PostTask(
-        FROM_HERE, {BrowserThread::IO},
+    content::GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&CustomThreadWatcher::VeryLongMethod,
                        base::Unretained(io_watcher_), kUnresponsiveTime * 10));
 
@@ -693,8 +693,8 @@ class ThreadWatcherTestMultipleThreadsNotResponding
     // a very long time by posting a task on watched thread that keeps it busy.
     // It is safe to use base::Unretained because test is waiting for the method
     // to finish.
-    base::PostTask(
-        FROM_HERE, {BrowserThread::IO},
+    content::GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&CustomThreadWatcher::VeryLongMethod,
                        base::Unretained(io_watcher_), kUnresponsiveTime * 10));
 
@@ -796,10 +796,10 @@ TEST_F(ThreadWatcherListTest, Restart) {
   ThreadWatcherList::StopWatchingAll();
   {
     base::RunLoop run_loop;
-    base::PostDelayedTask(FROM_HERE, {BrowserThread::UI},
-                          run_loop.QuitWhenIdleClosure(),
-                          base::TimeDelta::FromSeconds(
-                              ThreadWatcherList::g_initialize_delay_seconds));
+    content::GetUIThreadTaskRunner({})->PostDelayedTask(
+        FROM_HERE, run_loop.QuitWhenIdleClosure(),
+        base::TimeDelta::FromSeconds(
+            ThreadWatcherList::g_initialize_delay_seconds));
     run_loop.Run();
   }
 
@@ -810,8 +810,8 @@ TEST_F(ThreadWatcherListTest, Restart) {
   ThreadWatcherList::StartWatchingAll(*base::CommandLine::ForCurrentProcess());
   {
     base::RunLoop run_loop;
-    base::PostDelayedTask(
-        FROM_HERE, {BrowserThread::UI}, run_loop.QuitWhenIdleClosure(),
+    content::GetUIThreadTaskRunner({})->PostDelayedTask(
+        FROM_HERE, run_loop.QuitWhenIdleClosure(),
         base::TimeDelta::FromSeconds(
             ThreadWatcherList::g_initialize_delay_seconds + 1));
     run_loop.Run();
@@ -824,10 +824,10 @@ TEST_F(ThreadWatcherListTest, Restart) {
   ThreadWatcherList::StopWatchingAll();
   {
     base::RunLoop run_loop;
-    base::PostDelayedTask(FROM_HERE, {BrowserThread::UI},
-                          run_loop.QuitWhenIdleClosure(),
-                          base::TimeDelta::FromSeconds(
-                              ThreadWatcherList::g_initialize_delay_seconds));
+    content::GetUIThreadTaskRunner({})->PostDelayedTask(
+        FROM_HERE, run_loop.QuitWhenIdleClosure(),
+        base::TimeDelta::FromSeconds(
+            ThreadWatcherList::g_initialize_delay_seconds));
     run_loop.Run();
   }
 

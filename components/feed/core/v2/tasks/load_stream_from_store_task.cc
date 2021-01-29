@@ -7,12 +7,14 @@
 #include <algorithm>
 #include <utility>
 
-#include "base/time/clock.h"
+#include "base/time/time.h"
 #include "components/feed/core/proto/v2/store.pb.h"
+#include "components/feed/core/v2/config.h"
 #include "components/feed/core/v2/feed_store.h"
+#include "components/feed/core/v2/feed_stream.h"
 #include "components/feed/core/v2/proto_util.h"
+#include "components/feed/core/v2/protocol_translator.h"
 #include "components/feed/core/v2/scheduling.h"
-#include "components/feed/core/v2/stream_model_update_request.h"
 #include "components/feed/core/v2/types.h"
 
 namespace feed {
@@ -26,13 +28,11 @@ LoadStreamFromStoreTask::Result& LoadStreamFromStoreTask::Result::operator=(
 LoadStreamFromStoreTask::LoadStreamFromStoreTask(
     LoadType load_type,
     FeedStore* store,
-    const base::Clock* clock,
-    UserClass user_class,
+    bool missed_last_refresh,
     base::OnceCallback<void(Result)> callback)
     : load_type_(load_type),
       store_(store),
-      clock_(clock),
-      user_class_(user_class),
+      missed_last_refresh_(missed_last_refresh),
       result_callback_(std::move(callback)),
       update_request_(std::make_unique<StreamModelUpdateRequest>()) {}
 
@@ -49,12 +49,9 @@ void LoadStreamFromStoreTask::LoadStreamDone(
     Complete(LoadStreamStatus::kFailedWithStoreError);
     return;
   }
+  pending_actions_ = std::move(result.pending_actions);
 
-  if (!result.stream_data.consistency_token().empty()) {
-    consistency_token_ = result.stream_data.consistency_token();
-  }
-
-  if (load_type_ == LoadType::kConsistencyTokenOnly) {
+  if (load_type_ == LoadType::kPendingActionsOnly) {
     Complete(LoadStreamStatus::kLoadedFromStore);
     return;
   }
@@ -64,18 +61,20 @@ void LoadStreamFromStoreTask::LoadStreamDone(
     return;
   }
   if (!ignore_staleness_) {
-    const base::TimeDelta content_age =
-        clock_->Now() - feedstore::GetLastAddedTime(result.stream_data);
-    if (content_age < base::TimeDelta()) {
-      Complete(LoadStreamStatus::kDataInStoreIsStaleTimestampInFuture);
-      return;
-    } else if (ShouldWaitForNewContent(user_class_, true, content_age)) {
-      Complete(LoadStreamStatus::kDataInStoreIsStale);
+    content_age_ =
+        base::Time::Now() - feedstore::GetLastAddedTime(result.stream_data);
+    if (content_age_ > GetFeedConfig().content_expiration_threshold) {
+      Complete(LoadStreamStatus::kDataInStoreIsExpired);
       return;
     }
+    if (content_age_ < base::TimeDelta()) {
+      stale_reason_ = LoadStreamStatus::kDataInStoreIsStaleTimestampInFuture;
+    } else if (ShouldWaitForNewContent(true, content_age_)) {
+      stale_reason_ = LoadStreamStatus::kDataInStoreIsStale;
+    } else if (missed_last_refresh_) {
+      stale_reason_ = LoadStreamStatus::kDataInStoreStaleMissedLastRefresh;
+    }
   }
-
-  // TODO(harringtond): Add other failure cases?
 
   std::vector<ContentId> referenced_content_ids;
   for (const feedstore::StreamStructureSet& structure_set :
@@ -128,13 +127,19 @@ void LoadStreamFromStoreTask::LoadContentDone(
 
 void LoadStreamFromStoreTask::Complete(LoadStreamStatus status) {
   Result task_result;
-  task_result.status = status;
+
+  task_result.pending_actions = std::move(pending_actions_);
   if (status == LoadStreamStatus::kLoadedFromStore &&
       load_type_ == LoadType::kFullLoad) {
     task_result.update_request = std::move(update_request_);
-  } else {
-    task_result.consistency_token = consistency_token_;
   }
+  if (status == LoadStreamStatus::kLoadedFromStore &&
+      stale_reason_ != LoadStreamStatus::kNoStatus) {
+    task_result.status = stale_reason_;
+  } else {
+    task_result.status = status;
+  }
+  task_result.content_age = content_age_;
   std::move(result_callback_).Run(std::move(task_result));
   TaskComplete();
 }

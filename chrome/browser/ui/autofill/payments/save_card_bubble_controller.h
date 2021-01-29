@@ -13,15 +13,12 @@
 #include "components/autofill/core/browser/autofill_client.h"
 #include "components/autofill/core/browser/payments/legal_message_line.h"
 #include "components/autofill/core/browser/sync_utils.h"
+#include "components/autofill/core/browser/ui/payments/payments_bubble_closed_reasons.h"
 #include "components/signin/public/identity_manager/account_info.h"
 #include "content/public/browser/web_contents.h"
 #include "url/gurl.h"
 
 class Profile;
-
-namespace signin_metrics {
-enum class AccessPoint;
-}
 
 namespace autofill {
 
@@ -78,14 +75,7 @@ class SaveCardBubbleController {
   // allowing the user to provide expiration date.
   virtual bool ShouldRequestExpirationDateFromUser() const = 0;
 
-  // Returns whether or not a sign in / sync promo needs to be shown.
-  virtual bool ShouldShowSignInPromo() const = 0;
-
   // Interaction.
-  // OnSyncPromoAccepted is called when the Dice Sign-in promo is clicked.
-  virtual void OnSyncPromoAccepted(const AccountInfo& account,
-                                   signin_metrics::AccessPoint access_point,
-                                   bool is_default_promo_account) = 0;
   // OnSaveButton takes in a struct representing the cardholder name,
   // expiration date month and expiration date year confirmed/entered by the
   // user if they were requested, or struct with empty strings otherwise.
@@ -94,7 +84,7 @@ class SaveCardBubbleController {
   virtual void OnCancelButton() = 0;
   virtual void OnLegalMessageLinkClicked(const GURL& url) = 0;
   virtual void OnManageCardsClicked() = 0;
-  virtual void OnBubbleClosed() = 0;
+  virtual void OnBubbleClosed(PaymentsBubbleClosedReason closed_reason) = 0;
 
   // State.
 

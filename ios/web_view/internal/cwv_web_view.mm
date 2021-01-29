@@ -17,8 +17,10 @@
 #import "components/autofill/ios/browser/autofill_agent.h"
 #import "components/autofill/ios/browser/js_autofill_manager.h"
 #import "components/autofill/ios/browser/js_suggestion_manager.h"
+#include "components/autofill/ios/form_util/unique_id_data_tab_helper.h"
 #include "components/language/ios/browser/ios_language_detection_tab_helper.h"
 #include "components/password_manager/core/browser/password_manager.h"
+#import "components/password_manager/ios/shared_password_controller.h"
 #include "components/url_formatter/elide_url.h"
 #include "google_apis/google_api_keys.h"
 #import "ios/web/public/deprecated/crw_js_injection_receiver.h"
@@ -50,7 +52,6 @@
 #import "ios/web_view/internal/cwv_ssl_status_internal.h"
 #import "ios/web_view/internal/cwv_web_view_configuration_internal.h"
 #import "ios/web_view/internal/language/web_view_url_language_histogram_factory.h"
-#import "ios/web_view/internal/passwords/cwv_password_controller.h"
 #import "ios/web_view/internal/passwords/web_view_password_manager_client.h"
 #import "ios/web_view/internal/passwords/web_view_password_manager_driver.h"
 #import "ios/web_view/internal/translate/cwv_translation_controller_internal.h"
@@ -122,10 +123,9 @@ WEB_STATE_USER_DATA_KEY_IMPL(WebViewHolder)
   std::unique_ptr<ios_web_view::WebViewJavaScriptDialogPresenter>
       _javaScriptDialogPresenter;
   // Stores the script command callbacks with subscriptions.
-  std::unordered_map<
-      std::string,
-      std::pair<web::WebState::ScriptCommandCallback,
-                std::unique_ptr<web::WebState::ScriptCommandSubscription>>>
+  std::unordered_map<std::string,
+                     std::pair<web::WebState::ScriptCommandCallback,
+                               base::CallbackListSubscription>>
       _scriptCommandCallbacks;
   CRWSessionStorage* _cachedSessionStorage;
 }
@@ -523,16 +523,21 @@ BOOL gChromeLongPressAndForceTouchHandlingEnabled = YES;
 }
 
 - (void)webState:(web::WebState*)webState
-    contextMenuConfigurationForLinkWithURL:(const GURL&)linkURL
-                         completionHandler:
-                             (void (^)(UIContextMenuConfiguration*))
-                                 completionHandler API_AVAILABLE(ios(13.0)) {
+    contextMenuConfigurationForParams:(const web::ContextMenuParams&)params
+                      previewProvider:
+                          (UIContextMenuContentPreviewProvider)previewProvider
+                    completionHandler:
+                        (void (^)(UIContextMenuConfiguration*))completionHandler
+    API_AVAILABLE(ios(13.0)) {
   SEL selector = @selector(webView:
       contextMenuConfigurationForLinkWithURL:completionHandler:);
   if ([_UIDelegate respondsToSelector:selector]) {
     [_UIDelegate webView:self
-        contextMenuConfigurationForLinkWithURL:net::NSURLWithGURL(linkURL)
+        contextMenuConfigurationForLinkWithURL:net::NSURLWithGURL(
+                                                   params.link_url)
                              completionHandler:completionHandler];
+  } else {
+    completionHandler(nil);
   }
 }
 
@@ -641,20 +646,14 @@ BOOL gChromeLongPressAndForceTouchHandlingEnabled = YES;
 }
 
 - (CWVAutofillController*)newAutofillController {
+  UniqueIDDataTabHelper::CreateForWebState(_webState.get());
+
   auto autofillClient = autofill::WebViewAutofillClientIOS::Create(
       _webState.get(), _configuration.browserState);
   AutofillAgent* autofillAgent = [[AutofillAgent alloc]
       initWithPrefService:_configuration.browserState->GetPrefs()
                  webState:_webState.get()];
-  JsAutofillManager* JSAutofillManager =
-      base::mac::ObjCCastStrict<JsAutofillManager>(
-          [_webState->GetJSInjectionReceiver()
-              instanceOfClass:[JsAutofillManager class]]);
-  JsSuggestionManager* JSSuggestionManager =
-      base::mac::ObjCCastStrict<JsSuggestionManager>(
-          [_webState->GetJSInjectionReceiver()
-              instanceOfClass:[JsSuggestionManager class]]);
-  [JSSuggestionManager setWebFramesManager:_webState->GetWebFramesManager()];
+  JsAutofillManager* JSAutofillManager = [[JsAutofillManager alloc] init];
 
   auto passwordManagerClient =
       ios_web_view::WebViewPasswordManagerClient::Create(
@@ -662,22 +661,30 @@ BOOL gChromeLongPressAndForceTouchHandlingEnabled = YES;
   auto passwordManager = std::make_unique<password_manager::PasswordManager>(
       passwordManagerClient.get());
   auto passwordManagerDriver =
-      std::make_unique<ios_web_view::WebViewPasswordManagerDriver>();
-  CWVPasswordController* passwordController = [[CWVPasswordController alloc]
-           initWithWebState:_webState.get()
-            passwordManager:std::move(passwordManager)
-      passwordManagerClient:std::move(passwordManagerClient)
-      passwordManagerDriver:std::move(passwordManagerDriver)];
+      std::make_unique<ios_web_view::WebViewPasswordManagerDriver>(
+          passwordManager.get());
+
+  PasswordFormHelper* formHelper =
+      [[PasswordFormHelper alloc] initWithWebState:_webState.get()];
+  PasswordSuggestionHelper* suggestionHelper =
+      [[PasswordSuggestionHelper alloc] init];
+  SharedPasswordController* passwordController =
+      [[SharedPasswordController alloc] initWithWebState:_webState.get()
+                                                 manager:passwordManager.get()
+                                              formHelper:formHelper
+                                        suggestionHelper:suggestionHelper];
 
   return [[CWVAutofillController alloc]
-         initWithWebState:_webState.get()
-           autofillClient:std::move(autofillClient)
-            autofillAgent:autofillAgent
-        JSAutofillManager:JSAutofillManager
-      JSSuggestionManager:JSSuggestionManager
-       passwordController:passwordController
-        applicationLocale:ios_web_view::ApplicationContext::GetInstance()
-                              ->GetApplicationLocale()];
+           initWithWebState:_webState.get()
+             autofillClient:std::move(autofillClient)
+              autofillAgent:autofillAgent
+          JSAutofillManager:JSAutofillManager
+            passwordManager:std::move(passwordManager)
+      passwordManagerClient:std::move(passwordManagerClient)
+      passwordManagerDriver:std::move(passwordManagerDriver)
+         passwordController:passwordController
+          applicationLocale:ios_web_view::ApplicationContext::GetInstance()
+                                ->GetApplicationLocale()];
 }
 
 #pragma mark - Preserving and Restoring State

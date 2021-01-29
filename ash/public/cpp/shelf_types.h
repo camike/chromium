@@ -39,7 +39,14 @@ enum class HotseatState {
 
   // Hotseat is shown above the shelf.
   kExtended,
+
+  // No value,
+  kNone
 };
+
+// Defines the density of hotseat. Hotseat is "denser" if it can accommodate
+// more shelf buttons without scrolling for the given available space.
+enum class HotseatDensity { kNormal, kSemiDense, kDense };
 
 enum class ShelfAutoHideBehavior {
   kAlways,        // Always auto-hide.
@@ -146,10 +153,6 @@ enum ShelfItemType {
   // The browser shortcut button, the browser may be running or not.
   TYPE_BROWSER_SHORTCUT,
 
-  // Represents the lacros "linux-chrome" browser. The browser may or may not
-  // be running.
-  TYPE_LACROS_BROWSER,
-
   // Represents an unpinned running app window. Supports these app types:
   // - Extension "V1" (legacy packaged and hosted) apps,
   // - Extension "V2" (platform) apps,
@@ -182,6 +185,16 @@ enum ShelfItemStatus {
   STATUS_RUNNING,
   // A shelf item that needs user's attention.
   STATUS_ATTENTION,
+};
+
+// Represents the app status in the shelf or app_list.
+enum AppStatus {
+  // The app is ready.
+  kReady,
+  // The app is blocked.
+  kBlocked,
+  // The app is paused.
+  kPaused,
 };
 
 // A unique shelf item id composed of an |app_id| and a |launch_id|.

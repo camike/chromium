@@ -7,26 +7,32 @@
 
 #include "components/query_tiles/internal/tile_group.h"
 #include "components/query_tiles/proto/tile.pb.h"
+#include "components/query_tiles/proto/tile_response.pb.h"
 #include "components/query_tiles/tile.h"
 
-namespace upboarding {
+namespace query_tiles {
+
+using ResponseGroupProto = query_tiles::proto::ServerResponse;
+using ResponseTileProto = query_tiles::proto::TileInfo;
+using TileProto = query_tiles::proto::Tile;
+using TileGroupProto = query_tiles::proto::TileGroup;
 
 // Converts a Tile to proto.
-void TileToProto(upboarding::Tile* entry,
-                 upboarding::query_tiles::proto::Tile* proto);
+void TileToProto(Tile* entry, TileProto* proto);
 
 // Converts a proto to Tile.
-void TileFromProto(upboarding::query_tiles::proto::Tile* proto,
-                   upboarding::Tile* entry);
+void TileFromProto(TileProto* proto, Tile* entry);
 
 // Converts a TileGroup to proto.
-void TileGroupToProto(TileGroup* group,
-                      upboarding::query_tiles::proto::TileGroup* proto);
+void TileGroupToProto(TileGroup* group, TileGroupProto* proto);
 
 // Converts a proto to TileGroup.
-void TileGroupFromProto(upboarding::query_tiles::proto::TileGroup* proto,
-                        TileGroup* group);
+void TileGroupFromProto(TileGroupProto* proto, TileGroup* group);
 
-}  // namespace upboarding
+// Converts ServerResponseProto to TileGroup.
+void TileGroupFromResponse(const ResponseGroupProto& response,
+                           TileGroup* tile_group);
+
+}  // namespace query_tiles
 
 #endif  // COMPONENTS_QUERY_TILES_INTERNAL_PROTO_CONVERSION_H_

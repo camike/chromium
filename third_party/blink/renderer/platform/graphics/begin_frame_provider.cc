@@ -11,6 +11,7 @@
 #include "services/viz/public/mojom/compositing/frame_timing_details.mojom-blink.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/renderer/platform/mojo_binding_context.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "ui/gfx/mojom/presentation_feedback.mojom-blink.h"
 
@@ -98,7 +99,7 @@ void BeginFrameProvider::RequestBeginFrame() {
 
 void BeginFrameProvider::OnBeginFrame(
     const viz::BeginFrameArgs& args,
-    WTF::HashMap<uint32_t, ::viz::mojom::blink::FrameTimingDetailsPtr>) {
+    const WTF::HashMap<uint32_t, viz::FrameTimingDetails>&) {
   TRACE_EVENT_WITH_FLOW0("blink", "BeginFrameProvider::OnBeginFrame",
                          TRACE_ID_GLOBAL(args.trace_id),
                          TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT);
@@ -124,7 +125,7 @@ void BeginFrameProvider::FinishBeginFrame(const viz::BeginFrameArgs& args) {
   compositor_frame_sink_->DidNotProduceFrame(viz::BeginFrameAck(args, false));
 }
 
-void BeginFrameProvider::Trace(Visitor* visitor) {
+void BeginFrameProvider::Trace(Visitor* visitor) const {
   visitor->Trace(cfs_receiver_);
   visitor->Trace(efs_receiver_);
   visitor->Trace(compositor_frame_sink_);

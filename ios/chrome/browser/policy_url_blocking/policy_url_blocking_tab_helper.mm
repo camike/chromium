@@ -4,11 +4,10 @@
 
 #import "ios/chrome/browser/policy_url_blocking/policy_url_blocking_tab_helper.h"
 
-#include "components/policy/core/browser/url_blacklist_manager.h"
+#include "components/policy/core/browser/url_blocklist_manager.h"
 #import "ios/chrome/browser/policy_url_blocking/policy_url_blocking_service.h"
-#import "ios/net/protocol_handler_util.h"
+#import "ios/chrome/browser/policy_url_blocking/policy_url_blocking_util.h"
 #import "net/base/mac/url_conversions.h"
-#include "net/base/net_errors.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -29,11 +28,9 @@ PolicyUrlBlockingTabHelper::ShouldAllowRequest(
       PolicyBlocklistServiceFactory::GetForBrowserState(
           web_state()->GetBrowserState());
   if (blocklistService->GetURLBlocklistState(gurl) ==
-      policy::URLBlacklist::URLBlacklistState::URL_IN_BLACKLIST) {
+      policy::URLBlocklist::URLBlocklistState::URL_IN_BLOCKLIST) {
     return web::WebStatePolicyDecider::PolicyDecision::CancelAndDisplayError(
-        [NSError errorWithDomain:net::kNSErrorDomain
-                            code:net::ERR_BLOCKED_BY_ADMINISTRATOR
-                        userInfo:nil]);
+        policy_url_blocking_util::CreateBlockedUrlError());
   }
 
   return web::WebStatePolicyDecider::PolicyDecision::Allow();

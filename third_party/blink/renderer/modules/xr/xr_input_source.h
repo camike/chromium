@@ -5,7 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_XR_XR_INPUT_SOURCE_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_XR_XR_INPUT_SOURCE_H_
 
-#include "device/vr/public/mojom/vr_service.mojom-blink-forward.h"
+#include "base/optional.h"
+#include "device/vr/public/mojom/vr_service.mojom-blink.h"
 #include "third_party/blink/renderer/modules/gamepad/gamepad.h"
 #include "third_party/blink/renderer/modules/xr/xr_native_origin_information.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
@@ -22,6 +23,7 @@ namespace blink {
 
 class Element;
 class XRGripSpace;
+class XRHand;
 class XRInputSourceEvent;
 class XRSession;
 class XRSpace;
@@ -29,7 +31,6 @@ class XRTargetRaySpace;
 
 class XRInputSource : public ScriptWrappable, public Gamepad::Client {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(XRInputSource);
 
  public:
   static XRInputSource* CreateOrUpdateFrom(
@@ -48,6 +49,8 @@ class XRInputSource : public ScriptWrappable, public Gamepad::Client {
   void setActiveFrameId(int16_t id) { state_.active_frame_id = id; }
 
   XRSession* session() const { return session_; }
+
+  XRHand* hand() const { return hand_; }
 
   const String handedness() const;
   const String targetRayMode() const;
@@ -74,14 +77,13 @@ class XRInputSource : public ScriptWrappable, public Gamepad::Client {
   device::mojom::XRTargetRayMode TargetRayMode() const {
     return state_.target_ray_mode;
   }
-  const TransformationMatrix* MojoFromInput() const {
-    return mojo_from_input_.get();
-  }
-  const TransformationMatrix* InputFromPointer() const {
-    return input_from_pointer_.get();
-  }
 
-  base::Optional<XRNativeOriginInformation> nativeOrigin() const;
+  base::Optional<TransformationMatrix> MojoFromInput() const;
+
+  base::Optional<TransformationMatrix> InputFromPointer() const;
+
+  base::Optional<device::mojom::blink::XRNativeOriginInformation> nativeOrigin()
+      const;
 
   void OnSelectStart();
   void OnSelectEnd();
@@ -104,7 +106,7 @@ class XRInputSource : public ScriptWrappable, public Gamepad::Client {
       const device::mojom::blink::XRInputSourceStatePtr& state);
   bool IsVisible() const { return state_.is_visible; }
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   // In order to ease copying, any new member variables that can be trivially
@@ -162,6 +164,7 @@ class XRInputSource : public ScriptWrappable, public Gamepad::Client {
   Member<XRTargetRaySpace> target_ray_space_;
   Member<XRGripSpace> grip_space_;
   Member<Gamepad> gamepad_;
+  Member<XRHand> hand_{nullptr};
 
   // Input device pose in mojo space. This is the grip pose for
   // tracked controllers, and the viewer pose for screen input.

@@ -16,6 +16,7 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/native_library.h"
+#include "base/notreached.h"
 #include "base/path_service.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string16.h"
@@ -26,7 +27,7 @@
 #include "base/win/scoped_handle.h"
 #include "base/win/scoped_variant.h"
 #include "base/win/windows_version.h"
-#include "chrome/updater/updater_version.h"
+#include "chrome/updater/updater_branding.h"
 #include "chrome/updater/win/util.h"
 
 namespace updater {
@@ -108,7 +109,7 @@ bool GetCurrentUser(base::win::ScopedBstr* user_name) {
             NameSamCompatible,
             user_name->AllocateBytes(user_name_size * sizeof(OLECHAR)),
             &user_name_size)) {
-      DCHECK_NE(static_cast<DWORD>(ERROR_MORE_DATA), ::GetLastError());
+      DCHECK_NE(DWORD{ERROR_MORE_DATA}, ::GetLastError());
       PLOG(ERROR) << "GetUserNameEx failed.";
       return false;
     }

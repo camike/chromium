@@ -11,16 +11,20 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
-#include "chrome/browser/android/webapps/add_to_homescreen_data_fetcher.h"
-#include "chrome/browser/android/webapps/add_to_homescreen_installer.h"
-#include "chrome/browser/android/webapps/add_to_homescreen_params.h"
-#include "chrome/browser/banners/app_banner_manager.h"
+#include "components/webapps/browser/android/add_to_homescreen_data_fetcher.h"
+#include "components/webapps/browser/android/add_to_homescreen_installer.h"
+#include "components/webapps/browser/android/add_to_homescreen_params.h"
+#include "components/webapps/browser/banners/app_banner_manager.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "url/gurl.h"
 
 namespace content {
 class WebContents;
 }
+
+namespace webapps {
+
+struct ShortcutInfo;
 class AddToHomescreenInstaller;
 
 // AddToHomescreenMediator is the C++ counterpart of
@@ -36,7 +40,7 @@ class AddToHomescreenMediator : public AddToHomescreenDataFetcher::Observer {
       const base::android::JavaParamRef<jobject>& java_ref);
 
   void StartForAppBanner(
-      base::WeakPtr<banners::AppBannerManager> weak_manager,
+      base::WeakPtr<AppBannerManager> weak_manager,
       std::unique_ptr<AddToHomescreenParams> params,
       base::RepeatingCallback<void(AddToHomescreenInstaller::Event,
                                    const AddToHomescreenParams&)>
@@ -44,7 +48,8 @@ class AddToHomescreenMediator : public AddToHomescreenDataFetcher::Observer {
 
   void StartForAppMenu(
       JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& java_web_contents);
+      const base::android::JavaParamRef<jobject>& java_web_contents,
+      int title_id);
 
   // Called from the Java side when the user accepts app installation from the
   // dialog.
@@ -57,6 +62,9 @@ class AddToHomescreenMediator : public AddToHomescreenDataFetcher::Observer {
 
   // Called from the Java side when details for a native app are shown.
   void OnNativeDetailsShown(JNIEnv* env);
+
+  // Called from the Java side and destructs this object.
+  void Destroy(JNIEnv* env);
 
  private:
   ~AddToHomescreenMediator() override;
@@ -86,7 +94,7 @@ class AddToHomescreenMediator : public AddToHomescreenDataFetcher::Observer {
   // Points to the Java reference.
   base::android::ScopedJavaGlobalRef<jobject> java_ref_;
 
-  base::WeakPtr<banners::AppBannerManager> weak_app_banner_manager_;
+  base::WeakPtr<AppBannerManager> weak_app_banner_manager_;
 
   // Fetches data required to add a shortcut.
   std::unique_ptr<AddToHomescreenDataFetcher> data_fetcher_;
@@ -97,8 +105,12 @@ class AddToHomescreenMediator : public AddToHomescreenDataFetcher::Observer {
                                const AddToHomescreenParams&)>
       event_callback_;
 
+  int title_id_ = -1;
+
   AddToHomescreenMediator(const AddToHomescreenMediator&) = delete;
   AddToHomescreenMediator& operator=(const AddToHomescreenMediator&) = delete;
 };
+
+}  // namespace webapps
 
 #endif  // CHROME_BROWSER_ANDROID_WEBAPPS_ADD_TO_HOMESCREEN_MEDIATOR_H_

@@ -4,8 +4,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""Process Android resource directories to generate .resources.zip, R.txt and
-.srcjar files."""
+"""Process Android resource directories to generate .resources.zip and R.txt
+files."""
 
 import argparse
 import collections
@@ -18,7 +18,6 @@ import zipfile
 from util import build_utils
 from util import jar_info_utils
 from util import manifest_utils
-from util import md5_check
 from util import resources_parser
 from util import resource_utils
 
@@ -54,9 +53,6 @@ def _ParseArgs(args):
       '--resource-zip-out',
       help='Path to a zip archive containing all resources from '
       '--resource-dirs, merged into a single directory tree.')
-
-  output_opts.add_argument('--srcjar-out',
-                    help='Path to .srcjar to contain the generated R.java.')
 
   output_opts.add_argument('--r-text-out',
                     help='Path to store the generated R.txt file.')
@@ -156,7 +152,21 @@ def _GenerateRTxt(options, dep_subdirs, gen_dir):
       os.path.join(gen_dir, 'R.txt'))
 
 
-def _OnStaleMd5(options):
+def main(args):
+  args = build_utils.ExpandFileArgs(args)
+  options = _ParseArgs(args)
+
+  # Resource files aren't explicitly listed in GN. Listing them in the depfile
+  # ensures the target will be marked stale when resource files are removed.
+  depfile_deps = []
+  for resource_dir in options.resource_dirs:
+    for resource_file in build_utils.FindInDirectory(resource_dir, '*'):
+      # Don't list the empty .keep file in depfile. Since it doesn't end up
+      # included in the .zip, it can lead to -w 'dupbuild=err' ninja errors
+      # if ever moved.
+      if not resource_file.endswith(os.path.join('empty', '.keep')):
+        depfile_deps.append(resource_file)
+
   with resource_utils.BuildContext() as build:
     if options.sources:
       _CheckAllFilesListed(options.sources, options.resource_dirs)
@@ -174,33 +184,6 @@ def _OnStaleMd5(options):
     if options.r_text_out:
       shutil.copyfile(r_txt_path, options.r_text_out)
 
-    if options.srcjar_out:
-      package = options.custom_package
-      if not package and options.android_manifest:
-        _, manifest_node, _ = manifest_utils.ParseManifest(
-            options.android_manifest)
-        package = manifest_utils.GetPackage(manifest_node)
-
-      # Don't create a .java file for the current resource target when no
-      # package name was provided (either by manifest or build rules).
-      if package:
-        # All resource IDs should be non-final here, but the
-        # onResourcesLoaded() method should only be generated if
-        # --shared-resources is used.
-        rjava_build_options = resource_utils.RJavaBuildOptions()
-        rjava_build_options.ExportAllResources()
-        rjava_build_options.ExportAllStyleables()
-        if options.shared_resources:
-          rjava_build_options.GenerateOnResourcesLoaded()
-
-        # Not passing in custom_root_package_name or parent to keep
-        # file names unique.
-        resource_utils.CreateRJavaFiles(
-            build.srcjar_dir, package, r_txt_path, options.extra_res_packages,
-            options.extra_r_text_files, rjava_build_options, options.srcjar_out)
-
-      build_utils.ZipDir(options.srcjar_out, build.srcjar_dir)
-
     if options.resource_zip_out:
       ignore_pattern = resource_utils.AAPT_IGNORE_PATTERN
       if options.strip_drawables:
@@ -208,61 +191,11 @@ def _OnStaleMd5(options):
       _ZipResources(options.resource_dirs, options.resource_zip_out,
                     ignore_pattern)
 
-
-def main(args):
-  args = build_utils.ExpandFileArgs(args)
-  options = _ParseArgs(args)
-
-  # Order of these must match order specified in GN so that the correct one
-  # appears first in the depfile.
-  possible_output_paths = [
-    options.resource_zip_out,
-    options.r_text_out,
-    options.srcjar_out,
-  ]
-  output_paths = [x for x in possible_output_paths if x]
-
-  # List python deps in input_strings rather than input_paths since the contents
-  # of them does not change what gets written to the depsfile.
-  input_strings = options.extra_res_packages + [
-      options.custom_package,
-      options.shared_resources,
-      options.strip_drawables,
-  ]
-
-  possible_input_paths = [
-    options.android_manifest,
-  ]
-  possible_input_paths += options.include_resources
-  input_paths = [x for x in possible_input_paths if x]
-  input_paths.extend(options.dependencies_res_zips)
-  input_paths.extend(options.extra_r_text_files)
-
-  # Resource files aren't explicitly listed in GN. Listing them in the depfile
-  # ensures the target will be marked stale when resource files are removed.
-  depfile_deps = []
-  resource_names = []
-  for resource_dir in options.resource_dirs:
-    for resource_file in build_utils.FindInDirectory(resource_dir, '*'):
-      # Don't list the empty .keep file in depfile. Since it doesn't end up
-      # included in the .zip, it can lead to -w 'dupbuild=err' ninja errors
-      # if ever moved.
-      if not resource_file.endswith(os.path.join('empty', '.keep')):
-        input_paths.append(resource_file)
-        depfile_deps.append(resource_file)
-      resource_names.append(os.path.relpath(resource_file, resource_dir))
-
-  # Resource filenames matter to the output, so add them to strings as well.
-  # This matters if a file is renamed but not changed (http://crbug.com/597126).
-  input_strings.extend(sorted(resource_names))
-
-  md5_check.CallAndWriteDepfileIfStale(
-      lambda: _OnStaleMd5(options),
-      options,
-      input_paths=input_paths,
-      input_strings=input_strings,
-      output_paths=output_paths,
-      depfile_deps=depfile_deps)
+  if options.depfile:
+    # Order of output must match order specified in GN so that the correct one
+    # appears first in the depfile.
+    build_utils.WriteDepfile(options.depfile, options.resource_zip_out
+                             or options.r_text_out, depfile_deps)
 
 
 if __name__ == '__main__':

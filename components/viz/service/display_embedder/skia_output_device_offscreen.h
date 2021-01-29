@@ -48,11 +48,12 @@ class SkiaOutputDeviceOffscreen : public SkiaOutputDevice {
   sk_sp<SkSurface> sk_surface_;
   GrBackendTexture backend_texture_;
   bool supports_rgbx_ = true;
+  gfx::Size size_;
+  gfx::BufferFormat format_ = gfx::BufferFormat::RGBA_8888;
+  sk_sp<SkColorSpace> sk_color_space_;
 
  private:
-  gfx::Size size_;
   uint64_t backbuffer_estimated_size_ = 0;
-  sk_sp<SkColorSpace> sk_color_space_;
 
   DISALLOW_COPY_AND_ASSIGN(SkiaOutputDeviceOffscreen);
 };

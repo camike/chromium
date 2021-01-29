@@ -2,14 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {ColorModeRestriction, Destination, DestinationConnectionStatus, DestinationOrigin, DestinationStore, DestinationType, DuplexModeRestriction, InvitationStore, NativeLayer} from 'chrome://print/print_preview.js';
+import {ColorModeRestriction, Destination, DestinationConnectionStatus, DestinationOrigin, DestinationStore, DestinationType, DuplexModeRestriction, InvitationStore, NativeLayer, NativeLayerCrosImpl, NativeLayerImpl} from 'chrome://print/print_preview.js';
 import {assert} from 'chrome://resources/js/assert.m.js';
+import {NativeEventTarget as EventTarget} from 'chrome://resources/js/cr/event_target.m.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-import {NativeLayerStub} from 'chrome://test/print_preview/native_layer_stub.js';
-import {createDestinationStore, getCddTemplate, setupTestListenerElement} from 'chrome://test/print_preview/print_preview_test_utils.js';
-import {eventToPromise} from 'chrome://test/test_util.m.js';
+
+import {assertEquals, assertNotEquals} from '../chai_assert.js';
+import {eventToPromise} from '../test_util.m.js';
+
+import {NativeLayerCrosStub} from './native_layer_cros_stub.js';
+import {NativeLayerStub} from './native_layer_stub.js';
+import {createDestinationStore, getCddTemplate, setupTestListenerElement} from './print_preview_test_utils.js';
 
 window.destination_search_test_chromeos = {};
+const destination_search_test_chromeos =
+    window.destination_search_test_chromeos;
 destination_search_test_chromeos.suiteName = 'DestinationSearchTest';
 /** @enum {string} */
 destination_search_test_chromeos.TestNames = {
@@ -21,14 +28,17 @@ destination_search_test_chromeos.TestNames = {
 };
 
 suite(destination_search_test_chromeos.suiteName, function() {
-  /** @type {?PrintPreviewDestinationDialogElement} */
-  let dialog = null;
+  /** @type {PrintPreviewDestinationDialogCrosElement} */
+  let dialog;
 
-  /** @type {?DestinationStore} */
-  let destinationStore = null;
+  /** @type {DestinationStore} */
+  let destinationStore;
 
-  /** @type {?NativeLayer} */
-  let nativeLayer = null;
+  /** @type {NativeLayerStub} */
+  let nativeLayer;
+
+  /** @type {NativeLayerCrosStub} */
+  let nativeLayerCros;
 
   /** @override */
   suiteSetup(function() {
@@ -39,22 +49,26 @@ suite(destination_search_test_chromeos.suiteName, function() {
   setup(function() {
     // Create data classes
     nativeLayer = new NativeLayerStub();
-    NativeLayer.setInstance(nativeLayer);
+    NativeLayerImpl.instance_ = nativeLayer;
+    nativeLayerCros = new NativeLayerCrosStub();
+    NativeLayerCrosImpl.instance_ = nativeLayerCros;
     destinationStore = createDestinationStore();
     nativeLayer.setLocalDestinationCapabilities(
         getCddTemplate('FooDevice', 'FooName'));
     destinationStore.init(
-        false /* isInAppKioskMode */, 'FooDevice' /* printerName */,
+        false /* pdfPrinterDisabled */, true /* isDriveMounted */,
+        'FooDevice' /* printerName */,
         '' /* serializedDefaultDestinationSelectionRulesStr */,
         [] /* recentDestinations */);
 
     // Set up dialog
-    dialog = document.createElement('print-preview-destination-dialog');
+    dialog = /** @type {!PrintPreviewDestinationDialogCrosElement} */ (
+        document.createElement('print-preview-destination-dialog-cros'));
     dialog.users = [];
     dialog.activeUser = '';
     dialog.destinationStore = destinationStore;
     dialog.invitationStore = new InvitationStore();
-    PolymerTest.clearBody();
+    document.body.innerHTML = '';
     document.body.appendChild(dialog);
     return nativeLayer.whenCalled('getPrinterCapabilities').then(function() {
       dialog.show();
@@ -88,7 +102,6 @@ suite(destination_search_test_chromeos.suiteName, function() {
         DestinationConnectionStatus.ONLINE);
 
     // Add the destination to the list.
-    dialog.updateDestinations_([dest]);
     simulateDestinationSelect(dest);
   }
 
@@ -103,12 +116,13 @@ suite(destination_search_test_chromeos.suiteName, function() {
           capabilities: getCddTemplate(destId).capabilities,
           success: true,
         };
-        nativeLayer.setSetupPrinterResponse(response);
+        nativeLayerCros.setSetupPrinterResponse(response);
 
         const waiter = eventToPromise(
-            DestinationStore.EventType.DESTINATION_SELECT, destinationStore);
+            DestinationStore.EventType.DESTINATION_SELECT,
+            /** @type {!EventTarget} */ (destinationStore));
         requestSetup(destId);
-        return Promise.all([nativeLayer.whenCalled('setupPrinter'), waiter])
+        return Promise.all([nativeLayerCros.whenCalled('setupPrinter'), waiter])
             .then(function(results) {
               const actualId = results[0];
               assertEquals(destId, actualId);
@@ -125,16 +139,22 @@ suite(destination_search_test_chromeos.suiteName, function() {
       function() {
         const destId = '001122DEADBEEF';
         const originalDestination = destinationStore.selectedDestination;
-        nativeLayer.setSetupPrinterResponse(
-            {printerId: destId, success: false}, true);
+        nativeLayerCros.setSetupPrinterResponse(
+            {
+              printerId: destId,
+              success: false,
+              capabilities: {printer: {}, version: '1'}
+            },
+            true);
         requestSetup(destId);
-        return nativeLayer.whenCalled('setupPrinter').then(function(actualId) {
-          assertEquals(destId, actualId);
-          // The selected printer should not have changed, since a printer
-          // cannot be selected until setup succeeds.
-          assertEquals(
-              originalDestination, destinationStore.selectedDestination);
-        });
+        return nativeLayerCros.whenCalled('setupPrinter')
+            .then(function(actualId) {
+              assertEquals(destId, actualId);
+              // The selected printer should not have changed, since a printer
+              // cannot be selected until setup succeeds.
+              assertEquals(
+                  originalDestination, destinationStore.selectedDestination);
+            });
       });
 
   // Test what happens when the setupPrinter request is resolved with a
@@ -149,9 +169,9 @@ suite(destination_search_test_chromeos.suiteName, function() {
           capabilities: getCddTemplate(destId).capabilities,
           success: false,
         };
-        nativeLayer.setSetupPrinterResponse(response);
+        nativeLayerCros.setSetupPrinterResponse(response);
         requestSetup(destId);
-        return nativeLayer.whenCalled('setupPrinter')
+        return nativeLayerCros.whenCalled('setupPrinter')
             .then(function(actualDestId) {
               assertEquals(destId, actualDestId);
               // The selected printer should not have changed, since a printer
@@ -175,7 +195,6 @@ suite(destination_search_test_chromeos.suiteName, function() {
             getCddTemplate(printerId, 'displayName').capabilities;
 
         // Place destination in the local list as happens for Kiosk printers.
-        dialog.updateDestinations_([cloudDest]);
         simulateDestinationSelect(cloudDest);
 
         // Verify that the destination has been selected.
@@ -195,24 +214,29 @@ suite(destination_search_test_chromeos.suiteName, function() {
           policies: {
             allowedColorModes: ColorModeRestriction.MONOCHROME,
             allowedDuplexModes: DuplexModeRestriction.DUPLEX,
+            allowedPinMode: null,
+            defaultColorMode: null,
+            defaultDuplexMode: null,
+            defaultPinMode: null,
           },
           success: true,
         };
-        nativeLayer.setSetupPrinterResponse(response);
+        nativeLayerCros.setSetupPrinterResponse(response);
         requestSetup(destId);
-        return nativeLayer.whenCalled('setupPrinter').then(function(actualId) {
-          assertEquals(destId, actualId);
-          const selectedDestination = destinationStore.selectedDestination;
-          assertNotEquals(null, selectedDestination);
-          assertEquals(destId, selectedDestination.id);
-          assertNotEquals(null, selectedDestination.capabilities);
-          assertNotEquals(null, selectedDestination.policies);
-          assertEquals(
-              ColorModeRestriction.MONOCHROME,
-              selectedDestination.policies.allowedColorModes);
-          assertEquals(
-              DuplexModeRestriction.DUPLEX,
-              selectedDestination.policies.allowedDuplexModes);
-        });
+        return nativeLayerCros.whenCalled('setupPrinter')
+            .then(function(actualId) {
+              assertEquals(destId, actualId);
+              const selectedDestination = destinationStore.selectedDestination;
+              assertNotEquals(null, selectedDestination);
+              assertEquals(destId, selectedDestination.id);
+              assertNotEquals(null, selectedDestination.capabilities);
+              assertNotEquals(null, selectedDestination.policies);
+              assertEquals(
+                  ColorModeRestriction.MONOCHROME,
+                  selectedDestination.policies.allowedColorModes);
+              assertEquals(
+                  DuplexModeRestriction.DUPLEX,
+                  selectedDestination.policies.allowedDuplexModes);
+            });
       });
 });

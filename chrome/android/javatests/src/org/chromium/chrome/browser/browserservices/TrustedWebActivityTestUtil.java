@@ -12,14 +12,15 @@ import androidx.browser.customtabs.CustomTabsSessionToken;
 import androidx.browser.customtabs.TrustedWebUtils;
 
 import org.chromium.base.test.util.CallbackHelper;
-import org.chromium.chrome.browser.browserservices.trustedwebactivityui.controller.CurrentPageVerifier;
+import org.chromium.cc.input.BrowserControlsState;
+import org.chromium.chrome.browser.browserservices.ui.controller.CurrentPageVerifier;
+import org.chromium.chrome.browser.browserservices.verification.OriginVerifier;
 import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.customtabs.CustomTabsConnection;
 import org.chromium.chrome.browser.customtabs.CustomTabsTestUtils;
 import org.chromium.chrome.browser.tab.TabBrowserControlsConstraintsHelper;
 import org.chromium.components.embedder_support.util.Origin;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
-import org.chromium.content_public.common.BrowserControlsState;
 
 import java.util.concurrent.TimeoutException;
 
@@ -57,6 +58,18 @@ public class TrustedWebActivityTestUtil {
         Intent intent = CustomTabsTestUtils.createMinimalCustomTabIntent(
                 InstrumentationRegistry.getTargetContext(), url);
         intent.putExtra(TrustedWebUtils.EXTRA_LAUNCH_AS_TRUSTED_WEB_ACTIVITY, true);
+        return intent;
+    }
+
+    /**
+     * Creates an Intent that will launch a Custom Tab to the given |url|, caches a successful
+     * verification and creates the Custom Tabs Session from the intent.
+     */
+    public static Intent createTrustedWebActivityIntentAndVerifiedSession(
+            String url, String packageName) throws TimeoutException {
+        Intent intent = createTrustedWebActivityIntent(url);
+        spoofVerification(packageName, url);
+        createSession(intent, packageName);
         return intent;
     }
 

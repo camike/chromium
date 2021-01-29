@@ -7,6 +7,8 @@
 // Polymer BrowserTest fixture.
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
 
+GEN('#include "content/public/test/browser_test.h"');
+
 /**
  * Test fixture for MultiDeviceSetup elements.
  * @constructor
@@ -15,12 +17,12 @@ GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
 function MultiDeviceSetupBrowserTest() {}
 
 MultiDeviceSetupBrowserTest.prototype = {
-  __proto__: PolymerTest.prototype,
+  __proto__: Polymer2DeprecatedTest.prototype,
 
   browsePreload: 'chrome://multidevice-setup/',
 
   extraLibraries: [
-    ...PolymerTest.prototype.extraLibraries,
+    ...Polymer2DeprecatedTest.prototype.extraLibraries,
     '../test_browser_proxy.js',
     '../fake_chrome_event.js',  // Necessary for fake_quick_unlock_private.js
     '../settings/chromeos/fake_quick_unlock_private.js',
